@@ -612,7 +612,7 @@ func TestSelectionOverlapBetweenRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	if sum.Copy.PrevSelected != 0 || sum.Copy.Repeated != 0 {
-		t.Errorf("第一次运行没有上一轮可比: %+v", sum.Copy)
+		t.Errorf("第一次运行、壁纸文件夹也是空的，没有上一轮可比: %+v", sum.Copy)
 	}
 	// 图库只有 4 张、每次选 4 张，第二轮必然全部重复
 	var lines []string
@@ -627,9 +627,28 @@ func TestSelectionOverlapBetweenRuns(t *testing.T) {
 		t.Errorf("日志里应有重合率: %q", lines)
 	}
 
-	// 换了壁纸文件夹就不和上一轮比
+	if sum.Copy.PrevByName {
+		t.Error("有记录时应按原图路径比")
+	}
+
+	// 换了壁纸文件夹：记录不适用，按新文件夹里原有的文件名比
 	cfg.DestDir = filepath.Join(root, "dest2")
 	if sum, err = RunPipeline(cfg, paths, Reporter{}, nil); err != nil || sum.Copy.PrevSelected != 0 {
-		t.Errorf("换了壁纸文件夹不应比较: %+v %v", sum.Copy, err)
+		t.Errorf("新的空壁纸文件夹没有可比的: %+v %v", sum.Copy, err)
+	}
+
+	// 没有记录（比如刚升级），壁纸文件夹里已经有上一轮的图：按文件名比，隐藏文件和非图片不算
+	os.Remove(paths.Selection)
+	os.WriteFile(filepath.Join(cfg.DestDir, ".DS_Store"), nil, 0o644)
+	os.WriteFile(filepath.Join(cfg.DestDir, "notes.txt"), nil, 0o644)
+	if sum, err = RunPipeline(cfg, paths, Reporter{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// 壁纸文件夹里是 s0-a.png…s3-a.png，这一轮还是这 4 张
+	if !sum.Copy.PrevByName || sum.Copy.PrevSelected != 4 || sum.Copy.Repeated != 4 {
+		t.Errorf("应按文件名比较: %+v", sum.Copy)
+	}
+	if _, err := os.Stat(paths.Selection); err != nil {
+		t.Error("按文件名比完也应写下这一轮的记录")
 	}
 }

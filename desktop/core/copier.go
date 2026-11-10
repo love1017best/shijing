@@ -158,12 +158,17 @@ func sampleN(items []sourceImage, n int, r *rand.Rand) []sourceImage {
 // generateFilename 生成「上层目录名-原文件名」，冲突时加 _1、_2… 后缀。
 // taken 记录本轮已经分配出去、但可能还没真正写到磁盘上的名字（复制是并发的，
 // 只看磁盘会给两张同名图片分到同一个目标路径）；生成的名字会加进 taken。taken 可以为 nil。
+// destName 是原图复制到壁纸文件夹后的名字（不重名时）：「上级文件夹-原名」。
+func destName(src string) string {
+	return filepath.Base(filepath.Dir(src)) + "-" + filepath.Base(src)
+}
+
 func generateFilename(src, destDir string, taken map[string]bool) string {
 	name := filepath.Base(src)
 	parent := filepath.Base(filepath.Dir(src))
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
-	dest := filepath.Join(destDir, parent+"-"+name)
+	dest := filepath.Join(destDir, destName(src))
 	for i := 1; taken[dest] || lexists(dest); i++ {
 		dest = filepath.Join(destDir, fmt.Sprintf("%s-%s_%d%s", parent, stem, i, ext))
 	}
@@ -451,6 +456,7 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 	if rep.stopped() {
 		return res, ErrCanceled
 	}
+	prev := loadPrevSelection(o.SelectionFile, destDir)
 	if exists(destDir) {
 		logf("🔄 清空目标目录...")
 		if err := cleanDirectory(destDir); err != nil {
@@ -490,7 +496,7 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 		logf("⏹️ 已停止：壁纸目录里保留已复制的 %d 张", res.Copied)
 		return res, ErrCanceled
 	}
-	compareSelection(o.SelectionFile, destDir, selected, &res, logf)
+	compareSelection(o.SelectionFile, destDir, prev, selected, &res, logf)
 	logf("✅ 完成! 已处理 %d 张图片", len(selected))
 	logf("💾 目标目录: %s", destDir)
 	if o.ArchiveEnabled {
@@ -505,10 +511,51 @@ type savedSelection struct {
 	Sources []string `json:"sources"`
 }
 
-// compareSelection 把这一轮选中的原图和上一轮比，算出重复的张数，再把这一轮写下来。
-// 文件名会因为重名改写（generateFilename），所以按原图路径比，不看壁纸文件夹里的文件名。
-// 壁纸文件夹换了就不和上一轮比。
-func compareSelection(file, destDir string, selected []sourceImage, res *CopyResult, logf Logf) {
+// prevSelection 是上一轮选了哪些图，用来算这一轮新换上几张。
+type prevSelection struct {
+	keys   map[string]bool
+	n      int
+	byName bool // 没有记录，按壁纸文件夹里原有的文件名比（近似）
+}
+
+// loadPrevSelection 必须在清空壁纸文件夹之前调用。有上一轮的记录（且是同一个壁纸文件夹）就按原图路径比；
+// 没有记录（第一次运行、换了壁纸文件夹）就退而看壁纸文件夹里现有的图片文件名——复制时命名为
+// 「上级文件夹-原名」（destName），只有重名才加 _1，所以按这个名字比基本准确，只是上级文件夹同名、
+// 文件也同名的两张图会被当成同一张。都没有返回 nil。
+func loadPrevSelection(file, destDir string) *prevSelection {
+	if file == "" {
+		return nil
+	}
+	var saved savedSelection
+	if data, err := os.ReadFile(file); err == nil && json.Unmarshal(data, &saved) == nil && saved.Dest == destDir && len(saved.Sources) > 0 {
+		p := &prevSelection{keys: make(map[string]bool, len(saved.Sources)), n: len(saved.Sources)}
+		for _, s := range saved.Sources {
+			p.keys[s] = true
+		}
+		return p
+	}
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		return nil
+	}
+	p := &prevSelection{keys: map[string]bool{}, byName: true}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") || e.IsDir() || !IsValidImage(name) {
+			continue
+		}
+		p.keys[name] = true
+		p.n++
+	}
+	if p.n == 0 {
+		return nil
+	}
+	return p
+}
+
+// compareSelection 算这一轮选中的图里有几张上一轮也选过，再把这一轮按原图路径记下来。
+// 文件名会因为重名改写（generateFilename），所以有记录时按原图路径比，不看壁纸文件夹里的文件名。
+func compareSelection(file, destDir string, prev *prevSelection, selected []sourceImage, res *CopyResult, logf Logf) {
 	if file == "" {
 		return
 	}
@@ -516,20 +563,24 @@ func compareSelection(file, destDir string, selected []sourceImage, res *CopyRes
 	for i, img := range selected {
 		cur[i] = img.path
 	}
-	var prev savedSelection
-	if data, err := os.ReadFile(file); err == nil && json.Unmarshal(data, &prev) == nil && prev.Dest == destDir && len(prev.Sources) > 0 {
-		before := make(map[string]bool, len(prev.Sources))
-		for _, p := range prev.Sources {
-			before[p] = true
-		}
+	if prev != nil && len(cur) > 0 {
 		for _, p := range cur {
-			if before[p] {
+			key := p
+			if prev.byName {
+				key = destName(p)
+			}
+			if prev.keys[key] {
 				res.Repeated++
 			}
 		}
-		res.PrevSelected = len(prev.Sources)
-		logf("🔁 和上一轮相比：新换上 %d 张，重复 %d 张（重合率 %.0f%%）",
-			len(cur)-res.Repeated, res.Repeated, float64(res.Repeated)/float64(len(cur))*100)
+		res.PrevSelected = prev.n
+		res.PrevByName = prev.byName
+		note := ""
+		if prev.byName {
+			note = "，按文件名比较"
+		}
+		logf("🔁 和上一轮相比：新换上 %d 张，重复 %d 张（重合率 %.0f%%%s）",
+			len(cur)-res.Repeated, res.Repeated, float64(res.Repeated)/float64(len(cur))*100, note)
 	}
 	data, err := json.Marshal(savedSelection{Dest: destDir, Sources: cur})
 	if err == nil {

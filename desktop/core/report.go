@@ -86,8 +86,9 @@ type CopyResult struct {
 	CoveredFolders int // 平衡采样覆盖到的叶子文件夹数
 	// PrevSelected 是上一轮选中的张数，0 表示没有上一轮可比（第一次运行、换了壁纸文件夹）；
 	// Repeated 是这一轮里上一轮也选中过的张数。
-	PrevSelected int `json:",omitempty"`
-	Repeated     int `json:",omitempty"`
+	PrevSelected int  `json:",omitempty"`
+	Repeated     int  `json:",omitempty"`
+	PrevByName   bool `json:",omitempty"` // 没有上一轮的记录，按壁纸文件夹里原有的文件名比的（近似）
 	Dest         string
 }
 

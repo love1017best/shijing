@@ -413,6 +413,9 @@ func (a *app) resultDetail() string {
 	if c := s.Copy; c.PrevSelected > 0 {
 		parts = append(parts, fmt.Sprintf("和上一轮相比：新换上 %d 张，重复 %d 张（重合率 %s）",
 			c.Selected-c.Repeated, c.Repeated, overlapPercent(c)))
+		if c.PrevByName {
+			parts = append(parts, "（没有上一轮的记录，按壁纸文件夹里原有的文件名比较，结果是近似的）")
+		}
 	}
 	if len(a.cfg.FilterAndSampleDirs) > 0 {
 		if s.Sort.Simulated {
