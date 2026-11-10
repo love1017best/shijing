@@ -119,14 +119,10 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 发布顺序：代码先提交并推送 → 给那个提交打 tag `v<版本>` 并推送 → `gh release create v<版本> <通用版 dmg> <arm64 dmg> --verify-tag --title "拾景 v<版本>" --notes ...`。`--target` 不认短 sha，所以先打 tag。说明开头写清两个包怎么选。
 - 发布到 `origin`（`love1017best/shijing`）。本地还有指向旧历史的 tag（`python-final`、`v0.2.104`、`v0.2.105`）和 `legacy` 远端，**不要 `git push --tags`**，否则会把旧历史推到公开仓库；tag 一律单独推。
 - 说明里写这一版的改动，并注明是 ad-hoc 签名、未公证（别的 Mac 首次打开要右键「打开」）。仓库是**公开**的（2026-11-10 起），提交前注意别放进个人信息、真实壁纸或密钥。
-- 发布完**用 arm64 dmg 安装到本机，替换 `/Applications/拾景.app`**，再从 `/Applications` 启动。**不要直接运行 `build/` 下的 `.app`**（用户规定）。迭代后主动打开应用给用户预览、试用时也一样：先 `mygo build` 出 dmg、按下面的步骤装进 `/Applications` 再打开，任何时候都不 `open build/...app`。步骤：
-  ```sh
-  osascript -e 'tell application id "com.love1017best.shijing" to quit'   # 先正常退出旧版
-  MNT=$(hdiutil attach -nobrowse -readonly build/darwin-arm64/shi-jing-<版本>-arm64.dmg | grep -o '/Volumes/.*' | head -1)
-  command rm -rf /Applications/拾景.app && ditto "$MNT/拾景.app" /Applications/拾景.app && hdiutil detach -quiet "$MNT"
-  open /Applications/拾景.app
-  ```
-  装完用 `lsappinfo info -only bundlepath -app com.love1017best.shijing` 确认运行的是 `/Applications/拾景.app`，用 PlistBuddy 读 `CFBundleShortVersionString` 确认版本号。
+- 发布完**用 arm64 dmg 安装到本机，替换 `/Applications/拾景.app`**，再从 `/Applications` 启动。**不要直接运行 `build/` 下的 `.app`**（用户规定）。迭代后主动打开应用给用户预览、试用时也一样，任何时候都不 `open build/...app`。
+  - 用 `desktop/scripts/install-local.sh`：构建 arm64 → 退出旧版 → 挂载 dmg 用 `ditto` 替换 `/Applications/拾景.app` → 启动，最后输出一行版本和运行路径（不一致时退出码非 0）。约 10 秒。
+  - 发布时 arm64 dmg 刚构建过，用 `scripts/install-local.sh --no-build` 直接安装。
+  - 预览只需要 arm64；通用版只在发布时构建（发布仍然两个都要传）。`.app` 是 dmg 的中间产物，`mygo build` 省不掉它。
 
 ## 调试小抄
 
