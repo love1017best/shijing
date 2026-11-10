@@ -104,8 +104,12 @@ type app struct {
 	skipConfirm     bool        // 删除原图前不再弹确认框（重新打开删除开关后恢复）
 	prevDelete      bool        // 上一帧「删除不合格原图」的值，用来发现它被重新打开
 	stopReq         atomic.Bool // 用户点了「停止」，流程在安全的地方停下
-	toast           string
-	initialized     bool
+	// 这次运行筛选阶段的删除情况，从日志行里数出来（appendLog），运行中的进度卡片上显示。
+	runDelete                             bool // 这次运行是否真删（否则是模拟运行，只判定不合格）
+	runRejected, runDeleted, runDelFailed int
+	lastDel                               logEntry // 最近一张待删除/已删除的图片
+	toast                                 string
+	initialized                           bool
 
 	walls          wallpapers // 当前壁纸文件夹的缩略图
 	wallsGen       int        // 每次运行结束 +1，提示需要重新读取壁纸文件夹
@@ -259,6 +263,9 @@ func (a *app) startRun() {
 	a.running = true
 	a.prog = progress{}
 	a.last = nil
+	a.runDelete = cfg.DeleteDuringFilter
+	a.runRejected, a.runDeleted, a.runDelFailed = 0, 0, 0
+	a.lastDel = logEntry{}
 	a.stopReq.Store(false)
 	a.appendLog(strings.Repeat("─", 50))
 	a.appendLog("▶ " + time.Now().Format("2006-01-02 15:04:05") + " 开始运行")
@@ -338,9 +345,41 @@ func (a *app) flush() {
 
 // appendLog 只能在主线程调用。
 func (a *app) appendLog(text string) {
-	a.log = append(a.log, strings.Split(text, "\n")...)
+	lines := strings.Split(text, "\n")
+	if a.running {
+		for _, l := range lines {
+			a.countDeletion(l)
+		}
+	}
+	a.log = append(a.log, lines...)
 	if over := len(a.log) - maxLogLines; over > 0 {
 		a.log = slices.Delete(a.log, 0, over)
+	}
+}
+
+// countDeletion 数筛选阶段的「[文件夹] 🗑️ 待删除 / 🔥 已删除 / ❌ 删除失败」行。
+func (a *app) countDeletion(line string) {
+	raw := strings.TrimSpace(line)
+	if !strings.HasPrefix(raw, "[") {
+		return
+	}
+	if strings.Contains(raw, "删除失败") {
+		a.runDelFailed++
+		return
+	}
+	e := parseLogLine(line)
+	if e.kind != logDelete {
+		return
+	}
+	switch e.label {
+	case "待删除":
+		a.runRejected++
+	case "已删除":
+		a.runDeleted++
+	}
+	// 真删时只记真正删掉的那张（待删除之后可能删除失败），模拟运行时记不合格的那张
+	if (e.label == "已删除") == a.runDelete {
+		a.lastDel = e
 	}
 }
 

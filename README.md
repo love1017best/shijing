@@ -76,6 +76,7 @@ macOS 的 SMB 客户端不支持硬链接，它在 SMB 上建的软链接 Window
 | `image_sorter_state.json` | 增量筛选状态。想强制全部重新筛选：退出应用后删掉它 |
 | `image_sorter_deleted.log` | 删除日志：每行是时间、阈值、被删文件的完整路径，需要核对或从备份恢复时查这里 |
 | `ui_state.json` | 上次运行的结果、是否跳过删除确认 |
+| `last_selection.json` | 上一轮选中了哪些原图，用来算两轮之间的重合率 |
 
 <details>
 <summary>config.json 字段</summary>

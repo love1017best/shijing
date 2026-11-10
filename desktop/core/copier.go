@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +31,9 @@ type CopyOptions struct {
 	ArchiveDirOverride string
 	ArchiveSMBRoot     string
 	ArchiveNFSRoot     string
+
+	// SelectionFile 记录这一轮选中的原图路径；下一轮据此算有多少张和上一轮重复。为空则不记录。
+	SelectionFile string
 }
 
 // sourceImage 是一张候选图片：它来自哪个源目录、文件路径是什么。
@@ -486,10 +490,53 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 		logf("⏹️ 已停止：壁纸目录里保留已复制的 %d 张", res.Copied)
 		return res, ErrCanceled
 	}
+	compareSelection(o.SelectionFile, destDir, selected, &res, logf)
 	logf("✅ 完成! 已处理 %d 张图片", len(selected))
 	logf("💾 目标目录: %s", destDir)
 	if o.ArchiveEnabled {
 		logf("🔗 归档副本已创建 (子文件夹名: %s，优先硬链接，不支持时自动降级为软链接)", o.ArchiveSubdirName)
 	}
 	return res, nil
+}
+
+// savedSelection 是 Paths.Selection 文件的内容。
+type savedSelection struct {
+	Dest    string   `json:"dest"`
+	Sources []string `json:"sources"`
+}
+
+// compareSelection 把这一轮选中的原图和上一轮比，算出重复的张数，再把这一轮写下来。
+// 文件名会因为重名改写（generateFilename），所以按原图路径比，不看壁纸文件夹里的文件名。
+// 壁纸文件夹换了就不和上一轮比。
+func compareSelection(file, destDir string, selected []sourceImage, res *CopyResult, logf Logf) {
+	if file == "" {
+		return
+	}
+	cur := make([]string, len(selected))
+	for i, img := range selected {
+		cur[i] = img.path
+	}
+	var prev savedSelection
+	if data, err := os.ReadFile(file); err == nil && json.Unmarshal(data, &prev) == nil && prev.Dest == destDir && len(prev.Sources) > 0 {
+		before := make(map[string]bool, len(prev.Sources))
+		for _, p := range prev.Sources {
+			before[p] = true
+		}
+		for _, p := range cur {
+			if before[p] {
+				res.Repeated++
+			}
+		}
+		res.PrevSelected = len(prev.Sources)
+		logf("🔁 和上一轮相比：新换上 %d 张，重复 %d 张（重合率 %.0f%%）",
+			len(cur)-res.Repeated, res.Repeated, float64(res.Repeated)/float64(len(cur))*100)
+	}
+	data, err := json.Marshal(savedSelection{Dest: destDir, Sources: cur})
+	if err == nil {
+		_ = os.MkdirAll(filepath.Dir(file), 0o755)
+		err = os.WriteFile(file, data, 0o644)
+	}
+	if err != nil {
+		logf("⚠️ 记录本轮选中的图片失败: %v", err)
+	}
 }

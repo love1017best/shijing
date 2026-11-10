@@ -469,3 +469,48 @@ func TestLogFilterProblems(t *testing.T) {
 		t.Errorf("只看问题时应只剩警告: %q", tt.Texts())
 	}
 }
+
+func TestRunShowsDeletionsAndOverlap(t *testing.T) {
+	f, tt := newFakeApp(t)
+	f.cfg.FilterAndSampleDirs = []string{"/Volumes/Media0/Lib"}
+	f.cfg.DeleteDuringFilter = true
+	f.skipConfirm = true
+	f.release = make(chan struct{})
+	inner := f.run
+	f.run = func(cfg core.Config, rep core.Reporter) (core.Summary, error) {
+		rep.Progress(core.StageFilter, 1, 3)
+		rep.Log("    [set0] 🗑️ 待删除: a.jpg")
+		rep.Log("    [set0] 🔥 已删除: a.jpg")
+		rep.Log("    [set1] 🗑️ 待删除: b.jpg")
+		rep.Log("    [set1] 🔥 已删除: b.jpg")
+		rep.Log("    [set1] 🗑️ 待删除: c.jpg")
+		rep.Log("    [set1] ❌ 删除失败: c.jpg - permission denied")
+		sum, err := inner(cfg, rep)
+		sum.Copy.Selected, sum.Copy.PrevSelected, sum.Copy.Repeated = 2, 2, 1
+		return sum, err
+	}
+	tt.Frame()
+	click(t, tt, "换一批壁纸")
+	f.settle(t, tt, func() bool { return tt.HasText("已删除 2 张不合格原图") })
+	for _, s := range []string{"1 张删除失败", "b.jpg", "在 set1"} {
+		if !tt.HasText(s) {
+			t.Errorf("运行卡片上应显示 %q", s)
+		}
+	}
+	close(f.release)
+	f.settle(t, tt, func() bool { return !f.running && tt.HasText("新换 1 张") })
+	if !tt.HasText("重合 50%") {
+		t.Error("上次运行应显示和上一轮的重合率")
+	}
+}
+
+func TestOverlapPercent(t *testing.T) {
+	for _, c := range []struct {
+		sel, rep int
+		want     string
+	}{{0, 0, "0%"}, {400, 0, "0%"}, {400, 1, "<1%"}, {400, 28, "7%"}, {4, 4, "100%"}} {
+		if got := overlapPercent(core.CopyResult{Selected: c.sel, Repeated: c.rep}); got != c.want {
+			t.Errorf("%d/%d = %s, 想要 %s", c.rep, c.sel, got, c.want)
+		}
+	}
+}

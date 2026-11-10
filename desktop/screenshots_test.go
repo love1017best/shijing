@@ -145,7 +145,7 @@ func TestScreenshots(t *testing.T) {
 		f.num = 300
 		sum := core.Summary{Elapsed: 14200 * time.Millisecond}
 		sum.Sort = core.SortResult{Dirs: 3, Skipped: 412, Images: 186, Rejected: 4, Deleted: 4}
-		sum.Copy = core.CopyResult{Candidates: 27650, Selected: 300, Copied: 300, LeafFolders: 474, CoveredFolders: 300, Dest: "~/Pictures/Wallpapers"}
+		sum.Copy = core.CopyResult{Candidates: 27650, Selected: 300, Copied: 300, LeafFolders: 474, CoveredFolders: 300, Dest: "~/Pictures/Wallpapers", PrevSelected: 300, Repeated: 19}
 		sum.WallpaperRefreshed = true
 		f.last = &runResult{sum: sum, at: time.Now().Add(-25 * time.Minute)}
 		f.log = []string{
@@ -208,6 +208,8 @@ func TestScreenshots(t *testing.T) {
 		click(t, tt, "概览")
 		f.running = true
 		f.prog = progress{core.StageFilter, 268, 415}
+		f.runDelete, f.runRejected, f.runDeleted = true, 3, 3
+		f.lastDel = parseLogLine("    [旅行/京都] 🔥 已删除: IMG_2087.jpg")
 		f.log = append(f.log, "▶ "+time.Now().Format("2006-01-02 15:04:05")+" 开始运行", "  ├─ 北海道: ⏭️ 已跳过（无变化）")
 		shot("running")
 		f.running = false

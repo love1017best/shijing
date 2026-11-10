@@ -84,7 +84,11 @@ type CopyResult struct {
 	Archived       int // 成功创建归档链接的数量
 	LeafFolders    int
 	CoveredFolders int // 平衡采样覆盖到的叶子文件夹数
-	Dest           string
+	// PrevSelected 是上一轮选中的张数，0 表示没有上一轮可比（第一次运行、换了壁纸文件夹）；
+	// Repeated 是这一轮里上一轮也选中过的张数。
+	PrevSelected int `json:",omitempty"`
+	Repeated     int `json:",omitempty"`
+	Dest         string
 }
 
 // Summary 是一次完整运行的结果。

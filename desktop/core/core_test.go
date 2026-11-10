@@ -592,3 +592,44 @@ func stubRefresh(t *testing.T, fn func() error) {
 	RefreshWallpaper = fn
 	t.Cleanup(func() { RefreshWallpaper = old })
 }
+
+func TestSelectionOverlapBetweenRuns(t *testing.T) {
+	root := t.TempDir()
+	lib := filepath.Join(root, "lib")
+	for i := range 4 {
+		writePNG(t, filepath.Join(lib, fmt.Sprintf("s%d", i), "a.png"), 80, 40)
+	}
+	stubRefresh(t, func() error { return nil })
+	cfg := Defaults()
+	cfg.SampleOnlyDirs = []string{lib}
+	cfg.DestDir = filepath.Join(root, "dest")
+	cfg.MinWidth, cfg.MinHeight = tw, th
+	cfg.SampleCount = 4
+	paths := PathsIn(filepath.Join(root, "data"))
+
+	sum, err := RunPipeline(cfg, paths, Reporter{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Copy.PrevSelected != 0 || sum.Copy.Repeated != 0 {
+		t.Errorf("第一次运行没有上一轮可比: %+v", sum.Copy)
+	}
+	// 图库只有 4 张、每次选 4 张，第二轮必然全部重复
+	var lines []string
+	sum, err = RunPipeline(cfg, paths, Reporter{Log: collect(&lines)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Copy.PrevSelected != 4 || sum.Copy.Repeated != 4 {
+		t.Errorf("第二轮应全部重复: %+v", sum.Copy)
+	}
+	if !slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "重合率 100%") }) {
+		t.Errorf("日志里应有重合率: %q", lines)
+	}
+
+	// 换了壁纸文件夹就不和上一轮比
+	cfg.DestDir = filepath.Join(root, "dest2")
+	if sum, err = RunPipeline(cfg, paths, Reporter{}, nil); err != nil || sum.Copy.PrevSelected != 0 {
+		t.Errorf("换了壁纸文件夹不应比较: %+v %v", sum.Copy, err)
+	}
+}
