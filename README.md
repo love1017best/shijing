@@ -1,0 +1,129 @@
+# 拾景
+
+从 NAS 上的大型图片库里，按分辨率和方向挑出合格的横屏图片，随机拾一批放进壁纸文件夹，配合 macOS「系统设置 › 墙纸」的文件夹随机切换使用。
+
+原生 macOS 应用，Go + [MyGo](https://mygo.egoist.dev/) 写成（原生 UI，不走 webview），跟随系统浅色 / 深色。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png">
+  <img alt="拾景概览页" src="docs/screenshots/overview.png">
+</picture>
+
+## 安装
+
+在 [Releases](../../releases) 下载最新版，拖进「应用程序」。两个安装包任选其一：`shi-jing-<版本>.dmg` 是通用版，Intel 和 Apple Silicon 都能用；`shi-jing-<版本>-arm64.dmg` 只支持 Apple Silicon，体积约一半。
+
+应用没有经过苹果公证，第一次打开时右键点应用选「打开」，或在「系统设置 › 隐私与安全性」里允许。
+
+然后在「系统设置 › 墙纸」里把壁纸设为拾景的壁纸文件夹（默认 `~/Pictures/Wallpapers0`），打开随机切换。
+
+## 用法
+
+1. **图库**：添加图片所在的目录（通常在 NAS 上）。两类目录都会参与采样：
+   - **筛选 + 采样**：先删掉竖屏、正方形、分辨率不够的原图，再参与采样
+   - **仅采样**：不删任何文件，采样时跳过不合格的图片，适合收藏夹这类不想动的目录
+2. **设置**：选壁纸文件夹、每次张数、最低分辨率（4K / 5K / 2K / 1080p / 自定义）。改动自动保存。
+3. **概览**：点「换一批壁纸」（⌘R）。依次 筛选 → 采样 → 复制 → 刷新系统壁纸，系统的文件夹轮换会立刻用上新的一批。
+
+<table>
+  <tr>
+    <td><img alt="图库" src="docs/screenshots/library.png"></td>
+    <td><img alt="设置" src="docs/screenshots/settings.png"></td>
+  </tr>
+  <tr>
+    <td align="center">图库：两类源目录和挂载状态</td>
+    <td align="center">设置：自动保存，没有保存按钮</td>
+  </tr>
+  <tr>
+    <td><img alt="运行中" src="docs/screenshots/running.png"></td>
+    <td><img alt="运行日志" src="docs/screenshots/log.png"></td>
+  </tr>
+  <tr>
+    <td align="center">运行中：步骤、进度，随时可以停止</td>
+    <td align="center">运行日志：按类型排版，可只看问题</td>
+  </tr>
+</table>
+
+> [!WARNING]
+> 「筛选 + 采样」目录里不合格的图片会被**直接删除**（NAS 上的原图，不可撤销）。第一次用或调了分辨率时，建议先在设置里关掉「删除不合格原图」模拟跑一遍，看日志里的「待删除」是否符合预期。开着删除时，点「换一批壁纸」会先弹窗确认；每个被删的文件都记在删除日志里。
+
+## 功能
+
+- **增量筛选**：只检查有变化的文件夹；判断变化时忽略 `._*`、`.DS_Store`、`@eaDir` 等 macOS / NAS 产生的文件；分辨率改了自动全部重查
+- **平衡采样**：每个子文件夹优先入选一张，每次覆盖到的文件夹都不一样
+- **为 NAS 优化**：读目录、读图片尺寸、复制都并发进行；没有改动时整轮筛选只要十几秒
+- **安全**：先确认选出了图片才清空壁纸文件夹（NAS 没挂载时不会白白清空）；目录没挂载会提示，全部没挂载时不能运行
+- **刷新系统壁纸**：换完后重启 macOS 的壁纸服务（`WallpaperAgent`）。系统的文件夹轮换只在启动时读一次文件夹，不刷新的话会停在已经删掉的旧图上
+- **后台运行**：关掉窗口不退出，任务继续跑；Dock 图标上有运行状态角标，窗口隐藏时跑完会发通知。⌘Q 才真正退出
+- **硬链接归档**（可选）：在 NAS 上额外留一份这批图片的硬链接副本，见下文
+- **复制或软链接**：软链接省空间，但 NAS 没挂载时壁纸会显示不出来
+
+快捷键：⌘R 换一批壁纸、⌘. 停止、⌘O 打开壁纸文件夹、⌘1–4 切换页面、⌘, 设置。
+
+## 硬链接归档
+
+开启后，每张选中的图片除了复制到壁纸文件夹，还会在归档目录（默认 `{源目录的上级}/_WallpaperArchive/`）留一份链接：优先硬链接（不占额外空间），不支持时退回相对路径软链接。归档目录每次只保留这一批。
+
+macOS 的 SMB 客户端不支持硬链接，它在 SMB 上建的软链接 Windows 又读不了。如果 NAS 对同一份数据还开了 NFS，在「归档」页填上 SMB 挂载根（如 `/Volumes/Media0`）和 NFS 挂载根（如 `/Volumes/nfs/Media0`）：扫描、采样、复制仍然走 SMB，只有建归档链接这一步换到 NFS 下做硬链接，Windows 那边看到的也是普通文件。
+
+## 数据文件
+
+都在 `~/Library/Application Support/拾景/`，设置页和关于页都可以直接在 Finder 中打开：
+
+| 文件 | 内容 |
+|---|---|
+| `config.json` | 配置（设置页可以「导入配置…」） |
+| `image_sorter_state.json` | 增量筛选状态。想强制全部重新筛选：退出应用后删掉它 |
+| `image_sorter_deleted.log` | 删除日志：每行是时间、阈值、被删文件的完整路径，需要核对或从备份恢复时查这里 |
+| `ui_state.json` | 上次运行的结果、是否跳过删除确认 |
+
+<details>
+<summary>config.json 字段</summary>
+
+| 字段 | 说明 | 默认值 |
+|------|------|--------|
+| `filter_and_sample_dirs` | 「筛选 + 采样」目录 | `[]` |
+| `sample_only_dirs` | 「仅采样」目录 | `[]` |
+| `dest_dir` | 壁纸文件夹（每次运行会先清空） | `~/Pictures/Wallpapers0` |
+| `sample_count` | 每次张数 | `300` |
+| `min_width` / `min_height` | 最低分辨率 | `3840` / `2160` |
+| `mode` | `copy`（复制）或 `symlink`（软链接） | `copy` |
+| `balance_first` | 平衡采样 | `true` |
+| `incremental` | 增量筛选 | `true` |
+| `delete_during_filter` | 筛选时实际删除（`false` 为模拟运行） | `true` |
+| `clear_wallpaper_cache` | 换完后刷新系统壁纸（键名沿用旧的「清除壁纸缓存」） | `true` |
+| `archive_enabled` | 硬链接归档 | `false` |
+| `archive_subdir_name` | 归档子文件夹名 | `_WallpaperArchive` |
+| `archive_dir_override` | 归档父路径（留空用各源目录的上级） | `""` |
+| `archive_smb_root` / `archive_nfs_root` | SMB → NFS 换算的两个挂载根 | `""` |
+
+</details>
+
+## 开发
+
+代码在 `desktop/`，需要 Go 1.27+（`brew install go`）。
+
+```bash
+cd desktop
+go tool mygo dev                        # 开发：改代码自动重编译重启
+go tool mygo build -skip-notarize       # 打包本机版：build/darwin-arm64/
+go tool mygo build -skip-notarize -platform darwin/universal   # 打包通用版：build/darwin-universal/
+CGO_ENABLED=0 go test ./...             # 测试（界面测试不需要窗口）
+go tool mygo vet .                      # MyGo 的界面规则检查
+SHOTS_DIR=$PWD/../docs/screenshots CGO_ENABLED=0 go test -run TestScreenshots .   # 重新生成 README 截图
+```
+
+| 路径 | 内容 |
+|---|---|
+| `core/` | 筛选 / 采样 / 归档 / 流程编排，带测试；通过 `core.Reporter` 上报日志、进度，接收停止请求 |
+| `app.go` / `view.go` | 界面状态和后台任务 / 各个页面 |
+| `theme.go` / `icons.go` / `logview.go` | 配色和通用组件 / Lucide 图标 / 运行日志的解析和排版 |
+| `thumbs.go` | 后台读取壁纸文件夹、生成横幅和缩略图 |
+| `main.go` / `background.go` / `menu.go` | 窗口和系统对话框 / 关窗后台运行、Dock 角标、通知 / 菜单栏快捷键 |
+| `about.go` / `uistate.go` | 关于页 / 上次运行结果（`ui_state.json`） |
+| `screenshots_test.go` | 用演示数据渲染 README 截图（不读真实图库） |
+| `cmd/wallpaper/` | 命令行入口，用同一份配置跑完整流程（`go run ./cmd/wallpaper`） |
+
+拾景最早是一组 Python 脚本，现在只维护这个原生应用。
+
+作者：[@love1017best](https://github.com/love1017best)
