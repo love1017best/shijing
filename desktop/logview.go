@@ -187,7 +187,11 @@ func (a *app) logRow(c *ui.Context, e logEntry) {
 	case logError:
 		icon, color = iconXCircle, t.Danger
 	case logDelete:
-		icon, color = iconTrash, t.Danger
+		// 「待删除」只是判定不合格（模拟运行时也会出现），用警告色；「已删除」是真删掉了原图，用红色
+		icon, color = iconTrash, t.Warning
+		if e.label == "已删除" {
+			color = t.Danger
+		}
 	case logStop:
 		icon, color = iconCircleStop, t.TextMuted
 	}
