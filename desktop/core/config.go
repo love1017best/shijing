@@ -30,6 +30,14 @@ type Config struct {
 	ArchiveDirOverride string `json:"archive_dir_override"`
 	ArchiveSMBRoot     string `json:"archive_smb_root"`
 	ArchiveNFSRoot     string `json:"archive_nfs_root"`
+
+	// PreferUnseen：优先选这一轮轮换里还没换上过的图，整个图库都换上过一遍再开始新一轮。
+	PreferUnseen bool `json:"prefer_unseen"`
+	// Excluded 是不再参与采样的原图（在概览页缩略图上「不再选它」）。
+	Excluded []string `json:"excluded"`
+	// AutoRunHours 大于 0 时，应用开着（包括关窗后在后台）每隔这么多小时自动换一批；
+	// 自动运行不删除原图（筛选只模拟），删除只在手动运行时发生。
+	AutoRunHours int `json:"auto_run_hours"`
 }
 
 const (
@@ -55,6 +63,8 @@ func Defaults() Config {
 		RefreshWallpaper:    true,
 		ArchiveEnabled:      false,
 		ArchiveSubdirName:   DefaultArchiveSubdir,
+		PreferUnseen:        true,
+		Excluded:            []string{},
 	}
 }
 
@@ -74,6 +84,9 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if cfg.SampleOnlyDirs == nil {
 		cfg.SampleOnlyDirs = []string{}
+	}
+	if cfg.Excluded == nil {
+		cfg.Excluded = []string{}
 	}
 	return cfg, nil
 }

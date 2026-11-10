@@ -4,8 +4,8 @@ package main
 // SHOTS_DIR=$PWD/../docs/screenshots CGO_ENABLED=0 go test -run TestScreenshots .
 
 import (
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -146,9 +146,27 @@ func TestScreenshots(t *testing.T) {
 		f.num = 300
 		sum := core.Summary{Elapsed: 14200 * time.Millisecond}
 		sum.Sort = core.SortResult{Dirs: 3, Skipped: 412, Images: 186, Rejected: 4, Deleted: 4}
-		sum.Copy = core.CopyResult{Candidates: 27650, Selected: 300, Copied: 300, LeafFolders: 474, CoveredFolders: 300, Dest: "~/Pictures/Wallpapers", PrevSelected: 300, Repeated: 19}
+		sum.Copy = core.CopyResult{Candidates: 27650, Selected: 300, Copied: 300, LeafFolders: 474, CoveredFolders: 300, Dest: "~/Pictures/Wallpapers", PrevSelected: 300, Repeated: 19,
+			Rotated: 17400, Bytes: 300 * 15_800_000, Sources: []core.SourceStat{
+				{Dir: "/Volumes/NAS/Photos/风景", Images: 9820, Folders: 168},
+				{Dir: "/Volumes/NAS/Photos/旅行", Images: 12430, Folders: 211},
+				{Dir: "/Volumes/NAS/Photos/城市", Images: 3870, Folders: 64},
+				{Dir: "/Volumes/NAS/Photos/精选", Images: 1530, Folders: 31},
+			}}
 		sum.WallpaperRefreshed = true
 		f.last = &runResult{sum: sum, at: time.Now().Add(-25 * time.Minute)}
+		f.lastGood = &sum
+		os.Remove(f.paths.DeleteLog)
+		for _, d := range []struct {
+			path, reason string
+		}{
+			{"/Volumes/NAS/Photos/旅行/京都/IMG_2087.jpg", "竖屏 3024×4032"},
+			{"/Volumes/NAS/Photos/风景/新疆 2026/IMG_2231.jpg", "分辨率不足 1920×1080"},
+			{"/Volumes/NAS/Photos/风景/新疆 2026/IMG_2240.jpg", "接近正方形 3000×3000"},
+			{"/Volumes/NAS/Photos/城市/东京/DSC_0912.jpg", "竖屏 2160×3840"},
+		} {
+			core.LogDeletion(f.paths.DeleteLog, d.path, 3840, 2160, d.reason)
+		}
 		f.log = []string{
 			"▶ " + time.Now().Add(-26*time.Minute).Format("2006-01-02 15:04:05") + " 开始运行",
 			"🗑️  开始筛选目录：3 个",
@@ -157,9 +175,9 @@ func TestScreenshots(t *testing.T) {
 			"  ├─ 冰岛 2024: ⏭️ 已跳过（无变化）",
 			"  ├─ 北海道: ⏭️ 已跳过（无变化）",
 			"📂 处理文件夹: 新疆 2026",
-			"    [新疆 2026] 🗑️ 待删除: IMG_2231.jpg",
-			"    [新疆 2026] 🔥 已删除: IMG_2231.jpg",
-			"  └─ 新疆 2026: 处理 62 张，删除 1 张",
+			"    [新疆 2026] 🔥 已删除: IMG_2231.jpg  (分辨率不足 1920×1080)",
+			"    [新疆 2026] 🔥 已删除: IMG_2240.jpg  (接近正方形 3000×3000)",
+			"  └─ 新疆 2026: 处理 62 张，删除 2 张",
 			"⚠️  目录不存在（可能卷未挂载）: /Volumes/Backup/旧照片",
 			"🔍 扫描图片文件...",
 			"🎯 随机选择 300 张图片",
@@ -193,6 +211,8 @@ func TestScreenshots(t *testing.T) {
 		shot("library")
 		click(t, tt, "设置")
 		shot("settings")
+		click(t, tt, "删除记录")
+		shot("deleted")
 		click(t, tt, "关于")
 		shot("about")
 
@@ -210,9 +230,18 @@ func TestScreenshots(t *testing.T) {
 		f.running = true
 		f.prog = progress{core.StageFilter, 268, 415}
 		f.runDelete, f.runRejected, f.runDeleted = true, 3, 3
-		f.lastDel = parseLogLine("    [旅行/京都] 🔥 已删除: IMG_2087.jpg")
+		f.lastDel = parseLogLine("    [旅行/京都] 🔥 已删除: IMG_2087.jpg  (竖屏 3024×4032)")
 		f.log = append(f.log, "▶ "+time.Now().Format("2006-01-02 15:04:05")+" 开始运行", "  ├─ 北海道: ⏭️ 已跳过（无变化）")
 		shot("running")
 		f.running = false
+
+		// 大图预览
+		f.walls.sources = map[string]string{}
+		for _, p := range f.walls.paths {
+			f.walls.sources[filepath.Base(p)] = "/Volumes/NAS/Photos/旅行/冰岛 2024/" + filepath.Base(p)
+		}
+		f.openPreview(1)
+		shot("preview")
+		f.preview = false
 	}
 }

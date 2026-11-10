@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -94,7 +95,9 @@ type SortOptions struct {
 	DeleteLog   string // 实际删除的文件追加记录到这里；为空则不记录
 }
 
-func logDeletion(logPath, file string, minW, minH int) {
+// LogDeletion 往删除日志追加一行：时间、阈值、完整路径、原因（制表符分隔）。
+// 早期的日志没有原因这一列，ReadDeleteLog 两种都认。
+func LogDeletion(logPath, file string, minW, minH int, reason string) {
 	if logPath == "" {
 		return
 	}
@@ -103,7 +106,40 @@ func logDeletion(logPath, file string, minW, minH int) {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "%s\t(阈值 %dx%d)\t%s\n", time.Now().Format("2006-01-02 15:04:05"), minW, minH, file)
+	fmt.Fprintf(f, "%s\t(阈值 %dx%d)\t%s\t%s\n", time.Now().Format("2006-01-02 15:04:05"), minW, minH, file, reason)
+}
+
+// DeleteRecord 是删除日志里的一行。
+type DeleteRecord struct {
+	At     time.Time
+	Path   string
+	Reason string // 旧日志为空
+}
+
+// ReadDeleteLog 读出删除日志，按时间从新到旧排列。文件不存在时返回 nil。
+func ReadDeleteLog(logPath string) []DeleteRecord {
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return nil
+	}
+	var out []DeleteRecord
+	for _, line := range strings.Split(string(data), "\n") {
+		parts := strings.Split(line, "\t")
+		if len(parts) < 3 {
+			continue
+		}
+		at, err := time.ParseInLocation("2006-01-02 15:04:05", parts[0], time.Local)
+		if err != nil {
+			continue
+		}
+		r := DeleteRecord{At: at, Path: parts[2]}
+		if len(parts) > 3 {
+			r.Reason = parts[3]
+		}
+		out = append(out, r)
+	}
+	slices.Reverse(out)
+	return out
 }
 
 func relPath(root, source string) string {
@@ -222,25 +258,27 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 		processedDirs++
 		logf("\n📂 处理文件夹: %s", rel)
 		dirDelete := 0
-		ok := checkResolutions(d.images, o.MinWidth, o.MinHeight) // 并发读文件头，删除和日志仍按顺序串行
+		ok, reasons := checkVerdicts(d.images, o.MinWidth, o.MinHeight) // 并发读文件头，删除和日志仍按顺序串行
 		for k, file := range d.images {
 			totalImages++
 			name := filepath.Base(file)
 			if ok[k] {
 				continue
 			}
-			logf("    [%s] 🗑️ 待删除: %s", rel, name)
 			dirDelete++
 			deleteCount++
-			if o.Delete {
-				if err := os.Remove(file); err != nil {
-					logf("    [%s] ❌ 删除失败: %s - %v", rel, name, err)
-					continue
-				}
-				deleted++
-				logDeletion(o.DeleteLog, file, o.MinWidth, o.MinHeight)
-				logf("    [%s] 🔥 已删除: %s", rel, name)
+			// 每张不合格的图只打一行：模拟运行「待删除」，真删「已删除」或「删除失败」
+			if !o.Delete {
+				logf("    [%s] 🗑️ 待删除: %s  (%s)", rel, name, reasons[k])
+				continue
 			}
+			if err := os.Remove(file); err != nil {
+				logf("    [%s] ❌ 删除失败: %s - %v", rel, name, err)
+				continue
+			}
+			deleted++
+			LogDeletion(o.DeleteLog, file, o.MinWidth, o.MinHeight, reasons[k])
+			logf("    [%s] 🔥 已删除: %s  (%s)", rel, name, reasons[k])
 		}
 		logf("  └─ %s: 处理 %d 张，删除 %d 张", rel, len(d.images), dirDelete)
 		if o.Incremental {

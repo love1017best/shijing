@@ -15,6 +15,7 @@ type Paths struct {
 	StateFile string // 增量筛选状态
 	DeleteLog string // 删除留痕
 	Selection string // 上一轮选中了哪些原图，用来算两轮之间的重合
+	History   string // 这一轮轮换里换上过哪些原图（PreferUnseen）
 }
 
 // PathsIn 返回数据目录下的默认文件路径。
@@ -23,6 +24,7 @@ func PathsIn(dataDir string) Paths {
 		StateFile: filepath.Join(dataDir, "image_sorter_state.json"),
 		DeleteLog: filepath.Join(dataDir, "image_sorter_deleted.log"),
 		Selection: filepath.Join(dataDir, "last_selection.json"),
+		History:   filepath.Join(dataDir, "selection_history.json"),
 	}
 }
 
@@ -97,6 +99,9 @@ func RunPipeline(cfg Config, paths Paths, rep Reporter, r *rand.Rand) (Summary, 
 		ArchiveSMBRoot:     cfg.ArchiveSMBRoot,
 		ArchiveNFSRoot:     cfg.ArchiveNFSRoot,
 		SelectionFile:      paths.Selection,
+		HistoryFile:        paths.History,
+		PreferUnseen:       cfg.PreferUnseen,
+		Excluded:           cfg.Excluded,
 	}, rep, r)
 	if err != nil {
 		sum.Elapsed = time.Since(start)

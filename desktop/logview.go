@@ -38,6 +38,7 @@ type logEntry struct {
 	text   string
 	detail string // 第二段文字（来源目录的上级路径、复制的目标名、删除文件所在的文件夹），淡色显示
 	label  string // 删除行的「待删除 / 已删除」
+	reason string // 删除行的不合格原因（「竖屏 1080×1920」），旧日志没有
 }
 
 // isProblem 是「只看问题」时保留的行。
@@ -69,7 +70,9 @@ func parseLogLine(line string) logEntry {
 		e.kind, e.indent = logDelete, 2
 		folder, rest, _ := strings.Cut(strings.TrimPrefix(raw, "["), "] ")
 		label, name, _ := strings.Cut(strings.TrimSpace(cleanLogLine(rest)), ":")
+		name, reason, _ := strings.Cut(name, "  (")
 		e.label, e.text, e.detail = strings.TrimSpace(label), strings.TrimSpace(name), folder
+		e.reason = strings.TrimSuffix(strings.TrimSpace(reason), ")")
 	case strings.Contains(raw, "❌") || strings.HasPrefix(text, "失败:") || strings.HasPrefix(text, "归档失败"):
 		e.kind = logError
 	case strings.Contains(raw, "⚠️"):
@@ -223,8 +226,13 @@ func (a *app) logRow(c *ui.Context, e logEntry) {
 			case e.kind == logCopy && e.detail != "":
 				ui.Text(c, "→").FontSize(11.5).TextColor(t.TextMuted.Alpha(0.7))
 				ui.Text(c, e.detail).Font("Menlo").FontSize(11.5).TextColor(t.TextMuted).Wrap()
-			case e.kind == logDelete && e.detail != "":
-				ui.Text(c, "在 "+e.detail).FontSize(11.5).TextColor(t.TextMuted).SingleLine()
+			case e.kind == logDelete:
+				if e.reason != "" {
+					ui.Text(c, e.reason).FontSize(11.5).TextColor(color.Alpha(0.8)).SingleLine()
+				}
+				if e.detail != "" {
+					ui.Text(c, "在 "+e.detail).FontSize(11.5).TextColor(t.TextMuted).SingleLine()
+				}
 			case e.detail != "":
 				ui.Text(c, e.detail).FontSize(11.5).TextColor(t.TextMuted).SingleLine()
 			}

@@ -66,6 +66,12 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 窗口用 `TitleBarHiddenInset` + `VibrancySidebar`：侧边栏顶部和内容区顶部各留了一条 `DragWindow()` 的拖拽区，侧边栏背景透明才能透出毛玻璃（`c.Vibrancy()` 为 false 时退回纯色）。配色和通用组件（`panel`/`group`/`settingRow`/`sceneArt` 插画）集中在 `theme.go`。
 - 概览页缩略图由 `thumbs.go` 的 `scanWallpapers` 在后台解码缩小，`Bitmap` 回主线程再建；只读本地 `dest_dir`，运行结束 `wallsGen++` 触发重读。缩略图网格的行列数由 `stripLayout` 按**上一帧**量到的尺寸算（网格宽度定列数，滚动区高度 − 页面其余部分高度定行数，后者与行数无关所以不会来回跳），算出来变了就 `c.AnimationFrame()` 再排一帧；概览页不受 `contentMax` 限制、铺满窗口宽度。先解码 `initialThumbs` 张，放得下更多时 `loadMoreThumbs` 从 `walls.rest` 接着解码（`decodeWorkers` 限并发，原图很大）。`app.scanWallpapers` 是注入的，测试里设成 nil，界面测试不读真实目录。
 - 「换上时间」和「上次运行」来自 `ui_state.json`（`uistate.go`），**不要**改用壁纸文件夹里文件的 mtime：复制时 `copyFile` 会用 `Chtimes` 保留原图的修改时间，那是原图的时间，不是换上的时间。命令行跑的不会写这个文件。
+- v0.3.0 加的几样，改相关代码时注意：
+  - **优先选没换上过的**（`prefer_unseen`）：`selection_history.json` 是这一轮轮换里换上过的原图路径集合；没换上过的不够一批时全部选上、差的从换上过的里补，并把历史重置成只有这一批（`NewCycle`）。只在复制完整跑完后写。`CopyResult.Rotated` / `Candidates` 是轮换进度。
+  - **删除日志**每行 4 列（时间、阈值、路径、原因），旧日志只有 3 列，`core.ReadDeleteLog` 两种都认；不合格原因来自 `core.ImageVerdict`。筛选时每张不合格的图只打一行日志：真删「🔥 已删除: 名  (原因)」/「❌ 删除失败」，模拟「🗑️ 待删除: 名  (原因)」——界面 `parseLogLine` 按两个空格加括号拆出原因，`countDeletion` 数这些行。
+  - **缩略图 → 原图**：`last_selection.json` 里 `dests` 和 `sources` 一一对应，`core.WallpaperSources` 读成「壁纸文件名 → 原图」；旧版本换上的没有 `dests`，缩略图菜单里就不出现「不再选它 / 删除原图」。
+  - **定时自动换**（`auto_run_hours`）：`main.go` 里每分钟 `maybeAutoRun`，从上次运行（没运行过从应用启动）开始计时；`startRunWith(true)` 会强制 `DeleteDuringFilter=false`，自动运行永远不删原图。
+  - 图库统计、空间预估用 `a.lastGood`（最近一次成功运行，存在 `ui_state.json` 的 `last_success`），因为运行中 / 失败后 `a.last` 不是成功的结果。
 - 「上次运行」的「新换 N 张 / 重合率」来自 `core.compareSelection`：按**原图路径**比（壁纸文件夹里的文件名会因重名被改写，不能拿来比），上一轮的选择存在数据目录的 `last_selection.json`（命令行也会写），没有记录（刚升级、换了壁纸文件夹）时，在清空壁纸文件夹**之前**读里面现有的文件名，按 `destName`（「上级文件夹-原名」）近似比较（`PrevByName`）。只在复制完整跑完后写，被停止的不算一轮。运行卡片上的删除计数是 `app.countDeletion` 从日志行里数的，改 `sorter.go` 的「待删除 / 已删除 / 删除失败」日志格式要同步改这里。
 - 停止靠 `core.Reporter.Stop`：筛选在文件夹之间检查（没检查的目录不写进增量状态，否则下次会被当成"没变化"跳过）、清空壁纸目录前检查一次、复制时不再开始新任务；被停止返回 `core.ErrCanceled`。新加耗时步骤时记得在安全点检查它。
 - 删除原图前的确认框是注入的 `app.confirmDelete`（测试里可以替换）；「不再提示」存在 `ui_state.json`，`view` 发现「删除不合格原图」被重新打开时恢复确认。

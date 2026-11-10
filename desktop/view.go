@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	"desktop/core"
@@ -65,6 +66,8 @@ func (a *app) view(c *ui.Context) {
 						a.settingsPage(c)
 					case pageArchive:
 						a.archivePage(c)
+					case pageDeleted:
+						a.deletedPage(c)
 					case pageAbout:
 						a.aboutPage(c)
 					default:
@@ -112,6 +115,11 @@ func (a *app) sidebar(c *ui.Context, vibrant bool) {
 		ui.SidebarItem(c, pageArchive, iconArchive, "归档").Children(func() {
 			if a.cfg.ArchiveEnabled {
 				ui.Badge(c, "开").Background(t.Success.Alpha(0.18)).TextColor(t.Success)
+			}
+		})
+		ui.SidebarItem(c, pageDeleted, iconTrash, "删除记录").Children(func() {
+			if n := len(a.deleteRecords()); n > 0 {
+				ui.Badge(c, humanCount(n))
 			}
 		})
 		ui.SidebarItem(c, pageAbout, iconInfo, "关于")
@@ -166,6 +174,7 @@ func (a *app) overviewPage(c *ui.Context) {
 	a.thumbStrip(c)
 	a.statStrip(c)
 	a.logPanel(c)
+	a.previewModal(c)
 }
 
 // hero 是概览顶部的大横幅：背景是当前壁纸里的一张图，没有壁纸时画一幅暮色山景。
@@ -341,12 +350,16 @@ func (a *app) thumbStrip(c *ui.Context) {
 			if i >= len(w.thumbs) {
 				continue
 			}
-			name := filepath.Base(w.paths[i])
-			cell.Cursor(ui.CursorPointer).Tooltip(name).Children(func() {
+			name, path := filepath.Base(w.paths[i]), w.paths[i]
+			cell.Cursor(ui.CursorPointer).Tooltip(name + "（空格预览，右键更多操作）").Children(func() {
 				ui.Image(c, w.thumbs[i]).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 			})
-			if !a.running && cell.Clicked() {
-				a.openPath(w.paths[i])
+			if a.running {
+				continue
+			}
+			cell.ContextMenu(func(m *ui.Menu) { a.wallMenu(m, path) })
+			if cell.Clicked() || (cell.Hovered() && c.Shortcut(0, ui.KeySpace)) {
+				a.openPreview(i)
 			}
 		}
 		more := ui.ButtonBase(c).AspectRatio(stripAspect).Radius(9).Center().Column().Gap(2).
@@ -403,7 +416,14 @@ func (a *app) statStrip(c *ui.Context) {
 			balance = "平衡采样"
 		}
 		cell(0, "图库", fmt.Sprintf("%d 个目录", len(dirs)), mountSub, mountColor, "")
-		cell(1, "每次采样", fmt.Sprintf("%d 张", int(a.num)), balance, t.TextMuted, "")
+		rotTip := ""
+		if g := a.lastGood; a.cfg.PreferUnseen && g != nil && g.Copy.Rotated > 0 && g.Copy.Candidates > 0 {
+			pct := float64(g.Copy.Rotated) / float64(g.Copy.Candidates) * 100
+			balance = fmt.Sprintf("已轮换 %.0f%%", pct)
+			rotTip = fmt.Sprintf("优先选没换上过的图：这一轮已换上过 %s / %s 张（%.0f%%），全部换上过一遍后开始新一轮",
+				humanCount(g.Copy.Rotated), humanCount(g.Copy.Candidates), pct)
+		}
+		cell(1, "每次采样", fmt.Sprintf("%d 张", int(a.num)), balance, t.TextMuted, rotTip)
 		cell(2, "最低画质", a.resLabel()+" 横屏", fmt.Sprintf("%d×%d", int(a.minW), int(a.minH)), t.TextMuted, "")
 
 		switch r := a.last; {
@@ -523,6 +543,9 @@ func (a *app) progressLabel() string {
 		}
 		return "正在扫描图库、挑选图片…"
 	case core.StageCopy:
+		if eta := a.copyETA(time.Now()); eta != "" {
+			return fmt.Sprintf("复制 %d / %d 张 · %s", p.done, p.total, eta)
+		}
 		return fmt.Sprintf("复制 %d / %d 张", p.done, p.total)
 	default:
 		return "正在刷新系统壁纸…"
@@ -597,7 +620,7 @@ func (a *app) runningCard(c *ui.Context) {
 				}
 			})
 			ui.Progress(c, value).Label(label)
-			ui.Text(c, cleanLogLine(a.lastLogLine())).FontSize(12).TextColor(t.TextMuted).SingleLine()
+			ui.Text(c, stripEmoji(cleanLogLine(a.lastLogLine()))).FontSize(12).TextColor(t.TextMuted).SingleLine()
 		})
 		if len(a.cfg.FilterAndSampleDirs) > 0 {
 			a.deleteStrip(c)
@@ -664,6 +687,9 @@ func (a *app) deleteStrip(c *ui.Context) {
 				ui.Row(c).Gap(6).AlignItems(ui.Baseline).MinWidth(0).Children(func() {
 					ui.Text(c, "最近").FontSize(11.5).TextColor(t.TextMuted).Shrink(0)
 					ui.Text(c, e.text).Font("Menlo").FontSize(11.5).TextColor(t.Text.Alpha(0.86)).SingleLine().Shrink(1)
+					if e.reason != "" {
+						ui.Text(c, e.reason).FontSize(11.5).TextColor(color.Alpha(0.85)).SingleLine().Shrink(1)
+					}
 					if e.detail != "" {
 						ui.Text(c, "在 "+e.detail).FontSize(11.5).TextColor(t.TextMuted).SingleLine().Shrink(1)
 					}
@@ -785,6 +811,7 @@ func (a *app) libraryPage(c *ui.Context) {
 			"先删除竖屏、正方形、分辨率不足的图片，再参与采样。会直接删除原图，删除记录写在数据目录的删除日志里。", &a.filter)
 		a.dirSection(c, "sample", "仅采样", iconHeart,
 			"不删除任何文件，采样时跳过不合格的图片。适合收藏夹这类不想动的目录。", &a.sample)
+		a.excludedSection(c)
 	})
 }
 
@@ -807,7 +834,11 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 	c.Key(key)
 	dirs := *p.dirs
 	parent := commonParent(dirs)
-	ui.Column(c).Gap(10).Children(func() {
+	sec := ui.Column(c).Gap(10)
+	if dropped := sec.DroppedFiles(); len(dropped) > 0 && !a.running {
+		a.addDropped(p, dropped)
+	}
+	sec.Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Box(c).Size(28, 28).Radius(8).Center().Background(t.Accent.Alpha(0.12)).Children(func() {
 				ui.Icon(c, icon).FontSize(15).TextColor(t.Accent)
@@ -841,7 +872,7 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 			box.Children(func() {
 				ui.Column(c).Height(84).Center().Gap(4).Children(func() {
 					ui.Text(c, "还没有目录").FontSize(13).TextColor(t.TextMuted)
-					muted(c, "点右上角的「添加目录…」，可以一次选一个文件夹")
+					muted(c, "点右上角的「添加目录…」，或者把文件夹拖到这里")
 				})
 			})
 			return
@@ -870,6 +901,14 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 							ui.Text(c, filepath.Dir(filepath.Clean(d))).FontSize(11).TextColor(t.TextMuted).SingleLine()
 						}
 					})
+					if st, ok := a.sourceStat(d); ok {
+						parts := fmt.Sprintf("%s 张 · %d 个文件夹", humanCount(st.Images), st.Folders)
+						if n := a.deletedIn(d); n > 0 {
+							parts += fmt.Sprintf(" · 删过 %d 张", n)
+						}
+						ui.Text(c, parts).FontSize(11.5).TextColor(t.TextMuted).SingleLine().Shrink(0).
+							Tooltip("上次成功运行时扫描到的、符合画质要求的图片；删过的张数来自删除记录")
+					}
 					switch a.mounts[d] {
 					case mountOK:
 						pill(c, "可访问", t.Success)
@@ -884,7 +923,7 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 			}).Height(listHeight(len(dirs), parent == "" || len(dirs) == 1)).Padding(4, 0)
 		})
 		if len(dirs) > 1 {
-			muted(c, "按住 ⌘ 点击可以多选；右键可以在 Finder 中打开或移除").Padding(0, 4)
+			muted(c, "按住 ⌘ 点击可以多选；右键可以在 Finder 中打开或移除；也可以把文件夹拖进来添加").Padding(0, 4)
 		}
 	})
 }
@@ -928,13 +967,27 @@ func (a *app) settingsPage(c *ui.Context) {
 
 		group(c, "采样", "",
 			func() {
-				settingRow(c, "每次张数", "", func(ui.Element) {
+				desc := ""
+				if per, total := a.estimateBytes(int(a.num)); total > 0 && a.modeIdx == 0 {
+					desc = fmt.Sprintf("按上一轮平均每张 %s 算，大约占 %s", humanBytes(per), humanBytes(total))
+				}
+				settingRow(c, "每次张数", desc, func(ui.Element) {
 					ui.NumberInput(c, &a.num, 1, 9999, 10).Width(150).Label("每次张数")
 				})
 			},
 			func() {
 				settingRow(c, "平衡采样", "优先让每个子文件夹至少入选一张，避免少数几个大文件夹占满名额。", func(l ui.Element) {
 					ui.Switch(c, &a.cfg.BalanceFirst).LabelledBy(l)
+				})
+			},
+			func() {
+				desc := "先从这一轮里还没换上过的图里选，整个图库都换上过一遍后再开始新一轮，减少和前几次重复。"
+				if g := a.lastGood; g != nil && g.Copy.Rotated > 0 && g.Copy.Candidates > 0 {
+					desc += fmt.Sprintf("\n这一轮已换上过 %s / %s 张（%.0f%%）。", humanCount(g.Copy.Rotated), humanCount(g.Copy.Candidates),
+						float64(g.Copy.Rotated)/float64(g.Copy.Candidates)*100)
+				}
+				settingRow(c, "优先选没换上过的", desc, func(l ui.Element) {
+					ui.Switch(c, &a.cfg.PreferUnseen).LabelledBy(l)
 				})
 			})
 
@@ -984,6 +1037,21 @@ func (a *app) settingsPage(c *ui.Context) {
 			func() {
 				settingRow(c, "增量筛选", "跳过上次检查后没有变化的文件夹，只检查新增或修改过的。", func(l ui.Element) {
 					ui.Switch(c, &a.cfg.Incremental).LabelledBy(l)
+				})
+			})
+
+		group(c, "自动换壁纸", "应用开着时（关掉窗口后会在后台继续运行）按这个间隔自动换一批。自动运行不会删除原图，筛选只模拟；删除只在手动点「换一批壁纸」时发生。",
+			func() {
+				desc := "从上次运行开始计时。"
+				if next := a.nextAutoRun(); !next.IsZero() {
+					desc = "下一次：" + next.Format("1月2日 15:04")
+				}
+				settingRow(c, "间隔", desc, func(ui.Element) {
+					labels := make([]string, len(autoRunHours))
+					for i, h := range autoRunHours {
+						labels[i] = autoRunLabel(h)
+					}
+					ui.Segmented(c, &a.autoIdx, labels...).Label("自动换壁纸间隔")
 				})
 			})
 

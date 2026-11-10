@@ -5,6 +5,7 @@ package main
 import (
 	"log"
 	"path/filepath"
+	"time"
 
 	"desktop/core"
 
@@ -34,6 +35,12 @@ func main() {
 	mygo.App.WhenReady(func() {
 		var win *mygo.Window
 		a.update = func(fn func()) { win.Update(fn) }
+		// 定时自动换壁纸：每分钟回主线程检查一次（关窗只是隐藏，应用仍在运行）
+		go func() {
+			for now := range time.Tick(time.Minute) {
+				a.update(func() { a.maybeAutoRun(now) })
+			}
+		}()
 		a.version = mygo.App.Version()
 		a.pickDir = func(title string) string {
 			paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{

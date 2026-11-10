@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -35,17 +36,31 @@ func IsValidImage(path string) bool {
 // image.DecodeConfig 只解析文件头，不解码整张图（PIL 的 Image.open 同样是惰性读取）。
 // 打不开/解析失败的图片视为不合格，与 Python 版一致。
 func CheckImageResolution(path string, minWidth, minHeight int) bool {
+	ok, _ := ImageVerdict(path, minWidth, minHeight)
+	return ok
+}
+
+// ImageVerdict 和 CheckImageResolution 一样判断，另外给出不合格的原因（写进删除日志、显示在界面上）。
+func ImageVerdict(path string, minWidth, minHeight int) (ok bool, reason string) {
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return false, "打不开"
 	}
 	defer f.Close()
 	cfg, _, err := image.DecodeConfig(f)
 	if err != nil || cfg.Height == 0 {
-		return false
+		return false, "无法解析"
 	}
-	ratio := float64(cfg.Width) / float64(cfg.Height)
-	return ratio > DefaultMaxAspectRatio && cfg.Width >= minWidth && cfg.Height >= minHeight
+	size := fmt.Sprintf("%d×%d", cfg.Width, cfg.Height)
+	switch ratio := float64(cfg.Width) / float64(cfg.Height); {
+	case ratio < 1/DefaultMaxAspectRatio:
+		return false, "竖屏 " + size
+	case ratio <= DefaultMaxAspectRatio:
+		return false, "接近正方形 " + size
+	case cfg.Width < minWidth || cfg.Height < minHeight:
+		return false, "分辨率不足 " + size
+	}
+	return true, ""
 }
 
 // walk 按 Python os.walk(top, followlinks=False) 的语义遍历目录：
@@ -182,11 +197,17 @@ func parallelFor(n, workers int, fn func(i int)) {
 
 // checkResolutions 并发检查一批图片，返回与 paths 一一对应的结果。
 func checkResolutions(paths []string, minWidth, minHeight int) []bool {
-	ok := make([]bool, len(paths))
-	parallelFor(len(paths), metaWorkers, func(i int) {
-		ok[i] = CheckImageResolution(paths[i], minWidth, minHeight)
-	})
+	ok, _ := checkVerdicts(paths, minWidth, minHeight)
 	return ok
+}
+
+// checkVerdicts 同 checkResolutions，另外返回不合格的原因。
+func checkVerdicts(paths []string, minWidth, minHeight int) (ok []bool, reasons []string) {
+	ok, reasons = make([]bool, len(paths)), make([]string, len(paths))
+	parallelFor(len(paths), metaWorkers, func(i int) {
+		ok[i], reasons[i] = ImageVerdict(paths[i], minWidth, minHeight)
+	})
+	return ok, reasons
 }
 
 func exists(p string) bool {

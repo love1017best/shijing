@@ -652,3 +652,92 @@ func TestSelectionOverlapBetweenRuns(t *testing.T) {
 		t.Error("按文件名比完也应写下这一轮的记录")
 	}
 }
+
+func TestPreferUnseenRotatesWholeLibrary(t *testing.T) {
+	root := t.TempDir()
+	lib := filepath.Join(root, "lib")
+	for i := range 8 {
+		writePNG(t, filepath.Join(lib, fmt.Sprintf("s%d", i), "a.png"), 80, 40)
+	}
+	stubRefresh(t, func() error { return nil })
+	cfg := Defaults()
+	cfg.SampleOnlyDirs = []string{lib}
+	cfg.DestDir = filepath.Join(root, "dest")
+	cfg.MinWidth, cfg.MinHeight = tw, th
+	cfg.SampleCount = 3
+	paths := PathsIn(filepath.Join(root, "data"))
+
+	seen := map[string]int{}
+	run := func() CopyResult {
+		t.Helper()
+		sum, err := RunPipeline(cfg, paths, Reporter{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for src := range WallpaperSources(paths.Selection, cfg.DestDir) {
+			seen[src]++
+		}
+		return sum.Copy
+	}
+	// 8 张、每次 3 张：前两轮 6 张互不重复
+	if c := run(); c.Rotated != 3 || c.NewCycle {
+		t.Errorf("第一轮: %+v", c)
+	}
+	if c := run(); c.Repeated != 0 || c.Rotated != 6 {
+		t.Errorf("第二轮应全是没换上过的: %+v", c)
+	}
+	// 第三轮只剩 2 张没换上过：全选上，再补 1 张，开始新一轮
+	c := run()
+	if !c.NewCycle || c.Selected != 3 || c.Rotated != 3 {
+		t.Errorf("第三轮应开始新一轮: %+v", c)
+	}
+	if len(seen) != 8 {
+		t.Errorf("三轮下来应覆盖全部 8 张，实际 %d 张", len(seen))
+	}
+	if len(c.Sources) != 1 || c.Sources[0].Images != 8 || c.Sources[0].Folders != 8 {
+		t.Errorf("目录统计: %+v", c.Sources)
+	}
+	if c.Bytes <= 0 {
+		t.Error("复制模式应统计字节数")
+	}
+
+	// 排除名单里的图不再被选中
+	var excluded []string
+	for i := range 7 {
+		excluded = append(excluded, filepath.Join(lib, fmt.Sprintf("s%d", i), "a.png"))
+	}
+	cfg.Excluded = excluded
+	cfg.PreferUnseen = false
+	sum, err := RunPipeline(cfg, paths, Reporter{}, nil)
+	if err != nil || sum.Copy.Candidates != 1 || sum.Copy.Selected != 1 {
+		t.Errorf("排除后只剩 1 张: %+v %v", sum.Copy, err)
+	}
+}
+
+func TestImageVerdictReasons(t *testing.T) {
+	dir := t.TempDir()
+	for _, c := range []struct {
+		w, h   int
+		prefix string
+	}{{80, 40, ""}, {30, 60, "竖屏"}, {50, 48, "接近正方形"}, {30, 15, "分辨率不足"}} {
+		p := filepath.Join(dir, fmt.Sprintf("%dx%d.png", c.w, c.h))
+		writePNG(t, p, c.w, c.h)
+		ok, reason := ImageVerdict(p, tw, th)
+		if ok != (c.prefix == "") || !strings.HasPrefix(reason, c.prefix) {
+			t.Errorf("%dx%d: ok=%v reason=%q", c.w, c.h, ok, reason)
+		}
+	}
+	if _, reason := ImageVerdict(filepath.Join(dir, "missing.png"), tw, th); reason != "打不开" {
+		t.Errorf("不存在的文件: %q", reason)
+	}
+}
+
+func TestReadDeleteLog(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "deleted.log")
+	os.WriteFile(p, []byte("2026-11-01 10:00:00\t(阈值 3840x2160)\t/old/a.jpg\n坏行\n"), 0o644)
+	LogDeletion(p, "/new/b.jpg", 3840, 2160, "竖屏 1080×1920")
+	recs := ReadDeleteLog(p)
+	if len(recs) != 2 || recs[0].Path != "/new/b.jpg" || recs[0].Reason != "竖屏 1080×1920" || recs[1].Path != "/old/a.jpg" || recs[1].Reason != "" {
+		t.Errorf("应从新到旧、兼容没有原因的旧格式: %+v", recs)
+	}
+}

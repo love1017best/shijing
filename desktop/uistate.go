@@ -14,8 +14,10 @@ import (
 // 放在配置文件旁边的 ui_state.json，重启后「上次运行」和横幅上的换上时间仍然准确
 // ——壁纸文件夹里的文件时间靠不住，复制时会保留原图的修改时间。
 type uiState struct {
-	LastRun           *savedRun `json:"last_run,omitempty"`
-	SkipDeleteConfirm bool      `json:"skip_delete_confirm,omitempty"`
+	LastRun *savedRun `json:"last_run,omitempty"`
+	// LastSuccess 是最近一次成功运行的结果：上次运行失败或被停止时，图库统计和空间预估仍然有数
+	LastSuccess       *core.Summary `json:"last_success,omitempty"`
+	SkipDeleteConfirm bool          `json:"skip_delete_confirm,omitempty"`
 }
 
 type savedRun struct {
@@ -36,8 +38,12 @@ func (a *app) loadUIState() {
 		return
 	}
 	a.skipConfirm = s.SkipDeleteConfirm
+	a.lastGood = s.LastSuccess
 	if r := s.LastRun; r != nil {
 		a.last = &runResult{sum: r.Summary, err: savedError(r.Error), at: r.At}
+		if a.lastGood == nil && r.Error == "" {
+			a.lastGood = &r.Summary
+		}
 	}
 }
 
@@ -57,7 +63,7 @@ func savedError(msg string) error {
 
 // saveUIState 只在主线程调用；文件很小，写失败也不影响使用，忽略错误。
 func (a *app) saveUIState() {
-	s := uiState{SkipDeleteConfirm: a.skipConfirm}
+	s := uiState{SkipDeleteConfirm: a.skipConfirm, LastSuccess: a.lastGood}
 	if r := a.last; r != nil {
 		s.LastRun = &savedRun{At: r.at, Summary: r.sum}
 		if r.err != nil {

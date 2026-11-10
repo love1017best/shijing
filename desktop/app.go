@@ -25,8 +25,12 @@ const (
 	pageLibrary  = "library"
 	pageSettings = "settings"
 	pageArchive  = "archive"
+	pageDeleted  = "deleted"
 	pageAbout    = "about"
 )
+
+// autoRunHours 是「自动换壁纸」的选项（小时，0 为关闭），和设置页的分段控件一一对应。
+var autoRunHours = []int{0, 6, 12, 24, 168}
 
 var modes = []string{"copy", "symlink"}
 
@@ -116,6 +120,18 @@ type app struct {
 	wallsLoadedGen int
 
 	// 以下由 main 注入：真实窗口里是 Window.Update / 系统对话框，测试里是假的实现。
+	autoIdx  int           // 「自动换壁纸」选中的是 autoRunHours 的第几项；配置里是别的值时为 -1
+	started  time.Time     // 应用启动时间：从没运行过时，自动换壁纸从这里开始计时
+	lastGood *core.Summary // 最近一次成功运行的结果（图库统计、空间预估用；运行中 a.last 是 nil）
+	copyT0   time.Time     // 复制阶段开始的时间，算剩余时间用
+	delCache deleteCache
+	// 缩略图的大图预览和「删除原图」确认
+	preview        bool
+	previewIdx     int
+	previewImg     *ui.Bitmap
+	previewFor     string // previewImg 是哪个文件的
+	confirmDelSrc  bool
+	pendingDelWall string // 要删除原图的那张壁纸（壁纸文件夹里的路径）
 	// 概览页缩略图网格：上一帧量到的可视高度、整页高度，和据此算出的行列数（stripLayout）
 	viewH, pageH         float32
 	stripCols, stripRows int
@@ -142,7 +158,7 @@ type app struct {
 }
 
 func newApp(cfgPath string, paths core.Paths) *app {
-	a := &app{cfgPath: cfgPath, paths: paths, page: pageOverview, mounts: map[string]mountState{}}
+	a := &app{cfgPath: cfgPath, paths: paths, page: pageOverview, mounts: map[string]mountState{}, started: time.Now()}
 	a.logList.FollowEnd = true
 	a.run = func(cfg core.Config, rep core.Reporter) (core.Summary, error) {
 		return core.RunPipeline(cfg, paths, rep, nil)
@@ -177,6 +193,7 @@ func (a *app) setConfig(cfg core.Config) {
 	a.minW = float64(cfg.MinWidth)
 	a.minH = float64(cfg.MinHeight)
 	a.modeIdx = max(0, slices.Index(modes, cfg.Mode))
+	a.autoIdx = slices.Index(autoRunHours, cfg.AutoRunHours)
 	a.prevDelete = cfg.DeleteDuringFilter
 	a.preset = len(resPresets)
 	for i, p := range resPresets {
@@ -195,6 +212,10 @@ func (a *app) buildConfig() core.Config {
 	cfg.MinWidth = int(a.minW)
 	cfg.MinHeight = int(a.minH)
 	cfg.Mode = modes[a.modeIdx]
+	cfg.Excluded = slices.Clone(a.cfg.Excluded)
+	if a.autoIdx >= 0 {
+		cfg.AutoRunHours = autoRunHours[a.autoIdx]
+	}
 	return cfg
 }
 
@@ -261,8 +282,19 @@ func (a *app) startRun() {
 	if !a.canRun() {
 		return
 	}
+	a.startRunWith(false)
+}
+
+// startRunWith 开始运行；auto 为 true 是定时自动运行：不删除原图（筛选只模拟），也不弹删除确认。
+func (a *app) startRunWith(auto bool) {
+	if !a.canRun() {
+		return
+	}
 	a.autosave()
 	cfg := a.buildConfig()
+	if auto {
+		cfg.DeleteDuringFilter = false
+	}
 	a.running = true
 	a.prog = progress{}
 	a.last = nil
@@ -272,6 +304,9 @@ func (a *app) startRun() {
 	a.stopReq.Store(false)
 	a.appendLog(strings.Repeat("─", 50))
 	a.appendLog("▶ " + time.Now().Format("2006-01-02 15:04:05") + " 开始运行")
+	if auto {
+		a.appendLog(fmt.Sprintf("⏰ 定时自动运行（%s），这次不删除原图，只模拟筛选", autoRunLabel(cfg.AutoRunHours)))
+	}
 	rep := core.Reporter{Log: a.logf, Progress: a.progressf, Stop: a.stopReq.Load}
 	if a.onRunState != nil {
 		a.onRunState(true, nil)
@@ -289,6 +324,9 @@ func (a *app) startRun() {
 		a.update(func() {
 			a.running = false
 			a.last = &runResult{sum: sum, err: err, at: time.Now()}
+			if err == nil {
+				a.lastGood = &sum
+			}
 			a.saveUIState()
 			a.wallsGen++ // 壁纸文件夹换了一批，重新读缩略图
 			switch {
@@ -341,6 +379,9 @@ func (a *app) flush() {
 			a.appendLog(strings.Join(lines, "\n"))
 		}
 		if prog != nil {
+			if prog.stage == core.StageCopy && a.prog.stage != core.StageCopy {
+				a.copyT0 = time.Now()
+			}
 			a.prog = *prog
 		}
 	})
@@ -450,6 +491,28 @@ func (a *app) addDir(p *dirPanel) {
 		*p.dirs = append(*p.dirs, path)
 		a.mounts[path] = mountOK // 刚从对话框选出来，一定可访问
 	})
+}
+
+// addDropped 把拖进来的文件夹加进图库（文件、已经在图库里的跳过）。
+func (a *app) addDropped(p *dirPanel, paths []string) {
+	added, skipped := 0, 0
+	for _, path := range paths {
+		if st, err := os.Stat(path); err != nil || !st.IsDir() || slices.Contains(a.allDirs(), path) {
+			skipped++
+			continue
+		}
+		*p.dirs = append(*p.dirs, path)
+		a.mounts[path] = mountOK
+		added++
+	}
+	switch {
+	case added > 0 && skipped > 0:
+		a.toast = fmt.Sprintf("已添加 %d 个目录，跳过 %d 个（不是文件夹或已经在图库里）", added, skipped)
+	case added > 0:
+		a.toast = fmt.Sprintf("已添加 %d 个目录", added)
+	default:
+		a.toast = "没有可添加的文件夹（只能拖文件夹，已经在图库里的会跳过）"
+	}
 }
 
 func (a *app) removeDir(p *dirPanel, dir string) {

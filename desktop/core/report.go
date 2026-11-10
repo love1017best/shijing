@@ -89,7 +89,13 @@ type CopyResult struct {
 	PrevSelected int  `json:",omitempty"`
 	Repeated     int  `json:",omitempty"`
 	PrevByName   bool `json:",omitempty"` // 没有上一轮的记录，按壁纸文件夹里原有的文件名比的（近似）
-	Dest         string
+	// Rotated 是这一轮轮换里换上过的候选图片数（含这次），Rotated/Candidates 就是图库轮换进度；
+	// NewCycle 表示没换上过的图不够了，这次开始了新一轮。只在 PreferUnseen 时有。
+	Rotated  int          `json:",omitempty"`
+	NewCycle bool         `json:",omitempty"`
+	Bytes    int64        `json:",omitempty"` // 复制到壁纸文件夹的总字节数（软链接时为 0）
+	Sources  []SourceStat `json:",omitempty"` // 每个图库目录的统计（扫描时顺手算的）
+	Dest     string
 }
 
 // Summary 是一次完整运行的结果。
@@ -98,4 +104,11 @@ type Summary struct {
 	Copy               CopyResult
 	WallpaperRefreshed bool
 	Elapsed            time.Duration
+}
+
+// SourceStat 是一个图库目录在扫描时的情况。
+type SourceStat struct {
+	Dir     string
+	Images  int // 符合条件、可以参与采样的图片数
+	Folders int // 含图片的文件夹数
 }

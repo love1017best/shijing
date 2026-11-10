@@ -27,11 +27,12 @@ const (
 // wallpapers 是壁纸文件夹的快照。
 type wallpapers struct {
 	dir     string
-	total   int          // 文件夹里的图片数
-	hero    *ui.Bitmap   // 横幅背景；没有图片时为 nil
-	thumbs  []*ui.Bitmap // 缩略图
-	paths   []string     // 每张缩略图对应的文件，点击时打开
-	rest    []string     // 还没解码的文件（已打乱），需要更多缩略图时从这里取
+	total   int               // 文件夹里的图片数
+	hero    *ui.Bitmap        // 横幅背景；没有图片时为 nil
+	thumbs  []*ui.Bitmap      // 缩略图
+	paths   []string          // 每张缩略图对应的文件，点击时打开
+	rest    []string          // 还没解码的文件（已打乱），需要更多缩略图时从这里取
+	sources map[string]string // 壁纸文件名 → 原图路径（core.WallpaperSources）；旧版本换上的为 nil
 	loading bool
 	more    bool // 正在后台解码更多缩略图
 }
@@ -150,8 +151,9 @@ func (a *app) loadWallpapers() {
 	a.walls.loading = true
 	go func() {
 		s := a.scanWallpapers(dir)
+		sources := core.WallpaperSources(a.paths.Selection, dir)
 		a.update(func() {
-			w := wallpapers{dir: s.dir, total: s.total, paths: s.paths, rest: s.rest}
+			w := wallpapers{dir: s.dir, total: s.total, paths: s.paths, rest: s.rest, sources: sources}
 			if s.hero != nil {
 				w.hero = ui.NewBitmap(s.hero)
 			}

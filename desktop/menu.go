@@ -46,6 +46,7 @@ func setupMenu(a *app, win *mygo.Window) {
 			page("图库", "2", pageLibrary),
 			page("设置", "3", pageSettings),
 			page("归档", "4", pageArchive),
+			page("删除记录", "5", pageDeleted),
 		}},
 		{Role: mygo.RoleWindowMenu},
 	}))

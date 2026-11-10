@@ -38,6 +38,7 @@ var (
 	iconCode         = lucide(`<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>`)
 	iconPlay         = lucide(`<polygon points="6 3 20 12 6 21 6 3"/>`)
 	iconChevronRight = lucide(`<path d="m9 18 6-6-6-6"/>`)
+	iconChevronLeft  = lucide(`<path d="m15 18-6-6 6-6"/>`)
 	iconXCircle      = lucide(`<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>`)
 	iconArrowRight   = lucide(`<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>`)
 )

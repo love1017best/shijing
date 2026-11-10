@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -340,9 +341,16 @@ func TestThumbnailOpensItsImage(t *testing.T) {
 	f.wallsLoadedGen = f.wallsGen
 	tt.Frame()
 	click(t, tt, "壁纸 2")
-	if !slices.Equal(f.opened, []string{"/w/b.jpg"}) {
-		t.Errorf("点缩略图应打开那张图: %q", f.opened)
+	tt.Frame()
+	if !f.preview || !tt.HasText("b.jpg") || !tt.HasText("2 / 2") {
+		t.Errorf("点缩略图应打开大图预览: %q", tt.Texts())
 	}
+	click(t, tt, "下一张")
+	if !tt.HasText("1 / 2") {
+		t.Error("下一张应循环到第一张")
+	}
+	f.preview = false
+	tt.Frame()
 	if !tt.HasText("+7") {
 		t.Errorf("最后一格应显示剩下的张数: %q", tt.Texts())
 	}
@@ -532,5 +540,73 @@ func TestStripLayout(t *testing.T) {
 		if cols != c.wantCols || rows != c.wantRows {
 			t.Errorf("stripLayout(%v, %v, %v) = %d×%d，想要 %d×%d", c.grid, c.pageH, c.viewH, cols, rows, c.wantCols, c.wantRows)
 		}
+	}
+}
+
+func TestWallpaperActions(t *testing.T) {
+	f, _ := newFakeApp(t)
+	dir := t.TempDir()
+	wall, src := filepath.Join(dir, "wall", "s-a.jpg"), filepath.Join(dir, "lib", "s", "a.jpg")
+	for _, p := range []string{wall, src} {
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte("x"), 0o644)
+	}
+	img := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 4, 4)))
+	reset := func() {
+		os.WriteFile(wall, []byte("x"), 0o644)
+		f.walls = wallpapers{total: 1, thumbs: []*ui.Bitmap{img}, paths: []string{wall}, sources: map[string]string{"s-a.jpg": src}}
+	}
+
+	reset()
+	f.removeWallpaper(wall, true)
+	if _, err := os.Stat(wall); !os.IsNotExist(err) || len(f.walls.paths) != 0 {
+		t.Error("应从壁纸文件夹移除")
+	}
+	if !slices.Equal(f.cfg.Excluded, []string{src}) || !slices.Equal(f.buildConfig().Excluded, []string{src}) {
+		t.Errorf("应加进排除名单: %q", f.cfg.Excluded)
+	}
+
+	reset()
+	f.deleteOriginal(wall)
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Error("应删除原图")
+	}
+	if recs := core.ReadDeleteLog(f.paths.DeleteLog); len(recs) != 1 || recs[0].Path != src || recs[0].Reason != "手动删除" {
+		t.Errorf("应记进删除记录: %+v", recs)
+	}
+}
+
+func TestDeletedPageAndLibraryStats(t *testing.T) {
+	f, tt := newFakeApp(t)
+	f.cfg.FilterAndSampleDirs = []string{"/Volumes/Media0/Lib"}
+	core.LogDeletion(f.paths.DeleteLog, "/Volumes/Media0/Lib/set1/p.jpg", 3840, 2160, "竖屏 1080×1920")
+	f.lastGood = &core.Summary{Copy: core.CopyResult{Sources: []core.SourceStat{{Dir: "/Volumes/Media0/Lib", Images: 23456, Folders: 12}}}}
+	tt.Frame()
+	click(t, tt, "删除记录")
+	for _, s := range []string{"p.jpg", "竖屏 1080×1920", "共 1 张"} {
+		if !tt.HasText(s) {
+			t.Errorf("删除记录页应显示 %q: %q", s, tt.Texts())
+		}
+	}
+	click(t, tt, "图库")
+	if !tt.HasText("2.3 万 张 · 12 个文件夹 · 删过 1 张") {
+		t.Errorf("图库页应显示目录统计: %q", tt.Texts())
+	}
+}
+
+func TestAutoRunSkipsDeletion(t *testing.T) {
+	f, tt := newFakeApp(t)
+	f.cfg.FilterAndSampleDirs = []string{"/Volumes/Media0/Lib"}
+	f.cfg.DeleteDuringFilter = true
+	f.autoIdx = slices.Index(autoRunHours, 6)
+	tt.Frame()
+	f.maybeAutoRun(f.started.Add(5 * time.Hour))
+	if f.running {
+		t.Fatal("还没到时间不应运行")
+	}
+	f.maybeAutoRun(f.started.Add(6*time.Hour + time.Minute))
+	f.settle(t, tt, func() bool { return !f.running })
+	if len(f.runCfgs) != 1 || f.runCfgs[0].DeleteDuringFilter || f.runCfgs[0].AutoRunHours != 6 {
+		t.Errorf("定时运行不应删除原图: %+v", f.runCfgs)
 	}
 }

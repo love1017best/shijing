@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 )
@@ -34,6 +35,10 @@ type CopyOptions struct {
 
 	// SelectionFile 记录这一轮选中的原图路径；下一轮据此算有多少张和上一轮重复。为空则不记录。
 	SelectionFile string
+	// HistoryFile 记录这一轮轮换里换上过的原图；PreferUnseen 时优先选不在里面的。
+	HistoryFile  string
+	PreferUnseen bool
+	Excluded     []string // 不参与采样的原图
 }
 
 // sourceImage 是一张候选图片：它来自哪个源目录、文件路径是什么。
@@ -315,7 +320,8 @@ func planCopies(images []sourceImage, destDir string, o CopyOptions, archiveOver
 
 // processImages 并发复制/链接选中的图片，返回成功数、失败数和归档成功数。
 // 实测串行复制只有约 60 MB/s，6 路并发能到 110~120 MB/s（CLAUDE.md 坑 12）。
-func processImages(images []sourceImage, destDir string, o CopyOptions, archiveOverride string, rep Reporter) (copied, failed, archived int) {
+// dests 与 images 一一对应，是复制成功后在壁纸文件夹里的文件名（失败为空）；bytes 是复制的总字节数。
+func processImages(images []sourceImage, destDir string, o CopyOptions, archiveOverride string, rep Reporter) (copied, failed, archived int, dests []string, bytes int64) {
 	jobs := planCopies(images, destDir, o, archiveOverride)
 	rep = rep.synced()
 	logf := rep.logf
@@ -323,7 +329,8 @@ func processImages(images []sourceImage, destDir string, o CopyOptions, archiveO
 	if o.Mode != "copy" {
 		action = "软链接"
 	}
-	var nCopied, nFailed, nArchived, nDone atomic.Int64
+	var nCopied, nFailed, nArchived, nDone, nBytes atomic.Int64
+	dests = make([]string, len(jobs))
 	rep.progress(StageCopy, 0, len(jobs))
 	parallelFor(len(jobs), copyWorkers, func(i int) {
 		j := jobs[i]
@@ -350,6 +357,12 @@ func processImages(images []sourceImage, destDir string, o CopyOptions, archiveO
 			return
 		}
 		nCopied.Add(1)
+		dests[i] = destName
+		if o.Mode == "copy" {
+			if st, err := os.Stat(j.dest); err == nil {
+				nBytes.Add(st.Size())
+			}
+		}
 
 		switch {
 		case !o.ArchiveEnabled:
@@ -371,7 +384,7 @@ func processImages(images []sourceImage, destDir string, o CopyOptions, archiveO
 			logf("归档失败: %s - %v", srcName, err)
 		}
 	})
-	return int(nCopied.Load()), int(nFailed.Load()), int(nArchived.Load())
+	return int(nCopied.Load()), int(nFailed.Load()), int(nArchived.Load()), dests, nBytes.Load()
 }
 
 // CopySamples 扫描 → 采样 → 确认选出图片后才清空目标/归档目录并复制（CLAUDE.md 坑 10）。
@@ -414,7 +427,15 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 		logf("   分辨率筛选目录: %d 个 (最小 %dx%d, 横屏)", len(filter), o.MinWidth, o.MinHeight)
 	}
 	all, grouped, leafOrder := scanImages(o.Sources, filter, o.MinWidth, o.MinHeight, func(n int) { rep.progress(StageScan, n, 0) })
+	if len(o.Excluded) > 0 {
+		var dropped int
+		all, grouped, leafOrder, dropped = dropExcluded(all, grouped, leafOrder, o.Excluded)
+		if dropped > 0 {
+			logf("🚫 跳过 %d 张已排除的图片", dropped)
+		}
+	}
 	res.Candidates, res.LeafFolders = len(all), len(grouped)
+	res.Sources = sourceStats(o.Sources, all)
 	if len(all) == 0 {
 		return res, ErrNoImages
 	}
@@ -424,19 +445,46 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 	sampleSize := min(o.Num, len(all))
 	logf("🎯 随机选择 %d 张图片", sampleSize)
 
-	var selected []sourceImage
-	if o.BalanceFirst {
-		logf("⚖️ 使用平衡采样模式...")
-		leafCount := len(grouped)
-		total := 0
-		for _, imgs := range grouped {
-			total += len(imgs)
+	// 优先选这一轮轮换里还没换上过的：没换上过的够数就只从里面选，不够就全选上、差的从换上过的里补，
+	// 并开始新一轮（历史只留这一批）
+	var history map[string]bool
+	poolAll, poolGrouped, poolLeaves := all, grouped, leafOrder
+	var fillAll []sourceImage
+	var fillGrouped map[string][]sourceImage
+	var fillLeaves []string
+	if o.PreferUnseen && o.HistoryFile != "" {
+		history = loadHistory(o.HistoryFile)
+		unseen := func(img sourceImage) bool { return !history[img.path] }
+		uAll, uGrouped, uLeaves := subsetImages(all, grouped, leafOrder, unseen)
+		switch {
+		case len(uAll) >= sampleSize:
+			poolAll, poolGrouped, poolLeaves = uAll, uGrouped, uLeaves
+		default:
+			res.NewCycle = len(history) > 0
+			if res.NewCycle {
+				logf("🌀 没换上过的只剩 %d 张，全部选上，整个图库轮换完一遍，开始新一轮", len(uAll))
+			}
+			poolAll, poolGrouped, poolLeaves = uAll, uGrouped, uLeaves
+			fillAll, fillGrouped, fillLeaves = subsetImages(all, grouped, leafOrder, func(img sourceImage) bool { return history[img.path] })
 		}
-		logf("📁 发现 %d 个叶子文件夹，共 %d 张符合条件的图片", leafCount, total)
+	}
+	sample := func(all []sourceImage, grouped map[string][]sourceImage, leaves []string, n int) []sourceImage {
+		if o.BalanceFirst {
+			return sampleBalanced(grouped, leaves, n, r)
+		}
+		return sampleN(all, n, r)
+	}
+	selected := sample(poolAll, poolGrouped, poolLeaves, sampleSize)
+	if need := sampleSize - len(selected); need > 0 && len(fillAll) > 0 {
+		selected = append(selected, sample(fillAll, fillGrouped, fillLeaves, need)...)
+	}
+	res.Selected = len(selected)
+	if o.BalanceFirst {
+		leafCount := len(grouped)
+		logf("⚖️ 平衡采样：%d 个叶子文件夹，共 %d 张符合条件的图片", leafCount, len(all))
 		if sampleSize < leafCount {
 			logf("⚠️ 采样数量 (%d) 少于叶子文件夹数量 (%d)，无法保证每文件夹都选中", sampleSize, leafCount)
 		}
-		selected = sampleBalanced(grouped, leafOrder, sampleSize, r)
 		covered := map[string]bool{}
 		for _, img := range selected {
 			covered[filepath.Dir(img.path)] = true
@@ -447,10 +495,7 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 		}
 		logf("📊 叶子文件夹覆盖率: %d/%d (%.1f%%)", len(covered), leafCount, coverage)
 		res.CoveredFolders = len(covered)
-	} else {
-		selected = sampleN(all, sampleSize, r)
 	}
-	res.Selected = len(selected)
 
 	// 清空壁纸目录之前是最后一个"什么都没动"的时刻
 	if rep.stopped() {
@@ -491,12 +536,30 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 	}
 
 	logf("🚀 开始处理图片...")
-	res.Copied, res.Failed, res.Archived = processImages(selected, destDir, o, archiveOverride, rep)
+	var dests []string
+	res.Copied, res.Failed, res.Archived, dests, res.Bytes = processImages(selected, destDir, o, archiveOverride, rep)
 	if rep.stopped() && res.Copied+res.Failed < len(selected) {
 		logf("⏹️ 已停止：壁纸目录里保留已复制的 %d 张", res.Copied)
 		return res, ErrCanceled
 	}
-	compareSelection(o.SelectionFile, destDir, prev, selected, &res, logf)
+	compareSelection(o.SelectionFile, destDir, prev, selected, dests, &res, logf)
+	if o.PreferUnseen && o.HistoryFile != "" {
+		if res.NewCycle {
+			history = map[string]bool{}
+		}
+		for _, img := range selected {
+			history[img.path] = true
+		}
+		if err := saveHistory(o.HistoryFile, history); err != nil {
+			logf("⚠️ 记录轮换进度失败: %v", err)
+		}
+		for _, img := range all {
+			if history[img.path] {
+				res.Rotated++
+			}
+		}
+		logf("🌀 图库轮换进度：已换上过 %d / %d 张（%.0f%%）", res.Rotated, len(all), float64(res.Rotated)/float64(max(1, len(all)))*100)
+	}
 	logf("✅ 完成! 已处理 %d 张图片", len(selected))
 	logf("💾 目标目录: %s", destDir)
 	if o.ArchiveEnabled {
@@ -509,6 +572,24 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 type savedSelection struct {
 	Dest    string   `json:"dest"`
 	Sources []string `json:"sources"`
+	Dests   []string `json:"dests,omitempty"` // 与 Sources 一一对应：壁纸文件夹里的文件名（复制失败为空）
+}
+
+// WallpaperSources 返回壁纸文件夹里每个文件（文件名）对应的原图路径，界面上对缩略图做「不再选它」
+// 「删除原图」时用。没有记录或记录不是这个壁纸文件夹时返回 nil。
+func WallpaperSources(selectionFile, destDir string) map[string]string {
+	var saved savedSelection
+	data, err := os.ReadFile(selectionFile)
+	if err != nil || json.Unmarshal(data, &saved) != nil || saved.Dest != destDir || len(saved.Dests) != len(saved.Sources) {
+		return nil
+	}
+	out := make(map[string]string, len(saved.Dests))
+	for i, d := range saved.Dests {
+		if d != "" {
+			out[d] = saved.Sources[i]
+		}
+	}
+	return out
 }
 
 // prevSelection 是上一轮选了哪些图，用来算这一轮新换上几张。
@@ -555,7 +636,7 @@ func loadPrevSelection(file, destDir string) *prevSelection {
 
 // compareSelection 算这一轮选中的图里有几张上一轮也选过，再把这一轮按原图路径记下来。
 // 文件名会因为重名改写（generateFilename），所以有记录时按原图路径比，不看壁纸文件夹里的文件名。
-func compareSelection(file, destDir string, prev *prevSelection, selected []sourceImage, res *CopyResult, logf Logf) {
+func compareSelection(file, destDir string, prev *prevSelection, selected []sourceImage, dests []string, res *CopyResult, logf Logf) {
 	if file == "" {
 		return
 	}
@@ -582,7 +663,7 @@ func compareSelection(file, destDir string, prev *prevSelection, selected []sour
 		logf("🔁 和上一轮相比：新换上 %d 张，重复 %d 张（重合率 %.0f%%%s）",
 			len(cur)-res.Repeated, res.Repeated, float64(res.Repeated)/float64(len(cur))*100, note)
 	}
-	data, err := json.Marshal(savedSelection{Dest: destDir, Sources: cur})
+	data, err := json.Marshal(savedSelection{Dest: destDir, Sources: cur, Dests: dests})
 	if err == nil {
 		_ = os.MkdirAll(filepath.Dir(file), 0o755)
 		err = os.WriteFile(file, data, 0o644)
@@ -590,4 +671,94 @@ func compareSelection(file, destDir string, prev *prevSelection, selected []sour
 	if err != nil {
 		logf("⚠️ 记录本轮选中的图片失败: %v", err)
 	}
+}
+
+// dropExcluded 从扫描结果里去掉排除名单里的图片，返回去掉的张数。
+func dropExcluded(all []sourceImage, grouped map[string][]sourceImage, leafOrder []string, excluded []string) ([]sourceImage, map[string][]sourceImage, []string, int) {
+	ex := make(map[string]bool, len(excluded))
+	for _, p := range excluded {
+		ex[p] = true
+	}
+	a, g, l := subsetImages(all, grouped, leafOrder, func(img sourceImage) bool { return !ex[img.path] })
+	return a, g, l, len(all) - len(a)
+}
+
+// subsetImages 按 keep 过滤扫描结果的三种视图，去掉过滤后为空的叶子文件夹。
+func subsetImages(all []sourceImage, grouped map[string][]sourceImage, leafOrder []string, keep func(sourceImage) bool) ([]sourceImage, map[string][]sourceImage, []string) {
+	var outAll []sourceImage
+	for _, img := range all {
+		if keep(img) {
+			outAll = append(outAll, img)
+		}
+	}
+	outGrouped := map[string][]sourceImage{}
+	var outLeaves []string
+	for _, leaf := range leafOrder {
+		var here []sourceImage
+		for _, img := range grouped[leaf] {
+			if keep(img) {
+				here = append(here, img)
+			}
+		}
+		if len(here) > 0 {
+			outGrouped[leaf] = here
+			outLeaves = append(outLeaves, leaf)
+		}
+	}
+	return outAll, outGrouped, outLeaves
+}
+
+// sourceStats 按图库目录统计可参与采样的图片数和含图片的文件夹数，顺序与 sources 一致。
+func sourceStats(sources []string, all []sourceImage) []SourceStat {
+	idx := map[string]int{}
+	out := make([]SourceStat, 0, len(sources))
+	folders := make([]map[string]bool, 0, len(sources))
+	for _, s := range sources {
+		if _, dup := idx[s]; dup {
+			continue
+		}
+		idx[s] = len(out)
+		out = append(out, SourceStat{Dir: s})
+		folders = append(folders, map[string]bool{})
+	}
+	for _, img := range all {
+		i, ok := idx[img.sourceDir]
+		if !ok {
+			continue
+		}
+		out[i].Images++
+		folders[i][filepath.Dir(img.path)] = true
+	}
+	for i := range out {
+		out[i].Folders = len(folders[i])
+	}
+	return out
+}
+
+// loadHistory 读这一轮轮换里换上过的原图；读不到就是空的。
+func loadHistory(file string) map[string]bool {
+	out := map[string]bool{}
+	var paths []string
+	if data, err := os.ReadFile(file); err == nil && json.Unmarshal(data, &paths) == nil {
+		for _, p := range paths {
+			out[p] = true
+		}
+	}
+	return out
+}
+
+func saveHistory(file string, history map[string]bool) error {
+	paths := make([]string, 0, len(history))
+	for p := range history {
+		paths = append(paths, p)
+	}
+	slices.Sort(paths)
+	data, err := json.Marshal(paths)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(file, data, 0o644)
 }
