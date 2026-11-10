@@ -4,6 +4,7 @@ package main
 // SHOTS_DIR=$PWD/../docs/screenshots CGO_ENABLED=0 go test -run TestScreenshots .
 
 import (
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -111,6 +112,13 @@ func TestScreenshots(t *testing.T) {
 	if dir == "" {
 		t.Skip()
 	}
+	var meta struct{ Version string }
+	if data, err := os.ReadFile("mygo.json"); err != nil || json.Unmarshal(data, &meta) != nil {
+		t.Fatal("读不到 mygo.json 的版本号")
+	}
+	version := meta.Version
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	walls := t.TempDir()
 	for i, p := range pals {
 		f, _ := os.Create(filepath.Join(walls, "demo"+string(rune('a'+i))+".jpg"))
@@ -124,7 +132,10 @@ func TestScreenshots(t *testing.T) {
 			suffix = "-dark"
 		}
 		f, _ := newFakeApp(t)
-		f.version = "0.2.104"
+		f.version = version
+		// 「关于」页显示数据目录：放进假的家目录里，显示成 ~/Library/Application Support/拾景，
+		// 不露出本机的临时目录，也不会写到真实的配置
+		f.cfgPath = filepath.Join(home, "Library", "Application Support", appName, "config.json")
 		f.statDir = func(string) bool { return true }
 		f.scanWallpapers = func(d string) scannedWallpapers { s := scanWallpapers(walls); s.dir = d; return s }
 		f.cfg.FilterAndSampleDirs = []string{"/Volumes/NAS/Photos/风景", "/Volumes/NAS/Photos/旅行", "/Volumes/NAS/Photos/城市"}
