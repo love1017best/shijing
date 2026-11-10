@@ -49,8 +49,15 @@ func (a *app) view(c *ui.Context) {
 		ui.Column(c).Grow(1).MinWidth(0).Background(pageBg(t)).Children(func() {
 			// 隐藏标题栏后，内容区顶部这一条用来拖动窗口
 			ui.Box(c).Height(max(c.TitleBar().Height, 24)).Shrink(0).DragWindow()
-			ui.Scroll(c).Grow(1).Children(func() {
-				ui.Column(c).Padding(0, 36, 32, 36).Gap(22).MaxWidth(contentMax).Children(func() {
+			sc := ui.Scroll(c).Grow(1)
+			a.viewH = sc.LayoutBounds().H
+			sc.Children(func() {
+				col := ui.Column(c).Padding(0, 36, 32, 36).Gap(22)
+				if a.page != pageOverview {
+					col.MaxWidth(contentMax) // 设置之类的表单太宽不好读；概览页铺满窗口，缩略图跟着变多
+				}
+				a.pageH = col.LayoutBounds().H
+				col.Children(func() {
 					switch a.page {
 					case pageLibrary:
 						a.libraryPage(c)
@@ -278,6 +285,30 @@ func (a *app) stoppedWithCopies() bool {
 	return a.last != nil && errors.Is(a.last.err, core.ErrCanceled) && a.last.sum.Copy.Copied > 0
 }
 
+const (
+	stripGap      = 10
+	stripAspect   = 16.0 / 10
+	stripMinThumb = 132 // 缩略图最窄多宽（DIP），据此决定列数
+)
+
+// stripLayout 按上一帧量到的尺寸算缩略图网格的列数和行数：列数让每张不窄于 stripMinThumb，
+// 行数尽量填满窗口里剩下的高度（页面其余部分的高度 = 整页高度 - 网格高度，跟行数无关，所以不会来回跳）。
+// 第一帧还没量到尺寸时按默认窗口算（6 列 1 行）。
+func stripLayout(grid ui.Rect, pageH, viewH float32) (cols, rows int) {
+	cols, rows = 6, 1
+	if grid.W <= 0 {
+		return cols, rows
+	}
+	cols = max(4, min(12, int((grid.W+stripGap)/(stripMinThumb+stripGap))))
+	cellH := (grid.W - stripGap*float32(cols-1)) / float32(cols) / stripAspect
+	if grid.H <= 0 || pageH <= 0 || viewH <= 0 {
+		return cols, rows
+	}
+	free := viewH - (pageH - grid.H)
+	rows = max(1, min(6, int((free+stripGap)/(cellH+stripGap))))
+	return cols, rows
+}
+
 // thumbStrip 是当前壁纸的缩略图条：点一张用默认应用打开它，最后一格打开整个文件夹。
 // 运行中壁纸文件夹正在被清空重写，缩略图是上一批的，调暗并且不能点。
 func (a *app) thumbStrip(c *ui.Context) {
@@ -286,13 +317,26 @@ func (a *app) thumbStrip(c *ui.Context) {
 	if w.total == 0 && !w.loading {
 		return
 	}
-	grid := ui.Grid(c).Columns(stripThumbs + 1).Gap(10).Disabled(a.running)
+	grid := ui.Grid(c).Gap(stripGap).Disabled(a.running)
+	cols, rows := stripLayout(grid.LayoutBounds(), a.pageH, a.viewH)
+	if cols != a.stripCols || rows != a.stripRows {
+		// 尺寸是上一帧量的，变了就再排一帧，让网格跟上窗口大小
+		a.stripCols, a.stripRows = cols, rows
+		c.AnimationFrame()
+	}
+	cells := cols*rows - 1 // 最后一格是「+N / 打开文件夹」
+	shown := min(cells, len(w.thumbs))
+	if w.loading || w.more {
+		shown = cells // 还在解码：先用占位格撑住
+	}
+	a.loadMoreThumbs(cells)
+	grid.Columns(cols)
 	if a.running {
 		grid.Opacity(0.4).Tooltip("正在换壁纸，这是上一批")
 	}
 	grid.Children(func() {
-		for i := range stripThumbs {
-			cell := ui.Box(c).AspectRatio(16.0 / 10).Radius(9).Clip().Background(hairline(t)).
+		for i := range shown {
+			cell := ui.Box(c).AspectRatio(stripAspect).Radius(9).Clip().Background(hairline(t)).
 				Label(fmt.Sprintf("壁纸 %d", i+1))
 			if i >= len(w.thumbs) {
 				continue
@@ -305,13 +349,13 @@ func (a *app) thumbStrip(c *ui.Context) {
 				a.openPath(w.paths[i])
 			}
 		}
-		more := ui.ButtonBase(c).AspectRatio(16.0/10).Radius(9).Center().Column().Gap(2).
+		more := ui.ButtonBase(c).AspectRatio(stripAspect).Radius(9).Center().Column().Gap(2).
 			Background(panelBg(t)).Border(1, hairline(t)).Label("查看全部壁纸").Tooltip("在 Finder 中打开壁纸文件夹")
 		if more.Hovered() {
 			more.Background(t.SurfaceHover)
 		}
 		more.Children(func() {
-			if rest := w.total - len(w.thumbs); rest > 0 {
+			if rest := w.total - shown; rest > 0 && !w.loading {
 				ui.Text(c, fmt.Sprintf("+%d", rest)).FontSize(17).Bold()
 				ui.Text(c, "查看全部").FontSize(11).TextColor(t.TextMuted)
 			} else {

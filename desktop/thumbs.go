@@ -13,12 +13,15 @@ import (
 	"golang.org/x/image/draw"
 )
 
-// 概览页展示当前壁纸：一张做横幅背景，其余做缩略图条。
+// 概览页展示当前壁纸：一张做横幅背景，其余做缩略图网格。网格的行列数跟着窗口大小变（stripLayout），
+// 先解码够一屏常见大小的缩略图，窗口拉大需要更多时再从剩下的文件里接着解码（loadMoreThumbs）。
 // 只读本地的壁纸文件夹（dest_dir），不碰 NAS；解码和缩小都在后台完成。
 const (
-	stripThumbs = 5    // 缩略图条显示几张（最后再加一格「+N」）
-	heroWidth   = 1600 // 横幅图缩到的宽度（像素，Retina 下约 800 DIP）
-	thumbWidth  = 360  // 缩略图宽度（像素）
+	initialThumbs = 11   // 第一次解码几张缩略图（默认窗口两行 × 6 列，减去「+N」那格）
+	maxThumbs     = 71   // 最多显示几张（stripLayout 的上限：6 行 × 12 列 - 1）
+	decodeWorkers = 4    // 同时解码几张：原图可能是几千万像素，全部同时解码内存吃不消
+	heroWidth     = 1600 // 横幅图缩到的宽度（像素，Retina 下约 800 DIP）
+	thumbWidth    = 360  // 缩略图宽度（像素）
 )
 
 // wallpapers 是壁纸文件夹的快照。
@@ -28,7 +31,9 @@ type wallpapers struct {
 	hero    *ui.Bitmap   // 横幅背景；没有图片时为 nil
 	thumbs  []*ui.Bitmap // 缩略图
 	paths   []string     // 每张缩略图对应的文件，点击时打开
+	rest    []string     // 还没解码的文件（已打乱），需要更多缩略图时从这里取
 	loading bool
+	more    bool // 正在后台解码更多缩略图
 }
 
 // scannedWallpapers 是后台扫描的结果（image.Image 在主线程上才转成 Bitmap）。
@@ -38,9 +43,10 @@ type scannedWallpapers struct {
 	hero   image.Image
 	thumbs []image.Image
 	paths  []string
+	rest   []string
 }
 
-// scanWallpapers 列出文件夹里的图片，随机挑几张解码、缩小。读不了的图片直接跳过。
+// scanWallpapers 列出文件夹里的图片，打乱后解码横幅图和前几张缩略图。读不了的图片直接跳过。
 func scanWallpapers(dir string) scannedWallpapers {
 	res := scannedWallpapers{dir: dir}
 	entries, err := os.ReadDir(dir)
@@ -57,33 +63,50 @@ func scanWallpapers(dir string) scannedWallpapers {
 	res.total = len(files)
 	rand.Shuffle(len(files), func(i, j int) { files[i], files[j] = files[j], files[i] })
 
-	// 多挑几张备用：个别文件解码失败时仍能凑满
-	pick := files[:min(len(files), stripThumbs+4)]
-	decoded := make([]image.Image, len(pick))
-	var wg sync.WaitGroup
-	for i, f := range pick {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			width := thumbWidth
-			if i == 0 {
-				width = heroWidth
-			}
-			decoded[i] = loadScaled(f, width)
-		}()
-	}
-	wg.Wait()
-	for i, img := range decoded {
-		switch {
-		case img == nil:
-		case res.hero == nil && img.Bounds().Dx() >= thumbWidth*2:
+	// 横幅图要够宽；第一张不够宽（或读不了）就往后找，最多试几张
+	for len(files) > 0 && res.hero == nil {
+		f := files[0]
+		files = files[1:]
+		img := loadScaled(f, heroWidth)
+		if img == nil {
+			continue
+		}
+		if img.Bounds().Dx() >= thumbWidth*2 {
 			res.hero = img
-		case len(res.thumbs) < stripThumbs:
-			res.thumbs = append(res.thumbs, shrink(img, thumbWidth))
-			res.paths = append(res.paths, pick[i])
+			break
+		}
+		res.thumbs, res.paths = append(res.thumbs, shrink(img, thumbWidth)), append(res.paths, f)
+	}
+	thumbs, paths, rest := decodeThumbs(files, initialThumbs-len(res.thumbs))
+	res.thumbs, res.paths, res.rest = append(res.thumbs, thumbs...), append(res.paths, paths...), rest
+	return res
+}
+
+// decodeThumbs 从 files 里按顺序解码出 n 张缩略图（读不了的跳过、往后补），返回剩下没碰过的文件。
+func decodeThumbs(files []string, n int) (thumbs []image.Image, paths, rest []string) {
+	for n > 0 && len(files) > 0 {
+		batch := files[:min(len(files), n)]
+		files = files[len(batch):]
+		decoded := make([]image.Image, len(batch))
+		sem := make(chan struct{}, decodeWorkers)
+		var wg sync.WaitGroup
+		for i, f := range batch {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer func() { <-sem; wg.Done() }()
+				decoded[i] = loadScaled(f, thumbWidth)
+			}()
+		}
+		wg.Wait()
+		for i, img := range decoded {
+			if img != nil {
+				thumbs, paths = append(thumbs, img), append(paths, batch[i])
+				n--
+			}
 		}
 	}
-	return res
+	return thumbs, paths, files
 }
 
 // loadScaled 解码一张图片并缩到 width 像素宽（不放大）。
@@ -128,7 +151,7 @@ func (a *app) loadWallpapers() {
 	go func() {
 		s := a.scanWallpapers(dir)
 		a.update(func() {
-			w := wallpapers{dir: s.dir, total: s.total, paths: s.paths}
+			w := wallpapers{dir: s.dir, total: s.total, paths: s.paths, rest: s.rest}
 			if s.hero != nil {
 				w.hero = ui.NewBitmap(s.hero)
 			}
@@ -140,6 +163,31 @@ func (a *app) loadWallpapers() {
 			if core.ExpandUser(a.cfg.DestDir) != dir {
 				a.loadWallpapers()
 			}
+		})
+	}()
+}
+
+// loadMoreThumbs 在后台再解码几张缩略图，凑够 want 张（窗口拉大、网格放得下更多时）。
+func (a *app) loadMoreThumbs(want int) {
+	w := &a.walls
+	need := min(want, maxThumbs) - len(w.thumbs)
+	if need <= 0 || len(w.rest) == 0 || w.more || w.loading || a.update == nil {
+		return
+	}
+	w.more = true
+	dir, files, before := w.dir, w.rest, len(w.thumbs)
+	go func() {
+		thumbs, paths, rest := decodeThumbs(files, need)
+		a.update(func() {
+			w := &a.walls
+			if w.dir != dir || !w.more || len(w.thumbs) != before { // 期间重新读过壁纸文件夹，这批作废
+				return
+			}
+			w.more = false
+			for _, t := range thumbs {
+				w.thumbs = append(w.thumbs, ui.NewBitmap(t))
+			}
+			w.paths, w.rest = append(w.paths, paths...), rest
 		})
 	}()
 }

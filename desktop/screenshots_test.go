@@ -4,6 +4,7 @@ package main
 // SHOTS_DIR=$PWD/../docs/screenshots CGO_ENABLED=0 go test -run TestScreenshots .
 
 import (
+	"fmt"
 	"encoding/json"
 	"image"
 	"image/color"
@@ -120,9 +121,9 @@ func TestScreenshots(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	walls := t.TempDir()
-	for i, p := range pals {
-		f, _ := os.Create(filepath.Join(walls, "demo"+string(rune('a'+i))+".jpg"))
-		jpeg.Encode(f, landscape(1920, 1080, p, float64(i)+0.3), &jpeg.Options{Quality: 90})
+	for i := range 3 * len(pals) { // 够填满几行缩略图
+		f, _ := os.Create(filepath.Join(walls, fmt.Sprintf("demo%02d.jpg", i)))
+		jpeg.Encode(f, landscape(1920, 1080, pals[i%len(pals)], float64(i)+0.3), &jpeg.Options{Quality: 90})
 		f.Close()
 	}
 
@@ -179,7 +180,7 @@ func TestScreenshots(t *testing.T) {
 						return false
 					}
 				}
-				return !f.walls.loading && f.walls.hero != nil
+				return !f.walls.loading && !f.walls.more && f.walls.hero != nil
 			})
 			tt.Advance(2 * time.Second)
 			tt.Frame()

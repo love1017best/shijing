@@ -514,3 +514,23 @@ func TestOverlapPercent(t *testing.T) {
 		}
 	}
 }
+
+func TestStripLayout(t *testing.T) {
+	for _, c := range []struct {
+		grid               ui.Rect
+		pageH, viewH       float32
+		wantCols, wantRows int
+	}{
+		{ui.Rect{}, 0, 0, 6, 1},                    // 第一帧还没量到
+		{ui.Rect{W: 750, H: 90}, 900, 700, 5, 1},   // 页面已经比窗口高：只放一行
+		{ui.Rect{W: 750, H: 90}, 700, 1000, 5, 4},  // 剩 390 高：每格 88.75 高，4 行加 3 个间距 385
+		{ui.Rect{W: 1100, H: 90}, 700, 2000, 7, 6}, // 再高也最多 6 行
+		{ui.Rect{W: 400, H: 90}, 700, 700, 4, 1},   // 很窄也至少 4 列
+		{ui.Rect{W: 3000, H: 90}, 700, 700, 12, 1}, // 很宽最多 12 列
+	} {
+		cols, rows := stripLayout(c.grid, c.pageH, c.viewH)
+		if cols != c.wantCols || rows != c.wantRows {
+			t.Errorf("stripLayout(%v, %v, %v) = %d×%d，想要 %d×%d", c.grid, c.pageH, c.viewH, cols, rows, c.wantCols, c.wantRows)
+		}
+	}
+}

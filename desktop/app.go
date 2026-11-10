@@ -116,10 +116,13 @@ type app struct {
 	wallsLoadedGen int
 
 	// 以下由 main 注入：真实窗口里是 Window.Update / 系统对话框，测试里是假的实现。
-	update   func(fn func())             // 在主线程上执行 fn 并重绘
-	pickDir  func(title string) string   // 选择目录，取消返回 ""
-	pickFile func(title string) string   // 选择 JSON 配置文件，取消返回 ""
-	showErr  func(title, message string) // 弹出错误提示（不阻塞调用方）
+	// 概览页缩略图网格：上一帧量到的可视高度、整页高度，和据此算出的行列数（stripLayout）
+	viewH, pageH         float32
+	stripCols, stripRows int
+	update               func(fn func())             // 在主线程上执行 fn 并重绘
+	pickDir              func(title string) string   // 选择目录，取消返回 ""
+	pickFile             func(title string) string   // 选择 JSON 配置文件，取消返回 ""
+	showErr              func(title, message string) // 弹出错误提示（不阻塞调用方）
 	// confirmDelete 在运行前确认会删除原图（会阻塞，后台调用）；返回是否继续、是否勾了「不再提示」。
 	// 为 nil 时不确认（测试）。
 	confirmDelete func(detail string) (ok, dontAsk bool)
