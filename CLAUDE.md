@@ -116,6 +116,7 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
   - 通用版（Intel + Apple Silicon，纯 Go 无 cgo 所以直接支持）：`go tool mygo build -skip-notarize -platform darwin/universal` → `build/darwin-universal/shi-jing-<版本>.dmg`（文件名不带架构）
   - Apple Silicon 版（体积约一半，本机运行的也是它）：`go tool mygo build -skip-notarize` → `build/darwin-arm64/shi-jing-<版本>-arm64.dmg`
 - 发布顺序：代码先提交并推送 → 给那个提交打 tag `v<版本>` 并推送 → `gh release create v<版本> <通用版 dmg> <arm64 dmg> --verify-tag --title "拾景 v<版本>" --notes ...`。`--target` 不认短 sha，所以先打 tag。说明开头写清两个包怎么选。
+- 发布到 `origin`（`love1017best/shijing`）。本地还有指向旧历史的 tag（`python-final`、`v0.2.104`、`v0.2.105`）和 `legacy` 远端，**不要 `git push --tags`**，否则会把旧历史推到公开仓库；tag 一律单独推。
 - 说明里写这一版的改动，并注明是 ad-hoc 签名、未公证（别的 Mac 首次打开要右键「打开」）。仓库是私有的。
 
 ## 调试小抄
