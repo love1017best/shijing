@@ -131,6 +131,11 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 本机没装完整 Xcode 时，Swift 代码用命令行工具在 macOS SDK 上类型检查（命令见 `ios/README.md`）；必须用 `MacOSX26.5.sdk`，27.x 的 SwiftUI `@State` 是宏、命令行工具缺宏插件。iOS 专有修饰符包在 `PairView.swift` 底部的 `iOSKeyboard` / `iOSInlineTitle` 等扩展里。
 - 两边 JSON 对接验证过的方法：写个临时的 Go 测试用 `newRemoteHarness` 起服务并把地址和令牌写到文件，再用 `swiftc Models.swift APIClient.swift main.swift` 编一个命令行客户端去连。时间字段一律用 Unix 秒（Go 的 RFC3339 纳秒精度 Swift 解析不稳）。
 
+### 15. 横竖屏要按 EXIF 方向判断（v0.3.16）
+不少照片是「像素横着存 + EXIF Orientation 标记转 90°」：像素 6240×4160，系统壁纸、Finder、预览里显示的却是 4160×6240 的竖图（例：`[织梦映像]NO.098 …/0163.jpg`，Orientation=8）。以前 `ImageVerdict` 只看 `image.DecodeConfig` 的像素宽高，这种竖图被当成横屏选进壁纸。现在先用 `core/orientation.go` 的 `exifOrientation`（纯 Go，只读 JPEG 的 APP1 / TIFF 的 IFD0）读方向，5–8 时宽高互换再判断。2026-11 只读统计：全库 27464 张里有 287 张因此从合格变成竖屏。
+- `sips -g orientation` 对这张图报 `<nil>`，但 PIL 的 `getexif()[274]` 是 8——**查方向别信 sips**，用 PIL 或 `exifOrientation`。
+- 判断逻辑改了要把 `sorter.go` 的 `verdictRules` 加 1：它记在增量状态的 `thresholds.rules` 里，不一样就整体重扫，否则以前判过、之后没动过的目录会一直被跳过，新规则永远不生效。
+
 ## 两个会话并行开发（2026-11-11 起）
 
 macOS 端和 iOS 端分别由不同的会话负责，**两个会话共用同一个工作区**（同一个 checkout、都在 `main` 上，没有各自的 worktree）。所以：

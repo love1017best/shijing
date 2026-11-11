@@ -169,6 +169,12 @@ func TestSortImagesIncremental(t *testing.T) {
 	if !strings.Contains(strings.Join(lines, "\n"), "增量缓存已失效") {
 		t.Error("阈值变化应提示缓存失效")
 	}
+	// 判断规则升级（旧版本的状态文件里没有 rules）也让缓存失效
+	run(tw)
+	os.WriteFile(paths.StateFile, []byte(`{"thresholds":{"min_width":`+fmt.Sprint(tw)+`,"min_height":`+fmt.Sprint(th)+`},"dirs":{"`+dir+`":1}}`), 0o644)
+	if lines := run(tw); skippedIn(lines) || !strings.Contains(strings.Join(lines, "\n"), "增量缓存已失效") {
+		t.Error("判断规则变了应全量重新检查")
+	}
 }
 
 func TestCopySamplesNoImagesKeepsDest(t *testing.T) {

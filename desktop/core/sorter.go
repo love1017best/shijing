@@ -56,7 +56,13 @@ func dirMtime(dir string) float64 {
 type thresholds struct {
 	MinWidth  int `json:"min_width"`
 	MinHeight int `json:"min_height"`
+	// Rules 是判断规则的版本：ImageVerdict 的逻辑改了就加 1，让旧的增量缓存失效，
+	// 否则以前判过、之后没动过的目录会一直被跳过，新规则对它们永远不生效。
+	// 2：按 EXIF 方向转正后再判断横竖屏（v0.3.16）
+	Rules int `json:"rules,omitempty"`
 }
+
+const verdictRules = 2
 
 type sorterState struct {
 	Thresholds *thresholds        `json:"thresholds,omitempty"`
@@ -163,10 +169,10 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 		state = loadState(o.StateFile)
 	}
 	// 阈值变了就让旧缓存整体失效（CLAUDE.md 坑 10），否则调严分辨率后没变化的目录会被一直跳过
-	th := thresholds{o.MinWidth, o.MinHeight}
+	th := thresholds{o.MinWidth, o.MinHeight, verdictRules}
 	if o.Incremental && (state.Thresholds == nil || *state.Thresholds != th) {
 		if len(state.Dirs) > 0 {
-			logf("🔄 筛选阈值与上次不同，增量缓存已失效，本次将全量重新检查")
+			logf("🔄 筛选阈值或判断规则与上次不同，增量缓存已失效，本次将全量重新检查")
 		}
 		state = sorterState{}
 	}

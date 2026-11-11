@@ -6,6 +6,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -32,7 +33,7 @@ func IsValidImage(path string) bool {
 	return validImageExtensions[strings.ToLower(filepath.Ext(path))]
 }
 
-// CheckImageResolution 判断图片是否横屏（宽高比 > 1.1）且不小于最小分辨率。
+// CheckImageResolution 判断图片是否横屏（宽高比 > 1.1）且不小于最小分辨率；按显示方向（EXIF）算宽高。
 // image.DecodeConfig 只解析文件头，不解码整张图（PIL 的 Image.open 同样是惰性读取）。
 // 打不开/解析失败的图片视为不合格，与 Python 版一致。
 func CheckImageResolution(path string, minWidth, minHeight int) bool {
@@ -47,9 +48,17 @@ func ImageVerdict(path string, minWidth, minHeight int) (ok bool, reason string)
 		return false, "打不开"
 	}
 	defer f.Close()
+	// 先读 EXIF 方向：转 90° 显示的（5–8）按转过来的宽高判断（见 exifOrientation）
+	orient := exifOrientation(f)
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false, "打不开"
+	}
 	cfg, _, err := image.DecodeConfig(f)
 	if err != nil || cfg.Height == 0 {
 		return false, "无法解析"
+	}
+	if orient >= 5 {
+		cfg.Width, cfg.Height = cfg.Height, cfg.Width
 	}
 	size := fmt.Sprintf("%d×%d", cfg.Width, cfg.Height)
 	switch ratio := float64(cfg.Width) / float64(cfg.Height); {
