@@ -130,6 +130,53 @@ struct APIClient: Sendable {
         try await send(request("POST", "api/wallpapers/\(name)/delete", body: [:]), as: RemoteState.self)
     }
 
+    // MARK: 设置、日志、记录（第 3 期）
+
+    /// 改常用设置：只传要改的字段（键名同 RemoteSettings 的蛇形命名）。
+    func updateSettings(_ changes: [String: Any]) async throws -> RemoteState {
+        try await send(request("POST", "api/settings", body: changes), as: RemoteState.self)
+    }
+
+    /// 电脑上的运行日志（最近 400 行）。
+    func log() async throws -> [String] {
+        struct R: Decodable { var lines: [String] }
+        return try await send(request("GET", "api/log"), as: R.self).lines
+    }
+
+    /// 撤销最近一次移出（和电脑上 ⌘Z 是同一个撤销栈）。
+    func undo() async throws -> RemoteState {
+        try await send(request("POST", "api/undo", body: [:]), as: RemoteState.self)
+    }
+
+    private struct ExcludedR: Decodable { var items: [ExcludedItem] }
+
+    func excluded() async throws -> [ExcludedItem] {
+        try await send(request("GET", "api/excluded"), as: ExcludedR.self).items
+    }
+
+    /// 从「不再选」名单里拿掉：paths 为 nil 时全部恢复。返回剩下的名单。
+    func restoreExcluded(_ paths: [String]?) async throws -> [ExcludedItem] {
+        let body: [String: Any] = paths.map { ["paths": $0] } ?? ["all": true]
+        return try await send(request("POST", "api/excluded/restore", body: body), as: ExcludedR.self).items
+    }
+
+    func deletions() async throws -> DeletionList {
+        try await send(request("GET", "api/deletions"), as: DeletionList.self)
+    }
+
+    /// 下载壁纸的原文件到临时目录（文件名不变），分享 / 存相册用。
+    func downloadOriginal(_ name: String) async throws -> URL {
+        let req = request("GET", "api/wallpapers/\(name)/original", timeout: 120)
+        let (tmp, resp) = try await Self.session.download(for: req)
+        try Self.check(resp, data: (try? Data(contentsOf: tmp)).flatMap { $0.count < 4096 ? $0 : nil })
+        let dir = FileManager.default.temporaryDirectory.appending(path: "originals", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dst = dir.appending(path: name)
+        try? FileManager.default.removeItem(at: dst)
+        try FileManager.default.moveItem(at: tmp, to: dst)
+        return dst
+    }
+
     /// 状态事件流（SSE）：连上先收到一次当前状态，之后状态变了就收到一次。
     func events() -> AsyncThrowingStream<RemoteState, Error> {
         let req = request("GET", "api/events", timeout: 30)

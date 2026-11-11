@@ -3,6 +3,9 @@
 <plist version="1.0">
 <dict>
 	<!-- 其余键由 project.yml 里的 INFOPLIST_KEY_* 生成；这里只放那种方式写不了的数组/字典 -->
+	<!-- 和小组件共用的钥匙串组（带团队前缀，见 Shared/SharedKeychain.swift） -->
+	<key>ShiJingKeychainGroup</key>
+	<string>$(AppIdentifierPrefix)com.love1017best.shijing.shared</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_shijing._tcp</string>

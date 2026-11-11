@@ -57,6 +57,7 @@ struct DashboardView: View {
             } else {
                 List {
                     connectionSection
+                    signingSection
                     statusSection(state)
                     controlSection(state)
                     wallsSection(rows: 3)
@@ -90,6 +91,7 @@ struct DashboardView: View {
             HStack(alignment: .top, spacing: 0) {
                 List {
                     connectionSection
+                    signingSection
                     wallsSection(rows: 3)
                 }
                 // 列表的边距不算安全区（内屏横放时右边有传感器区），自己加上，和顶部卡片对齐
@@ -257,7 +259,7 @@ struct DashboardView: View {
 
     /// 当前壁纸：前几张缩略图，点开看大图、长按整理；「全部」进整个网格。
     @ViewBuilder private func wallsSection(rows: Int) -> some View {
-        if !session.walls.isEmpty {
+        if !session.walls.isEmpty || session.state?.undoName != nil {
             Section {
                 WallGrid(session: session, rows: rows)
                     .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))
@@ -266,6 +268,7 @@ struct DashboardView: View {
                 } label: {
                     LabeledContent("全部壁纸", value: "\(session.walls.count) 张")
                 }
+                UndoRemoveButton(session: session)
             } header: {
                 Text("当前壁纸")
             } footer: {
@@ -361,21 +364,25 @@ struct DashboardView: View {
         }
     }
 
-    private func overviewSection(_ s: RemoteState) -> some View {
-        Section {
-            LabeledContent("壁纸文件夹", value: s.dest)
-            LabeledContent("现在有", value: "\(s.wallpapers) 张")
-            LabeledContent("每次换", value: "\(s.sampleCount) 张")
-            LabeledContent("图库目录", value: "\(s.libraryDirs) 个")
-            if let next = s.nextAutoDate {
-                LabeledContent("下次自动换") {
-                    Text(next, format: .dateTime.month().day().hour().minute())
+    @ViewBuilder private func overviewSection(_ s: RemoteState) -> some View {
+        SettingsSection(session: session, state: s)
+        RecordsSection(session: session, state: s)
+    }
+
+    /// 免费签名快到期（剩不到 2 天）时顶部提醒重新安装。
+    @ViewBuilder private var signingSection: some View {
+        if SigningExpiry.isSoon, let text = SigningExpiry.text {
+            Section {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(SigningExpiry.isExpired ? "签名已经到期" : "签名\(text)").font(.subheadline.bold())
+                        Text("免费签名只有 7 天，到期后拾景就打不开了。连上电脑重新安装一次就能续上。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "clock.badge.exclamationmark").foregroundStyle(.orange)
                 }
             }
-        } header: {
-            Text("设置")
-        } footer: {
-            Text("要改设置请在电脑上改。电脑上拾景 \(s.version.isEmpty ? "开发版" : "v" + s.version)。")
         }
     }
 }

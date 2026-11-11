@@ -1,13 +1,15 @@
 import Foundation
 import Observation
-import Security
 
 /// 配对过的 Mac 列表（UserDefaults）和它们的令牌（钥匙串）。
 @Observable @MainActor
 final class MacStore {
     private(set) var macs: [SavedMac] = []
     var selectedID: SavedMac.ID? {
-        didSet { UserDefaults.standard.set(selectedID?.uuidString, forKey: Self.selectedKey) }
+        didSet {
+            UserDefaults.standard.set(selectedID?.uuidString, forKey: Self.selectedKey)
+            publishCurrent()
+        }
     }
 
     private static let macsKey = "savedMacs"
@@ -24,6 +26,7 @@ final class MacStore {
         } else {
             selectedID = macs.first?.id
         }
+        publishCurrent()
     }
 
     var selected: SavedMac? { macs.first { $0.id == selectedID } }
@@ -70,37 +73,15 @@ final class MacStore {
         if let data = try? JSONEncoder().encode(macs) {
             UserDefaults.standard.set(data, forKey: Self.macsKey)
         }
-    }
-}
-
-/// 令牌存在钥匙串里，每台 Mac 一条。
-enum Keychain {
-    private static let service = "com.love1017best.shijing.ios.token"
-
-    private static func query(_ id: UUID) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: service,
-         kSecAttrAccount as String: id.uuidString]
+        publishCurrent()
     }
 
-    static func set(_ token: String, for id: UUID) {
-        delete(id)
-        var q = query(id)
-        q[kSecValueData as String] = Data(token.utf8)
-        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(q as CFDictionary, nil)
-    }
-
-    static func get(_ id: UUID) -> String? {
-        var q = query(id)
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var out: AnyObject?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func delete(_ id: UUID) {
-        SecItemDelete(query(id) as CFDictionary)
+    /// 把选中的这台 Mac（地址和令牌）写进共享钥匙串，小组件和快捷指令用它（它们读不到这里的 UserDefaults）。
+    private func publishCurrent() {
+        guard let mac = selected, let token = Keychain.get(mac.id) else {
+            CurrentMac.clear()
+            return
+        }
+        CurrentMac(name: mac.name, host: mac.host, port: mac.port, token: token).save()
     }
 }

@@ -293,17 +293,26 @@ struct WallPreview: View {
 
     // MARK: 顶栏、底栏
 
+    /// 顶栏：左边关闭、撤销移出，右边分享原图，编号在正中（不管两边有几个按钮）。
     private var topBar: some View {
-        HStack {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark").font(.body.weight(.semibold)).frame(width: 36, height: 36)
+        HStack(spacing: 10) {
+            circleButton("xmark", label: "关闭") { dismiss() }
+            if let undo = session.state?.undoName {
+                circleButton("arrow.uturn.backward", label: "撤销移出 \(undo)") {
+                    Task {
+                        if let n = await session.undoRemove(), walls.contains(where: { $0.name == n }) { go(to: n) }
+                    }
+                }
+                .disabled(session.acting != nil || session.state?.running == true)
             }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.circle)
-            .accessibilityLabel("关闭")
             Spacer()
+            if let wall {
+                ShareOriginalButton(session: session, wall: wall)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.circle)
+            }
+        }
+        .overlay {
             if let index {
                 Button {
                     jumpText = ""
@@ -324,6 +333,15 @@ struct WallPreview: View {
         .padding(.top, 8)
         .padding(.bottom, 8)
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { topBarBottom = $0 }
+    }
+
+    private func circleButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.body.weight(.semibold)).frame(width: 36, height: 36)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(label)
     }
 
     private func bottomBar(_ w: Wallpaper) -> some View {

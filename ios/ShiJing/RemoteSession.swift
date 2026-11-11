@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// 和一台 Mac 的连接：保持事件流、断了自动重连，提供「换一批」「停止」。
 @Observable @MainActor
@@ -52,6 +55,36 @@ final class RemoteSession {
         task = nil
     }
 
+    #if os(iOS)
+    private var bgTask: UIBackgroundTaskIdentifier = .invalid
+    #endif
+
+    /// 进了后台：正在换壁纸的话向系统多要一会儿后台时间，继续连着，换完能发通知；没在换就直接断开。
+    func enterBackground() {
+        #if os(iOS)
+        guard state?.running == true, bgTask == .invalid else {
+            if bgTask == .invalid { pause() }
+            return
+        }
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "等这次换完") { [weak self] in
+            MainActor.assumeIsolated { self?.endBackground(disconnect: true) }
+        }
+        #else
+        pause()
+        #endif
+    }
+
+    /// 回到前台（或者后台时间用完）。
+    func endBackground(disconnect: Bool) {
+        #if os(iOS)
+        if disconnect { pause() }
+        if bgTask != .invalid {
+            UIApplication.shared.endBackgroundTask(bgTask)
+            bgTask = .invalid
+        }
+        #endif
+    }
+
     private func loop() async {
         var delay: Double = 1
         var failures = 0
@@ -59,7 +92,13 @@ final class RemoteSession {
             if state == nil { connection = .connecting }
             do {
                 for try await s in try client().events() {
+                    RunNotifier.observe(old: state, new: s, mac: mac.name)
+                    if state?.running == true, !s.running { WidgetReload.all() }
                     state = s
+                    #if os(iOS)
+                    // 在后台等的这次换完了：通知已经发了，断开
+                    if !s.running, bgTask != .invalid { endBackground(disconnect: true); return }
+                    #endif
                     connection = .live
                     if s.wallsRev != wallsRev { Task { await refreshWalls() } }
                     delay = 1
@@ -103,11 +142,60 @@ final class RemoteSession {
     }
 
     func run(deleteOriginals: Bool) async {
+        Notifications.requestOnce()
         await act { try await $0.run(deleteOriginals: deleteOriginals) }
+        WidgetReload.all()
     }
 
     func stop() async {
         await act { try await $0.stop() }
+    }
+
+    // MARK: 设置、撤销（第 3 期）
+
+    /// 正在保存的设置项（界面上对应那一行转圈）
+    private(set) var savingSettings = false
+
+    /// 改常用设置：只传要改的字段。失败时弹提示，界面回到电脑上的值。
+    func updateSettings(_ changes: [String: Any]) async {
+        #if DEBUG
+        if Self.demoMode != nil, var set = state?.settings { // 演示模式：只改本地
+            if let n = changes["sample_count"] as? Int { set.sampleCount = n; state?.sampleCount = n }
+            if let h = changes["auto_run_hours"] as? Int { set.autoRunHours = h }
+            if let v = changes["delete_during_filter"] as? Bool { set.deleteDuringFilter = v }
+            if let v = changes["prefer_unseen"] as? Bool { set.preferUnseen = v }
+            if let v = changes["refresh_wallpaper"] as? Bool { set.refreshWallpaper = v }
+            state?.settings = set
+            return
+        }
+        #endif
+        savingSettings = true
+        defer { savingSettings = false }
+        do {
+            state = try await client().updateSettings(changes)
+        } catch APIError.unauthorized(let msg) {
+            connection = .unpaired(msg)
+        } catch {
+            actionError = Self.describe(error)
+        }
+    }
+
+    /// 撤销最近一次移出：放回壁纸文件夹原来的位置。成功时返回放回去的那张的文件名。
+    @discardableResult
+    func undoRemove() async -> String? {
+        guard let name = state?.undoName else { return nil }
+        acting = name
+        defer { acting = nil }
+        do {
+            state = try await client().undo()
+            await refreshWalls()
+            return name
+        } catch APIError.unauthorized(let msg) {
+            connection = .unpaired(msg)
+        } catch {
+            actionError = Self.describe(error)
+        }
+        return nil
     }
 
     // MARK: 壁纸
@@ -201,6 +289,10 @@ extension RemoteSession {
                                          elapsed: 73, brief: "重合 4% · 删 3 张",
                                          detail: "和上一轮相比：新换上 288 张，重复 12 张（重合率 4%）\n筛选删除 3 张\n覆盖 300 / 415 个文件夹"),
             nextAuto: now + 6 * 3600, wallpapers: 300, wallsRev: "demo", dest: "~/Pictures/Wallpapers0", sampleCount: 300, libraryDirs: 3)
+        s.state?.settings = RemoteSettings(sampleCount: 300, autoRunHours: 6, autoOptions: [0, 6, 12, 24, 168],
+                                           deleteDuringFilter: true, preferUnseen: true, refreshWallpaper: true)
+        s.state?.undoName = running ? nil : "风景-京都-0012.jpg"
+        s.state?.excluded = 12
         s.connection = .live
         let places = ["冰岛", "阿尔卑斯", "京都", "黄石", "新西兰", "巴塔哥尼亚", "挪威", "托斯卡纳", "大理", "落基山"]
         s.walls = (0..<300).map { i in

@@ -35,6 +35,12 @@ struct RemoteState: Codable, Equatable {
     var dest: String
     var sampleCount: Int
     var libraryDirs: Int
+    /// 手机上能改的几项设置（第 3 期；旧版桌面端没有，界面上就只读）
+    var settings: RemoteSettings?
+    /// 最近一次可以撤销的移出（壁纸文件名）
+    var undoName: String?
+    /// 「不再选」名单里有几张
+    var excluded: Int?
 
     var nextAutoDate: Date? { nextAuto.map { Date(timeIntervalSince1970: $0) } }
 }
@@ -52,6 +58,54 @@ struct LastRun: Codable, Equatable {
     var detail: String?
 
     var date: Date { Date(timeIntervalSince1970: at) }
+}
+
+/// 手机上能改的设置（desktop/remoteextra.go 的 remoteSettings）。
+struct RemoteSettings: Codable, Equatable {
+    var sampleCount: Int
+    /// 0 表示不自动换
+    var autoRunHours: Int
+    var autoOptions: [Int]
+    var deleteDuringFilter: Bool
+    var preferUnseen: Bool
+    var refreshWallpaper: Bool
+
+    /// 和桌面端 autoRunLabel 一样的说法。
+    static func autoLabel(_ h: Int) -> String {
+        switch h {
+        case ...0: "关闭"
+        case 24: "每天"
+        case 168: "每周"
+        case let h where h % 24 == 0: "每 \(h / 24) 天"
+        default: "每 \(h) 小时"
+        }
+    }
+}
+
+/// 「不再选」名单里的一张原图。
+struct ExcludedItem: Codable, Identifiable, Hashable {
+    /// 完整路径（恢复时原样传回去）
+    var path: String
+    /// ~ 缩写的路径
+    var display: String
+    var id: String { path }
+    var name: String { (display as NSString).lastPathComponent }
+    var folder: String { (display as NSString).deletingLastPathComponent }
+}
+
+/// 删除记录里的一条。
+struct Deletion: Codable, Identifiable, Hashable {
+    var at: Double
+    var name: String
+    var dir: String
+    var reason: String?
+    var id: String { "\(at)|\(dir)/\(name)" }
+    var date: Date { Date(timeIntervalSince1970: at) }
+}
+
+struct DeletionList: Codable {
+    var total: Int
+    var items: [Deletion]
 }
 
 /// 壁纸文件夹里的一张（desktop/remotewalls.go 的 remoteWall）。

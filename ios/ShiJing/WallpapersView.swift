@@ -169,3 +169,84 @@ extension View {
         #endif
     }
 }
+
+/// 「撤销移出」：放回最近一次移出的那张（和电脑上 ⌘Z 是同一个撤销栈）。
+struct UndoRemoveButton: View {
+    let session: RemoteSession
+    var onUndone: ((String) -> Void)? = nil
+
+    var body: some View {
+        if let name = session.state?.undoName {
+            Button {
+                Task {
+                    if let n = await session.undoRemove() { onUndone?(n) }
+                }
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("撤销移出")
+                        Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+                } icon: {
+                    if session.acting == name { ProgressView() } else { Image(systemName: "arrow.uturn.backward") }
+                }
+            }
+            .disabled(session.acting != nil || session.state?.running == true)
+        }
+    }
+}
+
+/// 分享 / 存原图：先从电脑下载原文件（不是 2048 宽的预览图），下完弹系统分享面板（里面有「存储图像」）。
+struct ShareOriginalButton: View {
+    let session: RemoteSession
+    let wall: Wallpaper
+    @State private var loading = false
+    @State private var file: SharedFile?
+
+    var body: some View {
+        Button {
+            Task { await load() }
+        } label: {
+            ZStack {
+                Image(systemName: "square.and.arrow.up").opacity(loading ? 0 : 1)
+                if loading { ProgressView() }
+            }
+            .font(.body.weight(.semibold)).frame(width: 36, height: 36)
+        }
+        .disabled(loading)
+        .accessibilityLabel("分享原图")
+        .sheet(item: $file) { f in
+            ActivitySheet(items: [f.url]).ignoresSafeArea()
+        }
+    }
+
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        do {
+            file = SharedFile(url: try await session.client().downloadOriginal(wall.name))
+        } catch {
+            session.actionError = RemoteSession.describe(error)
+        }
+    }
+}
+
+struct SharedFile: Identifiable {
+    let url: URL
+    var id: URL { url }
+}
+
+#if os(iOS)
+struct ActivitySheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+#else
+struct ActivitySheet: View {
+    let items: [Any]
+    var body: some View { Text("只在 iOS 上可用") }
+}
+#endif

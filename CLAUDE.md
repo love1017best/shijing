@@ -131,6 +131,11 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - iOS 的开发语言必须是 `zh-Hans`（`project.yml` 的 `developmentLanguage`）：App 没有中文本地化时 `Locale.current` 会退回英文，日期、系统按钮都显示成英文（踩过）。
 - iOS 端没有侧栏（v0.3.21 起，用户嫌宽屏上占地方、连 Mac 只有第一次装时用）：一台都没配对时整屏是 `SetupView`（附近的 Mac + 手动输入地址）；配对过之后只有遥控面板，切换 / 添加 / 管理 Mac 在标题菜单里（`macTitleMenu`，点顶部 Mac 名字）。「附近的 Mac」只在有界面显示它时才用 Bonjour 搜索（`Discovery.want(名字, 开关)`）：首次配对页和「添加其他 Mac」弹层。
 - 本机没装完整 Xcode 时，Swift 代码用命令行工具在 macOS SDK 上类型检查（命令见 `ios/README.md`）；必须用 `MacOSX26.5.sdk`，27.x 的 SwiftUI `@State` 是宏、命令行工具缺宏插件。iOS 专有修饰符包在 `PairView.swift` 底部的 `iOSKeyboard` / `iOSInlineTitle` 等扩展里。
+- 第 3 期（v0.3.100，`desktop/remoteextra.go`）：状态里加了 `settings`（手机能改的几项）、`undo_name`、`excluded`；`POST /api/settings`（只改传了的字段，改的是界面状态，下一帧 autosave 写盘）、`GET /api/log`、`POST /api/undo`（桌面 `undoRemove`，同一个撤销栈）、`GET /api/excluded` / `POST /api/excluded/restore`、`GET /api/deletions`、`GET /api/wallpapers/{name}/original`。旧版桌面没有 `settings`，手机上设置就只读、不显示「记录」。
+- 小组件（`ios/ShiJingWidget`，bundle id `….ios.widget`）和快捷指令（`Shared/Intents.swift`）读不到 App 的 UserDefaults：**免费签名没有 App Groups，但钥匙串共享能用**（2026-11-11 真机签名验证过）。令牌和 `CurrentMac` 存在共享组里，组名带团队前缀，靠 Info.plist 的 `ShiJingKeychainGroup = $(AppIdentifierPrefix)…` 在构建时展开；模拟器没签名时退回默认组。旧版本存在默认组里的令牌读到时自动挪进共享组。`MacStore` 选中的 Mac 变了就写 `CurrentMac`。
+- 换完发通知没有推送可用：App 进后台时如果正在换，用 `beginBackgroundTask` 多连 ~30 秒；小组件运行中按分钟刷新。两边经 `RunNotifier` 共用钥匙串里「通知过的那次 `last.at`」，第一次只记不发，结束超过 15 分钟的不发。通知权限在第一次从手机换一批时才问。
+- 签名到期：`SigningExpiry` 读 `embedded.mobileprovision` 的 `ExpirationDate`；模拟器里用启动参数 `-demoExpiring` 假装 36 小时后到期，看提醒横幅。
+- `release.sh --version X.Y.Z` 直接发成指定版本（v0.3.100 就是这样发的），只在用户要求某个版本号时用。
 - 两边 JSON 对接验证过的方法：写个临时的 Go 测试用 `newRemoteHarness` 起服务并把地址和令牌写到文件，再用 `swiftc Models.swift APIClient.swift main.swift` 编一个命令行客户端去连。时间字段一律用 Unix 秒（Go 的 RFC3339 纳秒精度 Swift 解析不稳）。
 
 ### 15. 横竖屏要按 EXIF 方向判断（v0.3.18）
@@ -148,7 +153,7 @@ macOS 端和 iOS 端分别由不同的会话负责，**两个会话共用同一�
 - **构建、安装、发布只用这三个脚本**，它们共用一把锁（`desktop/scripts/lock.zsh`，锁文件在 `.git/shijing-build.lock`），两个会话同时跑时后来的会排队等，不会抢 `build/` 目录、同时替换 `/Applications/拾景.app` 或撞版本号：
   - `desktop/scripts/install-local.sh`：构建 macOS 并装到 `/Applications`、启动；连着 iPhone / iPad 时再构建 iOS 装到设备上并启动。**哪一端改了都跑它**，两端都会重新安装运行（iOS 会话也一样，不要只装手机）。
   - `desktop/scripts/install-ios-device.sh`：只装手机，`install-local.sh` 会自动调，一般不单独用。
-  - `desktop/scripts/release.sh`：发布，见下面「发布规则」。
+  - `desktop/scripts/release.sh`：发布，见下面「发布规则」（`--version X.Y.Z` 发成指定版本，只在用户要求时用）。
 - 不要手动走发布步骤、不要手动 `bump-version.sh`、不要手动打 tag。
 
 ## 版本号规则（用户规定）

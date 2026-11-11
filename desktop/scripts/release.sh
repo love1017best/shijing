@@ -4,6 +4,8 @@
 # 用法：scripts/release.sh --macos "这一版 macOS 的改动（Markdown 列表）" --ios "iOS 的改动"
 #       某一端没改就不传那一项，说明里写「无改动，仅同步版本号」。
 #       --dry-run 走一遍全部检查和构建，但不推送、不建 Release、不安装（验证脚本用）。
+#       --version 0.4.0 直接发成这个版本（不是 Z 加 1）。只在用户明确要求某个版本号时用，
+#       大版本 X.Y 只在用户要求时改；要比当前版本大。
 #       --ios-note "…" 替换 iOS 一节末尾的验证说明（默认按有没有连着手机自动写）。
 #
 # 做的事（全程持有构建锁，另一个会话的构建 / 安装 / 发布会排队等）：
@@ -18,13 +20,14 @@
 #   5. gh release create，然后用这个 dmg 装到本机并启动；连着 iPhone / iPad 时把同一个 tag 的 iOS 版也装上。
 set -euo pipefail
 
-MACOS="" IOS="" IOS_NOTE="" DRY=""
+MACOS="" IOS="" IOS_NOTE="" DRY="" WANT=""
 while (($#)); do
 	case $1 in
 	--macos) MACOS=$2; shift 2 ;;
 	--ios) IOS=$2; shift 2 ;;
 	--ios-note) IOS_NOTE=$2; shift 2 ;;
 	--dry-run) DRY=1; shift ;;
+	--version) WANT=${2#v}; shift 2 ;;
 	*) echo "不认识的参数：$1"; exit 2 ;;
 	esac
 done
@@ -70,7 +73,13 @@ for attempt in 1 2 3; do
 	cleanup
 	WT=$(mktemp -d -t shijing-release)
 	git worktree add -q --detach "$WT" HEAD
-	"$WT/desktop/scripts/bump-version.sh" >/dev/null
+	if [[ -n "$WANT" ]]; then
+		CUR=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' desktop/mygo.json | head -1)
+		if [[ "$WANT" == "$CUR" || "$(printf '%s\n%s\n' "$CUR" "$WANT" | sort -V | tail -1)" != "$WANT" ]]; then
+			echo "--version $WANT 不比当前的 $CUR 大"; cleanup; exit 2
+		fi
+	fi
+	"$WT/desktop/scripts/bump-version.sh" ${WANT:+"$WANT"} >/dev/null
 	VERSION=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$WT/desktop/mygo.json" | head -1)
 	if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
 		echo "远端已经有 v$VERSION，同步后重来"

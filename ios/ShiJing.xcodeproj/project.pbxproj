@@ -7,45 +7,121 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0503A2CCB8354AC748CE77A2 /* ShiJingWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5CF0981B7D45E7EE853F6988 /* ShiJingWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		099E53CA17FB750EED57745A /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CD57E5BA5441C8D0006947 /* DashboardView.swift */; };
-		0BAE969FA5B1F7CEA43055C5 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725B2CCDED437B4D2F84E0BD /* Models.swift */; };
-		1AB452A220F4A1469B9CCD00 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2824E0235535F38B05ADDF55 /* APIClient.swift */; };
 		21220E16DFE4ED934EEDE0FB /* Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */; };
+		297D4087083FCA357AF3B09A /* SharedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EDDF3D91E21A5E5D546ED41 /* SharedKeychain.swift */; };
+		2D6FB6DB4849F9E87ABED805 /* WidgetReload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 442B2E2EDAFCEC723F7A4D25 /* WidgetReload.swift */; };
 		32FAC1FD1E3F25C80AC63004 /* PairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F148DFA81C0AF1A9841A39B7 /* PairView.swift */; };
+		36635EB138FF8A4B6698EC3A /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B88ED75230843E7FF61E79A /* APIClient.swift */; };
+		3C9BB507068538CA83EED149 /* ShiJingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51973C6B54D5C302A82E3E3F /* ShiJingWidget.swift */; };
+		3E45D53F7AFBDF56529446CF /* AppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37262552F84556E74C66F4C5 /* AppShortcuts.swift */; };
+		4BF86FE7CE0BC9485AD18F1C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA83EAF792D5624EEA3CE11 /* Models.swift */; };
+		6360079382418D5385977F25 /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5FA3660DB88F64E7D64A4B9 /* Intents.swift */; };
 		679FCD5B5F3188967A723F62 /* WallpapersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27D8BD3049F3539DD7DA7537 /* WallpapersView.swift */; };
+		695F85C3B4BD9A53C77CB8F3 /* SettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7B5E8EBEC71B92C27E0F19 /* SettingsSection.swift */; };
+		69B1EC2E2F6D67EBB58E6001 /* WidgetReload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 442B2E2EDAFCEC723F7A4D25 /* WidgetReload.swift */; };
+		833A421C3683C30CFFAE31B1 /* RunNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */; };
 		94215927670239EE363E48CE /* ShiJingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04551D48684EF104173433F5 /* ShiJingApp.swift */; };
+		964F2B423059D88E93FE60F2 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B88ED75230843E7FF61E79A /* APIClient.swift */; };
 		BD12CD4B6997209CA3570CAB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EBBECD2386D5DFE983684B8F /* Assets.xcassets */; };
+		C1D57C628AAC10FA1D1BF907 /* RunNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */; };
+		CB821EEC8C60F998A6F25950 /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5FA3660DB88F64E7D64A4B9 /* Intents.swift */; };
+		D30F6878DC0FD0D245B8FDE3 /* SharedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EDDF3D91E21A5E5D546ED41 /* SharedKeychain.swift */; };
 		D6C6708F80AFC875451C3BDD /* RemoteSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D7F2A21A98AC8FD6910260 /* RemoteSession.swift */; };
 		D7E126223CA530FF96744B6D /* ImageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */; };
 		DA6264799C3CF66C5F9F9994 /* MacStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */; };
+		DCBBD1C38B5665384A54DF8F /* SigningExpiry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08A32667B20E7EAE1496A917 /* SigningExpiry.swift */; };
+		ED3B0A4451922C1D686A69E1 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA83EAF792D5624EEA3CE11 /* Models.swift */; };
 		F223669D3393FCDE9438804C /* MacListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FB9144ACC689795E105A27 /* MacListView.swift */; };
 		FF9B90C2D43F0864EF77A022 /* WallPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB7F89AA01677C0EB4EEDE4A /* WallPreview.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		BCD50C84B731CA8F1F065221 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 167FEB59C8D3B6AA8ACE5D84 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C54544C9ACEA98DC5362D3EA;
+			remoteInfo = ShiJingWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C51A13DF432028C64EB20211 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0503A2CCB8354AC748CE77A2 /* ShiJingWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		00B81837B22F5D8DBD7084AF /* ShiJing.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ShiJing.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		04551D48684EF104173433F5 /* ShiJingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiJingApp.swift; sourceTree = "<group>"; };
+		08A32667B20E7EAE1496A917 /* SigningExpiry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningExpiry.swift; sourceTree = "<group>"; };
+		0DBEDCD43C90E27D6891E91E /* ShiJingWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShiJingWidget.entitlements; sourceTree = "<group>"; };
 		15FB9144ACC689795E105A27 /* MacListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacListView.swift; sourceTree = "<group>"; };
 		1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
 		27D8BD3049F3539DD7DA7537 /* WallpapersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpapersView.swift; sourceTree = "<group>"; };
-		2824E0235535F38B05ADDF55 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunNotifier.swift; sourceTree = "<group>"; };
+		2EDDF3D91E21A5E5D546ED41 /* SharedKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedKeychain.swift; sourceTree = "<group>"; };
 		35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacStore.swift; sourceTree = "<group>"; };
+		37262552F84556E74C66F4C5 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
+		442B2E2EDAFCEC723F7A4D25 /* WidgetReload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetReload.swift; sourceTree = "<group>"; };
+		4E2CF36D4F4743785C376FFE /* ShiJing.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShiJing.entitlements; sourceTree = "<group>"; };
+		51973C6B54D5C302A82E3E3F /* ShiJingWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiJingWidget.swift; sourceTree = "<group>"; };
 		57D7F2A21A98AC8FD6910260 /* RemoteSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSession.swift; sourceTree = "<group>"; };
+		5C9A72A38A9D6D87D9C1E560 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		5CF0981B7D45E7EE853F6988 /* ShiJingWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShiJingWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		6AC7C4670660D49C3BD8F942 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		725B2CCDED437B4D2F84E0BD /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		6B88ED75230843E7FF61E79A /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageStore.swift; sourceTree = "<group>"; };
 		A5CD57E5BA5441C8D0006947 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		B5FA3660DB88F64E7D64A4B9 /* Intents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents.swift; sourceTree = "<group>"; };
+		BCA83EAF792D5624EEA3CE11 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		D86F178096ED4F9BDCD820EE /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		DB7F89AA01677C0EB4EEDE4A /* WallPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallPreview.swift; sourceTree = "<group>"; };
+		E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 		EBBECD2386D5DFE983684B8F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F148DFA81C0AF1A9841A39B7 /* PairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
+		FA7B5E8EBEC71B92C27E0F19 /* SettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSection.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		1CA2F933A40B3AA14032DC11 /* ShiJingWidget */ = {
+			isa = PBXGroup;
+			children = (
+				5C9A72A38A9D6D87D9C1E560 /* Info.plist */,
+				0DBEDCD43C90E27D6891E91E /* ShiJingWidget.entitlements */,
+				51973C6B54D5C302A82E3E3F /* ShiJingWidget.swift */,
+			);
+			path = ShiJingWidget;
+			sourceTree = "<group>";
+		};
+		4B4F561ECE75FDCA5FDCA861 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				6B88ED75230843E7FF61E79A /* APIClient.swift */,
+				B5FA3660DB88F64E7D64A4B9 /* Intents.swift */,
+				BCA83EAF792D5624EEA3CE11 /* Models.swift */,
+				2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */,
+				2EDDF3D91E21A5E5D546ED41 /* SharedKeychain.swift */,
+				442B2E2EDAFCEC723F7A4D25 /* WidgetReload.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		7A7FFB7893F7EF30AC7C2713 = {
 			isa = PBXGroup;
 			children = (
 				FB414A10773FB24DBAFE3C48 /* ShiJing */,
+				1CA2F933A40B3AA14032DC11 /* ShiJingWidget */,
 				DAD7F89B526DB1E019E9E94D /* Products */,
 			);
 			sourceTree = "<group>";
@@ -54,6 +130,7 @@
 			isa = PBXGroup;
 			children = (
 				00B81837B22F5D8DBD7084AF /* ShiJing.app */,
+				5CF0981B7D45E7EE853F6988 /* ShiJingWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,21 +138,25 @@
 		FB414A10773FB24DBAFE3C48 /* ShiJing */ = {
 			isa = PBXGroup;
 			children = (
-				2824E0235535F38B05ADDF55 /* APIClient.swift */,
+				37262552F84556E74C66F4C5 /* AppShortcuts.swift */,
 				EBBECD2386D5DFE983684B8F /* Assets.xcassets */,
 				A5CD57E5BA5441C8D0006947 /* DashboardView.swift */,
 				1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */,
 				A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */,
 				6AC7C4670660D49C3BD8F942 /* Info.plist */,
+				E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */,
 				15FB9144ACC689795E105A27 /* MacListView.swift */,
 				35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */,
-				725B2CCDED437B4D2F84E0BD /* Models.swift */,
 				F148DFA81C0AF1A9841A39B7 /* PairView.swift */,
 				57D7F2A21A98AC8FD6910260 /* RemoteSession.swift */,
+				FA7B5E8EBEC71B92C27E0F19 /* SettingsSection.swift */,
+				4E2CF36D4F4743785C376FFE /* ShiJing.entitlements */,
 				04551D48684EF104173433F5 /* ShiJingApp.swift */,
 				D86F178096ED4F9BDCD820EE /* Signing.xcconfig */,
+				08A32667B20E7EAE1496A917 /* SigningExpiry.swift */,
 				27D8BD3049F3539DD7DA7537 /* WallpapersView.swift */,
 				DB7F89AA01677C0EB4EEDE4A /* WallPreview.swift */,
+				4B4F561ECE75FDCA5FDCA861 /* Shared */,
 			);
 			path = ShiJing;
 			sourceTree = "<group>";
@@ -83,16 +164,35 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		C54544C9ACEA98DC5362D3EA /* ShiJingWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8BBA1A1A99BE52622F015CE7 /* Build configuration list for PBXNativeTarget "ShiJingWidget" */;
+			buildPhases = (
+				E8F88A3BFCADE2A9B4781B7C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ShiJingWidget;
+			packageProductDependencies = (
+			);
+			productName = ShiJingWidget;
+			productReference = 5CF0981B7D45E7EE853F6988 /* ShiJingWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		F25BEF7220A5AE49341BF708 /* ShiJing */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = EF8843569E6111897DE74B77 /* Build configuration list for PBXNativeTarget "ShiJing" */;
 			buildPhases = (
 				DBE980467F319F8FF1F67092 /* Sources */,
 				98D6D7B15A6E1169B66B1486 /* Resources */,
+				C51A13DF432028C64EB20211 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B7FED1C671E03A1FD1E8936C /* PBXTargetDependency */,
 			);
 			name = ShiJing;
 			packageProductDependencies = (
@@ -110,6 +210,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					C54544C9ACEA98DC5362D3EA = {
+						ProvisioningStyle = Automatic;
+					};
 					F25BEF7220A5AE49341BF708 = {
 						ProvisioningStyle = Automatic;
 					};
@@ -130,6 +233,7 @@
 			projectRoot = "";
 			targets = (
 				F25BEF7220A5AE49341BF708 /* ShiJing */,
+				C54544C9ACEA98DC5362D3EA /* ShiJingWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -150,24 +254,73 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1AB452A220F4A1469B9CCD00 /* APIClient.swift in Sources */,
+				964F2B423059D88E93FE60F2 /* APIClient.swift in Sources */,
+				3E45D53F7AFBDF56529446CF /* AppShortcuts.swift in Sources */,
 				099E53CA17FB750EED57745A /* DashboardView.swift in Sources */,
 				21220E16DFE4ED934EEDE0FB /* Discovery.swift in Sources */,
 				D7E126223CA530FF96744B6D /* ImageStore.swift in Sources */,
+				CB821EEC8C60F998A6F25950 /* Intents.swift in Sources */,
 				F223669D3393FCDE9438804C /* MacListView.swift in Sources */,
 				DA6264799C3CF66C5F9F9994 /* MacStore.swift in Sources */,
-				0BAE969FA5B1F7CEA43055C5 /* Models.swift in Sources */,
+				4BF86FE7CE0BC9485AD18F1C /* Models.swift in Sources */,
 				32FAC1FD1E3F25C80AC63004 /* PairView.swift in Sources */,
 				D6C6708F80AFC875451C3BDD /* RemoteSession.swift in Sources */,
+				833A421C3683C30CFFAE31B1 /* RunNotifier.swift in Sources */,
+				695F85C3B4BD9A53C77CB8F3 /* SettingsSection.swift in Sources */,
+				297D4087083FCA357AF3B09A /* SharedKeychain.swift in Sources */,
 				94215927670239EE363E48CE /* ShiJingApp.swift in Sources */,
+				DCBBD1C38B5665384A54DF8F /* SigningExpiry.swift in Sources */,
 				FF9B90C2D43F0864EF77A022 /* WallPreview.swift in Sources */,
 				679FCD5B5F3188967A723F62 /* WallpapersView.swift in Sources */,
+				2D6FB6DB4849F9E87ABED805 /* WidgetReload.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E8F88A3BFCADE2A9B4781B7C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				36635EB138FF8A4B6698EC3A /* APIClient.swift in Sources */,
+				6360079382418D5385977F25 /* Intents.swift in Sources */,
+				ED3B0A4451922C1D686A69E1 /* Models.swift in Sources */,
+				C1D57C628AAC10FA1D1BF907 /* RunNotifier.swift in Sources */,
+				D30F6878DC0FD0D245B8FDE3 /* SharedKeychain.swift in Sources */,
+				3C9BB507068538CA83EED149 /* ShiJingWidget.swift in Sources */,
+				69B1EC2E2F6D67EBB58E6001 /* WidgetReload.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		B7FED1C671E03A1FD1E8936C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C54544C9ACEA98DC5362D3EA /* ShiJingWidget */;
+			targetProxy = BCD50C84B731CA8F1F065221 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		1EB6B7EABAEB11462C159AF0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShiJingWidget/ShiJingWidget.entitlements;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ShiJingWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "拾景";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.love1017best.shijing.ios.widget;
+				PRODUCT_NAME = ShiJingWidget;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		283261BEA96A078F7B23238D /* Release */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = D86F178096ED4F9BDCD820EE /* Signing.xcconfig */;
@@ -228,16 +381,38 @@
 			};
 			name = Release;
 		};
+		3BFEDE7C2AE01A81FBCB6EC5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShiJingWidget/ShiJingWidget.entitlements;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ShiJingWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "拾景";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.love1017best.shijing.ios.widget;
+				PRODUCT_NAME = ShiJingWidget;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		502061483AA2F004C69363BC /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ShiJing/ShiJing.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ShiJing/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "拾景";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "拾景要在局域网里找到你的 Mac，并遥控上面的拾景换壁纸。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "把壁纸的原图存到相册。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -325,11 +500,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ShiJing/ShiJing.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ShiJing/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "拾景";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "拾景要在局域网里找到你的 Mac，并遥控上面的拾景换壁纸。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "把壁纸的原图存到相册。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -348,6 +525,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		8BBA1A1A99BE52622F015CE7 /* Build configuration list for PBXNativeTarget "ShiJingWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1EB6B7EABAEB11462C159AF0 /* Debug */,
+				3BFEDE7C2AE01A81FBCB6EC5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		D484C52BF846770739692F26 /* Build configuration list for PBXProject "ShiJing" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

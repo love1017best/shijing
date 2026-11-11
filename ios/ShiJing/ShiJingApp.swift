@@ -1,7 +1,13 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct ShiJingApp: App {
+    init() {
+        RunNotifier.isForeground = { UIApplication.shared.applicationState == .active }
+        Notifications.setUp()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -38,10 +44,11 @@ struct RootView: View {
             switch phase {
             case .active:
                 discovery.setPaused(false)
+                session?.endBackground(disconnect: false)
                 session?.start()
             case .background:
                 discovery.setPaused(true)
-                session?.pause()
+                session?.enterBackground()
             default:
                 break
             }
@@ -66,5 +73,37 @@ struct RootView: View {
         let s = RemoteSession(mac: mac, store: store)
         session = s
         s.start()
+    }
+}
+
+/// 本地通知：换完了、签名快到期。权限在第一次从手机换一批时再问（不一上来就弹）。
+@MainActor
+enum Notifications {
+    private static let delegate = ForegroundDelegate()
+
+    static func setUp() {
+        UNUserNotificationCenter.current().delegate = delegate
+        Task {
+            // 已经允许过才排签名到期提醒；没问过的等第一次换一批时问
+            let s = await UNUserNotificationCenter.current().notificationSettings()
+            if s.authorizationStatus == .authorized { SigningExpiry.scheduleReminder() }
+        }
+    }
+
+    static func requestOnce() {
+        Task {
+            let center = UNUserNotificationCenter.current()
+            guard await center.notificationSettings().authorizationStatus == .notDetermined else { return }
+            if (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) == true {
+                SigningExpiry.scheduleReminder()
+            }
+        }
+    }
+
+    /// App 在前台时也显示通知横幅（签名到期提醒；换完的通知在前台本来就不发）。
+    private final class ForegroundDelegate: NSObject, UNUserNotificationCenterDelegate {
+        func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+            [.banner, .sound]
+        }
     }
 }
