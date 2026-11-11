@@ -4,7 +4,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 品牌色取自应用图标：暮色紫做主色，太阳的暖黄做点缀。
+// 强调色是橙色（用户喜欢，v0.3.11 起；iOS 的 AccentColor 要保持一致）。暮色紫只用在横幅插画里，取自应用图标。
 var (
 	sunGlow   = ui.Hex("#FDE7B8")
 	duskTop   = ui.Hex("#2A2470")
@@ -25,13 +25,15 @@ const (
 func applyTheme(c *ui.Context) *ui.Theme {
 	t := *c.Theme()
 	if t.Dark {
-		t.Accent = ui.Oklch(0.62, 0.17, 288)
-		t.AccentHover = ui.Oklch(0.67, 0.17, 288)
-		t.AccentPressed = ui.Oklch(0.57, 0.17, 288)
+		// #E56900：深色底上对比度约 5:1，白字约 3.3:1（按钮文字是粗体，够用）
+		t.Accent = ui.Oklch(0.66, 0.18, 50)
+		t.AccentHover = ui.Oklch(0.71, 0.17, 52)
+		t.AccentPressed = ui.Oklch(0.61, 0.18, 48)
 	} else {
-		t.Accent = ui.Oklch(0.52, 0.19, 287)
-		t.AccentHover = ui.Oklch(0.47, 0.19, 287)
-		t.AccentPressed = ui.Oklch(0.43, 0.18, 287)
+		// #E45C00：白字约 3.6:1；再浅就发黄、白字看不清
+		t.Accent = ui.Oklch(0.64, 0.19, 47)
+		t.AccentHover = ui.Oklch(0.60, 0.19, 46)
+		t.AccentPressed = ui.Oklch(0.56, 0.18, 45)
 	}
 	t.AccentText = ui.RGB(255, 255, 255)
 	t.Focus = t.Accent.Alpha(0.5)
