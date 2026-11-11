@@ -288,7 +288,7 @@ func (a *app) thumbStrip(c *ui.Context) {
 	})
 }
 
-// statStrip 是一条四格的摘要：图库、采样（轮换进度）、自动换、上次运行。画质这类纯设置不放这里。
+// statStrip 是一条摘要：图库、采样（轮换进度）、自动换（打开了才有）、上次运行。画质这类纯设置不放这里。
 func (a *app) statStrip(c *ui.Context) {
 	t := c.Theme()
 	dirs := a.allDirs()
@@ -331,12 +331,11 @@ func (a *app) statStrip(c *ui.Context) {
 			sub = "平衡采样"
 		}
 		cell(1, "采样", value, sub, t.TextMuted, tip)
-		auto, next := "关闭", "只在手动点「换一批」时换"
+		// 定时自动换（设置里的「自动换壁纸」）没打开时不占一格
 		if h := a.buildConfig().AutoRunHours; h > 0 {
-			auto = autoRunLabel(h)
-			next = "下一次 " + a.nextAutoRun().Format("1月2日 15:04")
+			cell(2, "自动换", autoRunLabel(h), "下一次 "+a.nextAutoRun().Format("1月2日 15:04"), t.TextMuted,
+				"应用开着时按这个间隔自动换一批（不删原图），在「设置 → 自动换壁纸」里修改或关闭")
 		}
-		cell(2, "自动换", auto, next, t.TextMuted, "")
 
 		switch r := a.last; {
 		case r == nil:

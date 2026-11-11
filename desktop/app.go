@@ -93,8 +93,9 @@ type previewState struct {
 	previewImg     *ui.Bitmap
 	previewFor     string // previewImg 是哪个文件的
 	confirmDelSrc  bool
-	pendingDelWall string // 要删除原图的那张壁纸（壁纸文件夹里的路径）
-	jumpBuf        string // 正在输入的跳转编号
+	pendingDelWall string  // 要删除原图的那张壁纸（壁纸文件夹里的路径）
+	jumpBuf        string  // 正在输入的跳转编号
+	wheelAcc       float32 // 触控板滚动攒下的距离，够一页翻一张（wheelStep）
 	undo           []removedWall
 	undoSeq        int
 }

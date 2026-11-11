@@ -1,11 +1,12 @@
 package main
 
 import (
+	"hash/fnv"
 	"image"
 	"maps"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"desktop/core"
@@ -22,10 +23,11 @@ const (
 	maxThumbs     = 71   // 最多显示几张（stripLayout 的上限：6 行 × 12 列 - 1）
 	decodeWorkers = 4    // 同时解码几张：原图可能是几千万像素，全部同时解码内存吃不消
 	heroWidth     = 1600 // 横幅图缩到的宽度（像素，Retina 下约 800 DIP）
+	previewWidth  = 3200 // 大图预览解码到的宽度（像素）：全屏预览时也不糊
 	thumbWidth    = 360  // 缩略图宽度（像素）
 )
 
-// wallpapers 是壁纸文件夹的快照。all 是全部图片（打乱后的顺序，横幅图也在内），大图预览按它翻；
+// wallpapers 是壁纸文件夹的快照。all 是全部图片（shuffleStable 排过的固定顺序，横幅图也在内），大图预览按它翻；
 // 缩略图网格按 all 的顺序排、去掉横幅图和读不了的（grid）。缩略图按路径存在 thumbs 里，还没解码的不在里面。
 type wallpapers struct {
 	dir      string
@@ -72,7 +74,7 @@ func scanWallpapers(dir string) scannedWallpapers {
 		}
 		files = append(files, filepath.Join(dir, e.Name()))
 	}
-	rand.Shuffle(len(files), func(i, j int) { files[i], files[j] = files[j], files[i] })
+	shuffleStable(files)
 	res.all = files
 
 	// 横幅图要够宽；不够宽的那张拿来当缩略图，读不了的记下来
@@ -95,6 +97,26 @@ func scanWallpapers(dir string) scannedWallpapers {
 	}
 	maps.Copy(res.thumbs, decodeThumbs(todo))
 	return res
+}
+
+// shuffleStable 把图片排成看起来随机、但每次打开都一样的顺序：按文件名的哈希排。
+// 不换一批时顺序不变，方便一张张筛；移出一张也不会打乱其余的先后。每一批的文件名不同，所以每批的顺序各不相同。
+func shuffleStable(files []string) {
+	key := func(f string) uint64 {
+		h := fnv.New64a()
+		h.Write([]byte(filepath.Base(f)))
+		return h.Sum64()
+	}
+	slices.SortStableFunc(files, func(x, y string) int {
+		kx, ky := key(x), key(y)
+		switch {
+		case kx < ky:
+			return -1
+		case kx > ky:
+			return 1
+		}
+		return 0
+	})
 }
 
 // decodeThumbs 并发解码 files 的缩略图；读不了的值为 nil。

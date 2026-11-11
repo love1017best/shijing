@@ -53,15 +53,13 @@ func (a *app) view(c *ui.Context) {
 			sc.Children(func() {
 				col := ui.Column(c).Padding(0, 36, 32, 36).Gap(22)
 				// 概览页铺满窗口，缩略图跟着变多；设置类页面窗口宽时分两栏，窄时单栏（表单太宽不好读）
+				// 其余页面有最大宽度，窗口更宽时居中放（单栏、两栏都一样）
 				switch {
 				case a.page == pageOverview:
-				case a.page == pageAbout:
-					// 关于页内容少，铺宽了显得空：保持单栏宽度，居中放
-					col.Width(min(max(a.viewW, 1), contentMax)).AlignSelf(ui.Center)
-				case a.twoCol():
-					col.MaxWidth(twoColMax)
+				case a.twoCol() && a.page != pageAbout: // 关于页内容少，铺宽了显得空，始终单栏
+					col.Width(min(max(a.viewW, 1), twoColMax)).AlignSelf(ui.Center)
 				default:
-					col.MaxWidth(contentMax)
+					col.Width(min(max(a.viewW, 1), contentMax)).AlignSelf(ui.Center)
 				}
 				a.pageH = col.LayoutBounds().H
 				if a.page != pageKeys && a.recording != "" {

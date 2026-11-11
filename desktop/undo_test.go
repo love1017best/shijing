@@ -128,3 +128,48 @@ func TestPreviewJumpToNumber(t *testing.T) {
 		t.Error("没在输入编号时 Esc 应关闭预览")
 	}
 }
+
+func TestPreviewWheelPages(t *testing.T) {
+	f, tt, _, _ := previewFixture(t, "w-a.jpg", "w-b.jpg", "w-c.jpg")
+	tt.SetSize(1000, 800)
+	tt.Frame()
+	x, y := float32(500), float32(400)
+	tt.Wheel(x, y, 0, 40) // 滚轮往下一格：下一张
+	tt.Frame()
+	if f.previewIdx != 1 {
+		t.Fatalf("滚轮往下应翻到下一张，现在是 %d", f.previewIdx)
+	}
+	tt.Wheel(x, y, 0, -40)
+	tt.Frame()
+	if f.previewIdx != 0 {
+		t.Fatalf("滚轮往上应翻回上一张，现在是 %d", f.previewIdx)
+	}
+	for range 3 { // 触控板的小位移攒够一页才翻
+		tt.Scroll(x, y, 0, 15)
+	}
+	tt.Frame()
+	if f.previewIdx != 0 {
+		t.Fatalf("触控板滑得不够远不应翻页，现在是 %d", f.previewIdx)
+	}
+	tt.Scroll(x, y, 0, 20)
+	tt.Frame()
+	if f.previewIdx != 1 {
+		t.Fatalf("触控板攒够距离应翻一页，现在是 %d", f.previewIdx)
+	}
+}
+
+func TestShuffleStable(t *testing.T) {
+	a := []string{"/w/p-1.jpg", "/w/p-2.jpg", "/w/p-3.jpg", "/w/p-4.jpg", "/w/p-5.jpg"}
+	b := slices.Clone(a)
+	slices.Reverse(b)
+	shuffleStable(a)
+	shuffleStable(b)
+	if !slices.Equal(a, b) {
+		t.Fatalf("不管读目录的顺序，排出来应一样: %q vs %q", a, b)
+	}
+	c := slices.DeleteFunc(slices.Clone(a), func(s string) bool { return s == a[2] })
+	shuffleStable(c)
+	if !slices.Equal(c, slices.Delete(slices.Clone(a), 2, 3)) {
+		t.Errorf("去掉一张后其余的先后不应变: %q", c)
+	}
+}

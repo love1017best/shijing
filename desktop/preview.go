@@ -144,7 +144,7 @@ func (a *app) loadPreview(path string) {
 	}
 	a.previewFor, a.previewImg = path, nil
 	go func() {
-		img := loadScaled(path, heroWidth)
+		img := loadScaled(path, previewWidth)
 		if img == nil {
 			return
 		}
@@ -168,6 +168,46 @@ func (a *app) previewBitmap(wall string) *ui.Bitmap {
 		return a.walls.hero
 	}
 	return nil
+}
+
+// wheelStep 让鼠标滚轮 / 触控板在预览里翻页：往下（或往右）是下一张。
+// 滚轮一格翻一张；触控板的小位移攒够 wheelPage 才翻，手指离开后的惯性滚动不算，免得一下翻过好几张。
+func (a *app) wheelStep(ev ui.InputEvent, step func(int)) bool {
+	if ev.Kind != ui.InputScroll {
+		return false
+	}
+	d := ev.DY
+	if abs32(ev.DX) > abs32(d) {
+		d = ev.DX
+	}
+	switch {
+	case ev.Momentum:
+	case !ev.Precise:
+		if d != 0 {
+			step(sign32(d))
+		}
+	default:
+		a.wheelAcc += d
+		if abs32(a.wheelAcc) >= wheelPage {
+			step(sign32(a.wheelAcc))
+			a.wheelAcc = 0
+		}
+	}
+	return true // 预览里没有要滚动的东西，滚动都在这里接住
+}
+
+const (
+	wheelPage     = 60 // 触控板滑多远（DIP）翻一张
+	previewMargin = 48 // 预览弹层离窗口边缘至少这么远
+)
+
+func abs32(x float32) float32 { return max(x, -x) }
+
+func sign32(x float32) int {
+	if x < 0 {
+		return -1
+	}
+	return 1
 }
 
 // fitBox 让预览框和图片同比例（不留黑边），并且不超过 maxW × maxH。
@@ -195,7 +235,7 @@ func (a *app) previewModal(c *ui.Context) {
 	if a.preview {
 		a.loadPreview(w.all[a.previewIdx])
 	} else {
-		a.jumpBuf = ""
+		a.jumpBuf, a.wheelAcc = "", 0
 	}
 	vw, vh := c.Size()
 	wasOpen := a.preview
@@ -211,9 +251,11 @@ func (a *app) previewModal(c *ui.Context) {
 			iw, ih = bmp.Size()
 		}
 		a.previewKeys(c, wall, src != "", step)
-		// 图片框和图片同比例，整个弹层始终比主窗口小
-		boxW, boxH := fitBox(iw, ih, min(vw*0.86, 1200)-40, vh*0.86-190)
-		ui.Column(c).Width(min(max(boxW+40, 760), vw*0.9)).Gap(14).Padding(20).AlignItems(ui.Center).Children(func() {
+		// 图片框和图片同比例；弹层四周留 previewMargin（别压到红绿灯），窗口越大图越大，全屏时也铺得开。
+		// 下面的文字和按钮约占 190，左右内边距 40
+		boxW, boxH := fitBox(iw, ih, vw-2*previewMargin-40, vh-2*previewMargin-190)
+		ui.Column(c).Width(min(max(boxW+40, 760), vw-2*previewMargin)).Gap(14).Padding(20).AlignItems(ui.Center).
+			HandleInput(func(ev ui.InputEvent) bool { return a.wheelStep(ev, step) }).Children(func() {
 			// 焦点放在图片上而不是第一个按钮上：按钮有焦点时空格 / 回车会按下它，翻页的空格就不灵了
 			box := ui.Box(c).Size(boxW, boxH).Radius(10).Clip().Label("预览图片").Focusable().FocusRing(false).AutoFocus()
 			if bmp == nil {
