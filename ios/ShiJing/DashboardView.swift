@@ -434,6 +434,8 @@ struct ConnectionBadge: View {
         .labelStyle(.titleAndIcon)
         .font(.footnote)
         .foregroundStyle(.secondary)
+        .padding(.horizontal, 8) // 工具栏会给它包一层玻璃气泡，不留边距的话字贴着边
+        .fixedSize()
         .accessibilityLabel("连接状态：\(text)")
     }
 }
