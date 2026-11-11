@@ -1,19 +1,16 @@
 import SwiftUI
 
-/// 左栏：配对过的 Mac + 局域网里找到的、还没配对的 Mac + 手动添加。
+/// 左栏：配对过的 Mac；还没配对过任何 Mac 时直接列出附近找到的，配对过之后点「添加其他 Mac」才去找。
 struct MacListView: View {
     let store: MacStore
     let discovery: Discovery
-    @State private var pairing: PairTarget?
-    @State private var manual = false
-
-    private var unpaired: [Discovery.Found] {
-        discovery.found.filter { store.mac(serviceName: $0.name) == nil }
-    }
+    @State private var adding = false
 
     var body: some View {
         List(selection: Binding(get: { store.selectedID }, set: { store.selectedID = $0 })) {
-            if !store.macs.isEmpty {
+            if store.macs.isEmpty {
+                NearbySection(store: store, discovery: discovery)
+            } else {
                 Section("已配对") {
                     ForEach(store.macs) { mac in
                         Label {
@@ -33,34 +30,80 @@ struct MacListView: View {
                         }
                     }
                 }
+                Section {
+                    Button("添加其他 Mac…", systemImage: "plus") { adding = true }
+                }
             }
-            Section {
-                ForEach(unpaired) { found in
-                    Button {
-                        pairing = PairTarget(name: found.name, serviceName: found.name, endpoint: found.endpoint)
-                    } label: {
-                        Label {
-                            Text(found.name)
-                        } icon: {
-                            Image(systemName: "plus.circle")
-                        }
-                    }
+        }
+        .sheet(isPresented: $adding) {
+            AddMacView(store: store, discovery: discovery)
+        }
+        // 一台都没配对时侧栏里直接列出附近的 Mac，要搜索；配对过之后侧栏不再搜
+        .onAppear { discovery.want("sidebar", store.macs.isEmpty) }
+        .onChange(of: store.macs.isEmpty) { _, empty in discovery.want("sidebar", empty) }
+        .onDisappear { discovery.want("sidebar", false) }
+    }
+}
+
+/// 「添加其他 Mac」：打开时才在局域网里找，配对成功后自动关闭。
+struct AddMacView: View {
+    let store: MacStore
+    let discovery: Discovery
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                NearbySection(store: store, discovery: discovery)
+            }
+            .onAppear { discovery.want("add", true) }
+            .onDisappear { discovery.want("add", false) }
+            .navigationTitle("添加 Mac")
+            .iOSInlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
+            }
+        }
+        .onChange(of: store.macs.count) { old, new in
+            if new > old { dismiss() }
+        }
+    }
+}
+
+/// 附近找到的、还没配对的 Mac，加上手动输入地址。搜索的开关由显示它的界面用 discovery.want 管。
+struct NearbySection: View {
+    let store: MacStore
+    let discovery: Discovery
+    @State private var pairing: PairTarget?
+    @State private var manual = false
+
+    private var unpaired: [Discovery.Found] {
+        discovery.found.filter { store.mac(serviceName: $0.name) == nil }
+    }
+
+    var body: some View {
+        Section {
+            ForEach(unpaired) { found in
+                Button {
+                    pairing = PairTarget(name: found.name, serviceName: found.name, endpoint: found.endpoint)
+                } label: {
+                    Label(found.name, systemImage: "plus.circle")
                 }
-                if unpaired.isEmpty {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text("正在局域网里找拾景…").foregroundStyle(.secondary)
-                    }
+            }
+            if unpaired.isEmpty {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("正在局域网里找拾景…").foregroundStyle(.secondary)
                 }
-                Button("手动输入地址…", systemImage: "keyboard") { manual = true }
-            } header: {
-                Text("附近的 Mac")
-            } footer: {
-                if let p = discovery.problem {
-                    Text(p)
-                } else {
-                    Text("电脑上的拾景要打开「设置 › 手机遥控」，手机和电脑连同一个网络。")
-                }
+            }
+            Button("手动输入地址…", systemImage: "keyboard") { manual = true }
+        } header: {
+            Text("附近的 Mac")
+        } footer: {
+            if let p = discovery.problem {
+                Text(p)
+            } else {
+                Text("电脑上的拾景要打开「设置 › 手机遥控」，手机和电脑连同一个网络。")
             }
         }
         .sheet(item: $pairing) { target in

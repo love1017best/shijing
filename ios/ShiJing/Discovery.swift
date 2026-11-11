@@ -17,8 +17,31 @@ final class Discovery {
     /// 本地网络权限被拒绝等情况的说明
     private(set) var problem: String?
     private var browser: NWBrowser?
+    /// 哪些界面正在显示「附近的 Mac」：只有有人在看的时候才搜索，配对完平时不在后台一直找。
+    /// 按名字记（而不是计数），同一个界面重复报告也不会算错。
+    private var watchers: Set<String> = []
+    private var paused = false
 
-    func start() {
+    func want(_ who: String, _ on: Bool) {
+        if on { watchers.insert(who) } else { watchers.remove(who) }
+        if watchers.isEmpty {
+            stop()
+        } else if !paused {
+            start()
+        }
+    }
+
+    /// App 进后台时停止搜索，回前台时如果还有人在看再接着找。
+    func setPaused(_ p: Bool) {
+        paused = p
+        if p {
+            stop()
+        } else if !watchers.isEmpty {
+            start()
+        }
+    }
+
+    private func start() {
         guard browser == nil else { return }
         let b = NWBrowser(for: .bonjour(type: Self.serviceType, domain: nil), using: .tcp)
         b.browseResultsChangedHandler = { [weak self] results, _ in
@@ -39,9 +62,11 @@ final class Discovery {
         browser = b
     }
 
-    func stop() {
+    private func stop() {
         browser?.cancel()
         browser = nil
+        found = []
+        problem = nil
     }
 
     private nonisolated static func describe(_ e: NWError) -> String {

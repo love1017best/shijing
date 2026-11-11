@@ -148,18 +148,18 @@ struct DashboardView: View {
                         Task { await session.run(deleteOriginals: false) }
                     }
                 } label: {
-                    HStack {
-                        Spacer()
-                        if session.busy {
-                            ProgressView()
-                        } else {
-                            Label("换一批壁纸", systemImage: "shuffle").font(.headline)
-                        }
-                        Spacer()
+                    // 文字和图标整体在按钮里居中；忙的时候换成转圈，按钮宽度不变
+                    ZStack {
+                        Label("换一批壁纸", systemImage: "shuffle")
+                            .font(.headline)
+                            .opacity(session.busy ? 0 : 1)
+                        if session.busy { ProgressView() }
                     }
+                    .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.roundedRectangle(radius: 12))
                 .controlSize(.large)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -224,8 +224,18 @@ struct DashboardView: View {
                 if l.failed > 0 {
                     LabeledContent("复制失败", value: "\(l.failed) 张")
                 }
-                LabeledContent("用时", value: Duration.seconds(l.elapsed), format: .units(allowed: [.minutes, .seconds], width: .narrow))
+                LabeledContent("用时", value: Self.elapsedText(l.elapsed))
             }
+        }
+    }
+
+    /// 「1 分 13 秒」这种说法（系统的时长格式跟着语言走，写死成中文更稳）。
+    static func elapsedText(_ seconds: Double) -> String {
+        let s = Int(seconds.rounded())
+        switch s {
+        case ..<60: return "\(s) 秒"
+        case ..<3600: return s % 60 == 0 ? "\(s / 60) 分钟" : "\(s / 60) 分 \(s % 60) 秒"
+        default: return "\(s / 3600) 小时 \(s % 3600 / 60) 分"
         }
     }
 

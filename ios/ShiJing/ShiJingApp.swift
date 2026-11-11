@@ -35,21 +35,23 @@ struct RootView: View {
             }
         }
         .onAppear {
-            discovery.start()
             syncSession()
-            if store.selected == nil { compactColumn = .sidebar }
+            if session == nil { compactColumn = .sidebar }
         }
         .onChange(of: store.selectedID) {
             syncSession()
             if store.selectedID != nil { compactColumn = .detail }
         }
         .onChange(of: scenePhase) { _, phase in
+            #if DEBUG
+            if RemoteSession.demoMode != nil { return }
+            #endif
             switch phase {
             case .active:
-                discovery.start()
+                discovery.setPaused(false)
                 session?.start()
             case .background:
-                discovery.stop()
+                discovery.setPaused(true)
                 session?.pause()
             default:
                 break
@@ -59,6 +61,12 @@ struct RootView: View {
 
     /// 选中的 Mac 变了：换一个连接。
     private func syncSession() {
+        #if DEBUG
+        if let mode = RemoteSession.demoMode {
+            if session == nil { session = RemoteSession.demo(mode, store: store) }
+            return
+        }
+        #endif
         guard let mac = store.selected else {
             session?.pause()
             session = nil
