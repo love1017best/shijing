@@ -25,13 +25,14 @@ for d in json.load(open(sys.argv[1]))["result"]["devices"]:
 
 LOG=build/install-device.log
 mkdir -p build
-if ! xcodebuild -project ShiJing.xcodeproj -scheme ShiJing -destination 'generic/platform=iOS' \
+# 装 Release：代码优化过、去掉了调试符号和演示代码（Debug 版 6 MB 多，Release 2 MB 左右）
+if ! xcodebuild -project ShiJing.xcodeproj -scheme ShiJing -configuration Release -destination 'generic/platform=iOS' \
 	-derivedDataPath build -allowProvisioningUpdates build -quiet >"$LOG" 2>&1; then
 	echo "iOS：构建失败，没有安装（日志：ios/$LOG）"
 	grep -m3 "error" "$LOG"
 	exit 1
 fi
-APP=build/Build/Products/Debug-iphoneos/拾景.app
+APP=build/Build/Products/Release-iphoneos/拾景.app
 VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Info.plist")
 STATUS=0
 while IFS=$'\t' read -r UDID NAME; do

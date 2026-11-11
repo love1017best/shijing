@@ -43,6 +43,14 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         # 和小组件共用钥匙串（配对令牌、选中的 Mac）：免费签名没有 App Groups，钥匙串共享可以用
         CODE_SIGN_ENTITLEMENTS: ShiJing/ShiJing.entitlements
+      configs:
+        # 发布 / 装到手机的是 Release：去掉调试符号（包从 6 MB 多降到 2 MB 左右）
+        Release:
+          DEPLOYMENT_POSTPROCESSING: YES
+          STRIP_INSTALLED_PRODUCT: YES
+          STRIP_STYLE: all
+          # 小组件界面编进 App 只给 Debug 的 -demoWidgets 演示页用
+          EXCLUDED_SOURCE_FILE_NAMES: WidgetViews.swift
     dependencies:
       - target: ShiJingWidget
   ShiJingWidget:
@@ -61,6 +69,12 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: 拾景
         CODE_SIGN_ENTITLEMENTS: ShiJingWidget/ShiJingWidget.entitlements
         SKIP_INSTALL: YES
+      configs:
+        # 发布 / 装到手机的是 Release：去掉调试符号（包从 6 MB 多降到 2 MB 左右）
+        Release:
+          DEPLOYMENT_POSTPROCESSING: YES
+          STRIP_INSTALLED_PRODUCT: YES
+          STRIP_STYLE: all
     info:
       path: ShiJingWidget/Info.plist
       properties:

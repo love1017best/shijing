@@ -44,10 +44,13 @@ var (
 	iconArrowRight   = lucide(`<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>`)
 )
 
-//go:embed resources/icon.png
+// icon256.png 是 resources/icon.png（1024 宽，mygo 拿它生成 .icns）缩到 256 宽的一份：界面上最大只画 256 宽，
+// 嵌原图要多带 100 多 KB、启动时还得解两遍 1024 的 PNG。换图标时用 PIL 重新缩一份。
+//
+//go:embed icon256.png
 var appIconPNG []byte
 
-// appIcon 是侧边栏顶部的应用图标，aboutIcon 是「关于」页的大图标（都由 resources/icon.png 缩小）。
+// appIcon 是侧边栏顶部的应用图标，aboutIcon 是「关于」页的大图标（都由 icon256.png 缩小）。
 var appIcon, aboutIcon = appIconAt(96), appIconAt(256)
 
 func appIconAt(width int) *ui.Bitmap {
