@@ -30,7 +30,7 @@ struct WallGrid: View {
 
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Self.gap), count: columns), spacing: Self.gap) {
-            ForEach(shown) { w in
+            ForEach(Array(shown.enumerated()), id: \.element.id) { i, w in
                 Button {
                     previewing = w
                 } label: {
@@ -38,6 +38,17 @@ struct WallGrid: View {
                         .aspectRatio(16 / 10, contentMode: .fill)
                         .frame(minWidth: 0, maxWidth: .infinity)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(alignment: .bottomTrailing) {
+                            // 「全部壁纸」页标上编号，和大图预览顶部的编号一致，方便对照着找
+                            if rows == nil {
+                                Text("\(i + 1)")
+                                    .font(.caption2.monospacedDigit().weight(.medium))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 4).padding(.vertical, 1)
+                                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 3))
+                                    .padding(3)
+                            }
+                        }
                         .overlay {
                             if session.acting == w.name {
                                 RoundedRectangle(cornerRadius: 6).fill(.black.opacity(0.4))
@@ -145,180 +156,6 @@ struct AllWallpapersView: View {
         }
         .navigationTitle("全部壁纸（\(session.walls.count)）")
         .iOSInlineTitle()
-    }
-}
-
-/// 大图预览：左右滑翻看壁纸文件夹里的全部图片，往下拖关闭，底栏三种操作。操作完停在原位置，看到的就是下一张。
-///
-/// 翻页用按整屏宽度分页的 ScrollView，不用 TabView(.page)：TabView 按扣掉安全区后的宽度分页，
-/// iPhone Duo 内屏横放时侧边有传感器区，每页比屏幕窄，会露出下一张的一条、图片也铺不满。
-struct WallPreview: View {
-    let session: RemoteSession
-    @State private var current: String?
-    @State private var confirmDelete: Wallpaper?
-    @State private var chrome = true
-    /// 往下拖的距离；dragging 为 nil 表示这次拖动还没判断方向，false 是横向翻页
-    @State private var dragY: CGFloat = 0
-    @State private var dragging: Bool?
-    @Environment(\.dismiss) private var dismiss
-
-    /// 拖过这么远（或甩得够快）松手就关闭
-    private static let dismissDistance: CGFloat = 120
-
-    init(session: RemoteSession, startName: String) {
-        self.session = session
-        _current = State(initialValue: startName)
-    }
-
-    private var index: Int? { session.walls.firstIndex { $0.name == current } }
-    private var wall: Wallpaper? { index.map { session.walls[$0] } }
-    private var dragProgress: CGFloat { min(max(dragY, 0) / 400, 1) }
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(1 - dragProgress * 0.85).ignoresSafeArea()
-            GeometryReader { geo in
-                ScrollView(.horizontal) {
-                    LazyHStack(spacing: 0) {
-                        ForEach(session.walls) { w in
-                            WallImage(session: session, wall: w, kind: .image, contentMode: .fit)
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .contentShape(Rectangle())
-                                .onTapGesture { withAnimation(.easeOut(duration: 0.2)) { chrome.toggle() } }
-                                .id(w.name)
-                        }
-                    }
-                    .scrollTargetLayout()
-                }
-                .scrollTargetBehavior(.paging)
-                .scrollPosition(id: $current)
-                .scrollIndicators(.hidden)
-                .scrollDisabled(dragging == true)
-            }
-            .ignoresSafeArea()
-            .scaleEffect(1 - dragProgress * 0.25)
-            .offset(y: max(dragY, 0))
-            .simultaneousGesture(dismissDrag)
-
-            if chrome {
-                VStack(spacing: 0) {
-                    topBar
-                    Spacer()
-                    if let wall { bottomBar(wall) }
-                }
-                .opacity(dragging == true ? 0 : 1)
-                .transition(.opacity)
-            }
-        }
-        .presentationBackground(.clear)
-        .preferredColorScheme(.dark)
-        .statusBarHiddenCompat(!chrome || dragging == true)
-        .deleteOriginalDialog(session: session, wall: $confirmDelete)
-        .onChange(of: session.walls) { old, new in
-            // 当前这张被移出了：停在原来的位置（就是下一张），删光了就关掉
-            guard !new.contains(where: { $0.name == current }) else { return }
-            if new.isEmpty {
-                dismiss()
-                return
-            }
-            let oldIdx = old.firstIndex { $0.name == current } ?? 0
-            current = new[min(oldIdx, new.count - 1)].name
-        }
-        .sensoryFeedback(.success, trigger: session.walls.count) { old, new in new < old }
-    }
-
-    /// 往下拖关闭：一次拖动开头往下为主才算，横着拖照常翻页。
-    private var dismissDrag: some Gesture {
-        DragGesture(minimumDistance: 12)
-            .onChanged { v in
-                if dragging == nil {
-                    dragging = v.translation.height > 0 && abs(v.translation.height) > abs(v.translation.width) * 1.2
-                }
-                if dragging == true { dragY = v.translation.height }
-            }
-            .onEnded { v in
-                guard dragging == true else {
-                    dragging = nil
-                    return
-                }
-                if v.translation.height > Self.dismissDistance || v.predictedEndTranslation.height > Self.dismissDistance * 3 {
-                    dismiss() // dragging 留着 true：关闭动画里不再闪出顶栏底栏
-                } else {
-                    dragging = nil
-                    withAnimation(.spring(duration: 0.3)) { dragY = 0 }
-                }
-            }
-    }
-
-    private var topBar: some View {
-        HStack {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark").font(.body.weight(.semibold)).frame(width: 36, height: 36)
-            }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.circle)
-            .accessibilityLabel("关闭")
-            Spacer()
-            if let index {
-                Text("\(index + 1) / \(session.walls.count)")
-                    .font(.subheadline.monospacedDigit())
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(.ultraThinMaterial, in: Capsule())
-            }
-        }
-        .padding(.horizontal)
-        .padding(.top, 8)
-    }
-
-    private func bottomBar(_ w: Wallpaper) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(w.name).font(.subheadline.bold()).lineLimit(1).truncationMode(.middle)
-                Text(w.hasSource ? "原图：\(w.source ?? "")" : "原图：没有记录（之前的版本换上的），只能移出")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
-            }
-            if session.state?.running == true {
-                Label("正在换壁纸，等换完再整理", systemImage: "hourglass").font(.footnote).foregroundStyle(.secondary)
-            }
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { actionButtons(w) }
-                VStack(alignment: .leading, spacing: 8) { actionButtons(w) }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.regular)
-            .disabled(session.acting != nil || session.state?.running == true)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, ignoresSafeAreaEdges: [.bottom, .horizontal])
-    }
-
-    @ViewBuilder
-    private func actionButtons(_ w: Wallpaper) -> some View {
-        Button {
-            Task { await session.removeWallpaper(w, exclude: false) }
-        } label: {
-            Label("移出", systemImage: "minus.circle").fixedSize()
-        }
-        .accessibilityHint(WallAction.removeHint)
-        if w.hasSource {
-            Button {
-                Task { await session.removeWallpaper(w, exclude: true) }
-            } label: {
-                Label("不再选它", systemImage: "nosign").fixedSize()
-            }
-            .accessibilityHint(WallAction.excludeHint)
-            Button(role: .destructive) {
-                confirmDelete = w
-            } label: {
-                Label("删除原图…", systemImage: "trash").fixedSize()
-            }
-        }
-        if session.acting == w.name {
-            ProgressView()
-        }
     }
 }
 
