@@ -128,7 +128,7 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - iPhone Duo（折叠屏，iPhone19,4）有模拟器：机型 `iPhone Duo`，用它自己的运行时 `iOS-27-2-iPhone19-4`。两块屏截图要指定 `--display`：内屏（展开）`--display=3`，外屏（合上）`--display=1`。切换展开 / 合上用 Device Hub 窗口底部的 Closed / Partially Open / Open 按钮（`com.apple.dt.Devices`，命令行没有接口）；**别用 `simctl io … screenConfig power off` 关屏**，会把 SpringBoard 弄崩、要重启模拟器。内屏展开后是横向的，侧边有传感器区占安全区：大图预览因此不用 `TabView(.page)`（它按扣掉安全区的宽度分页，会露出下一张）。
 - 大图预览（`ios/ShiJing/WallPreview.swift`）的翻页是自己写的：只摆上一张 / 当前 / 下一张三页，首尾相接（和桌面一样）；一次拖动开头判断方向——横向翻页、往下关闭、放大后平移，双指缩放以手指位置为中心。屏幕横着（内屏、手机横放）默认铺满，裁掉超过三成才完整显示；竖着一律完整显示，并让开顶栏底栏（`fitInsets`）。双击在铺满 / 完整之间切换（放大时双击还原）。底部缩略图条（`FilmStrip`）拖动时大图跟着换，按屏幕正中对齐（内屏侧边的传感器区会让这条变窄，不能用它自己的正中）；点顶部编号输入数字跳转，「全部壁纸」页的缩略图标着同样的编号。`-demoPreview` 启动参数直接打开大图预览；Device Hub 里用鼠标没法双指缩放，只能真机试。
 - iOS 的开发语言必须是 `zh-Hans`（`project.yml` 的 `developmentLanguage`）：App 没有中文本地化时 `Locale.current` 会退回英文，日期、系统按钮都显示成英文（踩过）。
-- iOS 端没有侧栏（v0.3.20 起，用户嫌宽屏上占地方、连 Mac 只有第一次装时用）：一台都没配对时整屏是 `SetupView`（附近的 Mac + 手动输入地址）；配对过之后只有遥控面板，切换 / 添加 / 管理 Mac 在标题菜单里（`macTitleMenu`，点顶部 Mac 名字）。「附近的 Mac」只在有界面显示它时才用 Bonjour 搜索（`Discovery.want(名字, 开关)`）：首次配对页和「添加其他 Mac」弹层。
+- iOS 端没有侧栏（v0.3.21 起，用户嫌宽屏上占地方、连 Mac 只有第一次装时用）：一台都没配对时整屏是 `SetupView`（附近的 Mac + 手动输入地址）；配对过之后只有遥控面板，切换 / 添加 / 管理 Mac 在标题菜单里（`macTitleMenu`，点顶部 Mac 名字）。「附近的 Mac」只在有界面显示它时才用 Bonjour 搜索（`Discovery.want(名字, 开关)`）：首次配对页和「添加其他 Mac」弹层。
 - 本机没装完整 Xcode 时，Swift 代码用命令行工具在 macOS SDK 上类型检查（命令见 `ios/README.md`）；必须用 `MacOSX26.5.sdk`，27.x 的 SwiftUI `@State` 是宏、命令行工具缺宏插件。iOS 专有修饰符包在 `PairView.swift` 底部的 `iOSKeyboard` / `iOSInlineTitle` 等扩展里。
 - 两边 JSON 对接验证过的方法：写个临时的 Go 测试用 `newRemoteHarness` 起服务并把地址和令牌写到文件，再用 `swiftc Models.swift APIClient.swift main.swift` 编一个命令行客户端去连。时间字段一律用 Unix 秒（Go 的 RFC3339 纳秒精度 Swift 解析不稳）。
 
