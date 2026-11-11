@@ -17,7 +17,7 @@ SwiftUI 写的原生 iPhone / iPad 应用，在局域网里遥控 Mac 上的拾�
 3. iPhone 用线连上 Mac，在 Xcode 顶部选这台手机点运行；或者用命令行（见下面）。
 4. 第一次装：手机上打开「设置 › 隐私与安全性 › 开发者模式」并重启确认；装上后到「设置 › 通用 › VPN 与设备管理」里信任自己的开发者证书。
 
-命令行构建并安装（`xcode-select` 指向命令行工具时用 `DEVELOPER_DIR` 指定 Xcode）：
+在这个仓库里开发时直接用 `desktop/scripts/install-local.sh`：它会同时重装 Mac 端，并把 iOS 版装到所有连着的 iPhone / iPad 上（见根目录 CLAUDE.md「两个会话并行开发」）。手动的话，命令行构建并安装（`xcode-select` 指向命令行工具时用 `DEVELOPER_DIR` 指定 Xcode）：
 
 ```bash
 export DEVELOPER_DIR=/Applications/Xcode-27.2.0.app/Contents/Developer

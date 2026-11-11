@@ -5,6 +5,7 @@
 set -uo pipefail
 
 cd "${0:A:h}/../../ios"
+source ../desktop/scripts/lock.zsh
 export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode-27.2.0.app/Contents/Developer}
 [[ -d "$DEVELOPER_DIR" ]] || { echo "iOS：没找到 Xcode，跳过"; exit 0; }
 BUNDLE_ID=com.love1017best.shijing.ios

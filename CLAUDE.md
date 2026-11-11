@@ -129,32 +129,45 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 本机没装完整 Xcode 时，Swift 代码用命令行工具在 macOS SDK 上类型检查（命令见 `ios/README.md`）；必须用 `MacOSX26.5.sdk`，27.x 的 SwiftUI `@State` 是宏、命令行工具缺宏插件。iOS 专有修饰符包在 `PairView.swift` 底部的 `iOSKeyboard` / `iOSInlineTitle` 等扩展里。
 - 两边 JSON 对接验证过的方法：写个临时的 Go 测试用 `newRemoteHarness` 起服务并把地址和令牌写到文件，再用 `swiftc Models.swift APIClient.swift main.swift` 编一个命令行客户端去连。时间字段一律用 Unix 秒（Go 的 RFC3339 纳秒精度 Swift 解析不稳）。
 
+## 两个会话并行开发（2026-11-11 起）
+
+macOS 端和 iOS 端分别由不同的会话负责，**两个会话共用同一个工作区**（同一个 checkout、都在 `main` 上，没有各自的 worktree）。所以：
+
+- **只提交自己改的文件**：`git add <具体路径>` / `git commit -- <路径>`，**不要 `git add -A`、`git commit -a`**，否则会把另一个会话写到一半的文件一起提交。提交前 `git status` 看一眼，不认识的改动别碰、别还原、别 `git stash`。
+- 接口两边对应（`desktop/remote.go` ↔ `ios/ShiJing/Models.swift` / `APIClient.swift`）：改了一边要同步另一边。另一边归对方会话管时，在提交说明里写清楚，或者告诉用户请对方会话跟进。
+- **构建、安装、发布只用这三个脚本**，它们共用一把锁（`desktop/scripts/lock.zsh`，锁文件在 `.git/shijing-build.lock`），两个会话同时跑时后来的会排队等，不会抢 `build/` 目录、同时替换 `/Applications/拾景.app` 或撞版本号：
+  - `desktop/scripts/install-local.sh`：构建 macOS 并装到 `/Applications`、启动；连着 iPhone / iPad 时再构建 iOS 装到设备上并启动。**哪一端改了都跑它**，两端都会重新安装运行（iOS 会话也一样，不要只装手机）。
+  - `desktop/scripts/install-ios-device.sh`：只装手机，`install-local.sh` 会自动调，一般不单独用。
+  - `desktop/scripts/release.sh`：发布，见下面「发布规则」。
+- 不要手动走发布步骤、不要手动 `bump-version.sh`、不要手动打 tag。
+
 ## 版本号规则（用户规定）
 
 - 格式 `vX.Y.Z`（如 `v0.2.101`），写在 `desktop/mygo.json` 的 `version`（那里不带 `v`，macOS 的 Info.plist 只认数字）。
-- **macOS 和 iOS 两端永远用同一个版本号，每次发布两端一起发，不管哪一端有没有改动**（用户规定，2026-11-11）。这样不用分别维护两套版本号，分别负责 macOS 和 iOS 的会话也不会各自升版本撞车。
-  - 改版本号只用 `desktop/scripts/bump-version.sh`（不带参数 Z 加 1，带参数直接设成某个版本）：同时改 `desktop/mygo.json`、`ios/project.yml` 的 `MARKETING_VERSION`（= 版本号）和 `CURRENT_PROJECT_VERSION`（= Z），并重新生成 Xcode 工程。不要手改其中一处。
+- **macOS 和 iOS 两端永远用同一个版本号，每次发布两端一起发，不管哪一端有没有改动**（用户规定，2026-11-11）。
+  - 版本号由 `release.sh` 调 `bump-version.sh` 升：同时改 `desktop/mygo.json`、`ios/project.yml` 的 `MARKETING_VERSION`（= 版本号）和 `CURRENT_PROJECT_VERSION`（= Z），并重新生成 Xcode 工程。功能提交里不要升版本号。
   - `desktop/version_test.go` 检查这几处一致，`go test ./...` 会挡住只改了一端的情况。
-  - 多个会话并行时：只在发布那一步升版本号，升之前先 `git pull`，看清 `mygo.json` 当前是哪个版本再加 1；不要在功能分支 / 各自的改动里提前升。
-- `X.Y` 是大版本号，**只有用户明确要求大迭代时才提升**，不要自己改。
-- `Z`：每次有代码改动并重新构建（`mygo build`），就先把 Z 加 1 再构建。没有改动的重复构建不加。
+- `X.Y` 是大版本号，**只有用户明确要求大迭代时才提升**，不要自己改（`bump-version.sh 0.4.0` 这种只在用户要求时用）。
+- `Z`：有代码改动、要给用户用的构建都走 `release.sh`，它会先把 Z 加 1。自己调试时用 `install-local.sh` 装的预览不升版本；改完要交给用户试的，发布一个新版本。
 - 起点：v0.2.100。
 
 ## 发布规则（用户规定）
 
-- 每次发布都是两端一起：同一个提交、同一个 tag `v<版本>`、同一个 Release。说明里分「macOS」「iOS」两节写这一版各自的改动，某一端没改就写「无改动，仅同步版本号」。
-- iOS 端没有上架、也不传安装包（免费签名的包只能装到签名者自己的设备上，传了别人也装不了）：Release 里只说明 iOS 源码在 `ios/`、按 `ios/README.md` 自己用 Xcode 装。本机装了完整 Xcode 之后，发布前要至少跑一次模拟器构建确认能编译通过（`xcodebuild -project ios/ShiJing.xcodeproj -scheme ShiJing -destination 'generic/platform=iOS Simulator' build`）；没装 Xcode 时退而用 `ios/README.md` 里的 `swiftc -typecheck` 做类型检查，并在说明里如实写明没在真机上验证。
-- 每次版本构建（Z 加 1 那种）都要发布到 GitHub Release，macOS 只传 dmg，**两个都传**：
-  - 通用版（Intel + Apple Silicon，纯 Go 无 cgo 所以直接支持）：`go tool mygo build -skip-notarize -platform darwin/universal` → `build/darwin-universal/shi-jing-<版本>.dmg`（文件名不带架构）
-  - Apple Silicon 版（体积约一半，本机运行的也是它）：`go tool mygo build -skip-notarize` → `build/darwin-arm64/shi-jing-<版本>-arm64.dmg`
-- 发布顺序：代码先提交并推送 → 给那个提交打 tag `v<版本>` 并推送 → `gh release create v<版本> <通用版 dmg> <arm64 dmg> --verify-tag --title "拾景 v<版本>" --notes ...`。`--target` 不认短 sha，所以先打 tag。说明开头写清两个包怎么选。
-- 发布到 `origin`（`love1017best/shijing`）。本地还有指向旧历史的 tag（`python-final`、`v0.2.104`、`v0.2.105`）和 `legacy` 远端，**不要 `git push --tags`**，否则会把旧历史推到公开仓库；tag 一律单独推。
-- 说明里写这一版的改动，并注明是 ad-hoc 签名、未公证（别的 Mac 首次打开要右键「打开」）。仓库是**公开**的（2026-11-10 起），提交前注意别放进个人信息、真实壁纸或密钥。
-- 发布完**用 arm64 dmg 安装到本机，替换 `/Applications/拾景.app`**，再从 `/Applications` 启动。**不要直接运行 `build/` 下的 `.app`**（用户规定）。迭代后主动打开应用给用户预览、试用时也一样，任何时候都不 `open build/...app`。
-  - 用 `desktop/scripts/install-local.sh`：构建 arm64 → 退出旧版 → 挂载 dmg 用 `ditto` 替换 `/Applications/拾景.app` → 启动，最后输出一行版本和运行路径（不一致时退出码非 0）。约 10 秒。
-  - 发布时 arm64 dmg 刚构建过，用 `scripts/install-local.sh --no-build` 直接安装。
-  - **连着 iPhone / iPad 时，每次构建都要顺带把 iOS 版装上去**（用户规定，2026-11-11；没连就算了）。`install-local.sh` 最后会自动调 `scripts/install-ios-device.sh`：用 `devicectl list devices --json-output` 找连着的真机（模拟器不算），有就 `xcodebuild … -allowProvisioningUpdates` 构建、`devicectl` 安装并启动，一台都没有就跳过；iOS 失败只提示，不影响 macOS 的退出码。只改了 iOS、不需要动 Mac 时可以单独跑这个脚本。设备锁屏或没信任这台电脑时安装会失败，提示用户解锁就行。
-  - 预览只需要 arm64；通用版只在发布时构建（发布仍然两个都要传）。`.app` 是 dmg 的中间产物，`mygo build` 省不掉它。
+- **只用 `desktop/scripts/release.sh` 发布**（两个会话都是）：
+  ```bash
+  desktop/scripts/release.sh --macos "- 这一版 macOS 的改动" --ios "- iOS 的改动"
+  ```
+  某一端没改就不传，说明里自动写「无改动，仅同步版本号」；`--dry-run` 只检查和构建、不推送不发布。它会：
+  1. 拿锁；检查暂存区是空的、版本号文件没有没提交的改动（**先把自己的改动提交好**；工作区里别人没提交的文件不碰、也不会被打包进去）。
+  2. 和 `origin/main` 同步（快进；本地有没推送的提交时 rebase，这时要求工作区干净）。
+  3. 在临时 worktree 里升 Z、跑 `go test`、只提交版本号文件、打 tag `v<版本>`，`git push --atomic origin HEAD:main v<版本>` 一次推送提交和 tag（**不要 `git push --tags`**：本地还有旧历史的 tag `python-final`、`v0.2.104`、`v0.2.105` 和 `legacy` 远端，会把旧历史推到公开仓库）。另一个会话抢先发布了同一个版本号时推送会被拒，自动同步后重来。本地 `main` 再快进到这个提交。
+  4. 还在那个 worktree 里构建两个 dmg（通用版 `shi-jing-<版本>.dmg`、Apple Silicon 版 `shi-jing-<版本>-arm64.dmg`），跑 iOS 模拟器构建检查——发布包严格等于 tag 的内容。
+  5. `gh release create`（两个 dmg 都传，说明分「macOS」「iOS」两节，开头写清两个包怎么选，结尾注明 ad-hoc 签名、未公证），然后用刚发布的 arm64 dmg 装到 `/Applications` 并启动，连着手机时把同一个 tag 的 iOS 版也装上。
+- iOS 端没有上架、也不传安装包（免费签名的包只能装到签名者自己的设备上）：Release 里只说明 iOS 源码在 `ios/`、按 `ios/README.md` 自己用 Xcode 装。
+- 仓库是**公开**的（2026-11-10 起），提交前注意别放进个人信息、真实壁纸或密钥（签名团队 ID 只放在 gitignore 的 `ios/ShiJing/Local.xcconfig`，`release.sh` 会把它拷进临时 worktree）。
+- **不要直接运行 `build/` 下的 `.app`**（用户规定），预览、试用也一样，任何时候都不 `open build/...app`；一律用 `install-local.sh` 装到 `/Applications` 再启动。
+- **连着 iPhone / iPad 时，每次构建都要顺带把 iOS 版装上去**（用户规定，2026-11-11；没连就算了）：`install-local.sh` 最后自动调 `install-ios-device.sh`，用 `devicectl list devices --json-output` 找连着的真机（模拟器不算），有就构建、安装并启动，一台都没有就跳过；iOS 失败只提示，不影响 macOS 的退出码。设备锁屏或没信任这台电脑时安装会失败，提示用户解锁就行。免费签名 7 天过期，重新跑一次就续上。
+- 预览只需要 arm64；通用版只在发布时构建。`.app` 是 dmg 的中间产物，`mygo build` 省不掉它。
 
 ## 调试小抄
 

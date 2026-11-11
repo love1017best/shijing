@@ -7,6 +7,7 @@
 set -euo pipefail
 
 cd "${0:A:h}/.."
+source scripts/lock.zsh
 BUNDLE_ID=com.love1017best.shijing
 APP=/Applications/拾景.app
 VERSION=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' mygo.json | head -1)
