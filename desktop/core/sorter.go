@@ -59,7 +59,7 @@ type thresholds struct {
 	// Rules 是判断规则的版本：ImageVerdict 的逻辑改了就加 1，让旧的增量缓存失效，
 	// 否则以前判过、之后没动过的目录会一直被跳过，新规则对它们永远不生效。
 	// 2：按 EXIF 方向转正后再判断横竖屏（v0.3.18）
-	// 3：状态里记下不合格但没删的图（Rejected），采样时排除（v0.3.19）
+	// 3：状态里记下不合格但没删的图（Rejected），采样时排除（v0.3.20）
 	Rules int `json:"rules,omitempty"`
 }
 
