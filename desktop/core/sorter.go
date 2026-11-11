@@ -58,7 +58,7 @@ type thresholds struct {
 	MinHeight int `json:"min_height"`
 	// Rules 是判断规则的版本：ImageVerdict 的逻辑改了就加 1，让旧的增量缓存失效，
 	// 否则以前判过、之后没动过的目录会一直被跳过，新规则对它们永远不生效。
-	// 2：按 EXIF 方向转正后再判断横竖屏（v0.3.16）
+	// 2：按 EXIF 方向转正后再判断横竖屏（v0.3.18）
 	Rules int `json:"rules,omitempty"`
 }
 
