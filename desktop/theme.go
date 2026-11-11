@@ -4,13 +4,14 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 强调色是橙色（用户喜欢，v0.3.11 起；iOS 的 AccentColor 要保持一致）。暮色紫只用在横幅插画里，取自应用图标。
+// 强调色是橙色（用户喜欢，v0.3.11 起；iOS 的 AccentColor 要保持一致）。横幅插画的日落色取自应用图标
+// （v0.3.12 起图标也是橙色，由 scripts/recolor_icon.py 从原来的紫色图标换算，这几个颜色用的是同一套换算）。
 var (
 	sunGlow   = ui.Hex("#FDE7B8")
-	duskTop   = ui.Hex("#2A2470")
-	duskMid   = ui.Hex("#5B3F94")
-	duskHill  = ui.Hex("#8E5C9E")
-	duskFront = ui.Hex("#33275E")
+	duskTop   = ui.Hex("#963711")
+	duskMid   = ui.Hex("#C0571F")
+	duskHill  = ui.Hex("#CC742F")
+	duskFront = ui.Hex("#813714")
 )
 
 const (
