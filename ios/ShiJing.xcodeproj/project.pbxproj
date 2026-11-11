@@ -20,7 +20,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		00B81837B22F5D8DBD7084AF /* ShiJing.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ShiJing.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		00B81837B22F5D8DBD7084AF /* 拾景.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "拾景.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		04551D48684EF104173433F5 /* ShiJingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiJingApp.swift; sourceTree = "<group>"; };
 		15FB9144ACC689795E105A27 /* MacListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacListView.swift; sourceTree = "<group>"; };
 		1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
@@ -30,6 +30,8 @@
 		6AC7C4670660D49C3BD8F942 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		725B2CCDED437B4D2F84E0BD /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		A5CD57E5BA5441C8D0006947 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		D86F178096ED4F9BDCD820EE /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
+		E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 		EBBECD2386D5DFE983684B8F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F148DFA81C0AF1A9841A39B7 /* PairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -46,7 +48,7 @@
 		DAD7F89B526DB1E019E9E94D /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				00B81837B22F5D8DBD7084AF /* ShiJing.app */,
+				00B81837B22F5D8DBD7084AF /* 拾景.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -59,12 +61,14 @@
 				A5CD57E5BA5441C8D0006947 /* DashboardView.swift */,
 				1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */,
 				6AC7C4670660D49C3BD8F942 /* Info.plist */,
+				E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */,
 				15FB9144ACC689795E105A27 /* MacListView.swift */,
 				35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */,
 				725B2CCDED437B4D2F84E0BD /* Models.swift */,
 				F148DFA81C0AF1A9841A39B7 /* PairView.swift */,
 				57D7F2A21A98AC8FD6910260 /* RemoteSession.swift */,
 				04551D48684EF104173433F5 /* ShiJingApp.swift */,
+				D86F178096ED4F9BDCD820EE /* Signing.xcconfig */,
 			);
 			path = ShiJing;
 			sourceTree = "<group>";
@@ -87,7 +91,7 @@
 			packageProductDependencies = (
 			);
 			productName = ShiJing;
-			productReference = 00B81837B22F5D8DBD7084AF /* ShiJing.app */;
+			productReference = 00B81837B22F5D8DBD7084AF /* 拾景.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -100,7 +104,6 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					F25BEF7220A5AE49341BF708 = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -157,6 +160,7 @@
 /* Begin XCBuildConfiguration section */
 		283261BEA96A078F7B23238D /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = D86F178096ED4F9BDCD820EE /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -192,7 +196,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 6;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 36G3KFV8R3;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -241,6 +245,7 @@
 		};
 		9D3B21C25FCBDD38C42D83A9 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = D86F178096ED4F9BDCD820EE /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -276,7 +281,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 6;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 36G3KFV8R3;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;

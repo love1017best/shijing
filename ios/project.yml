@@ -11,8 +11,10 @@ settings:
     CURRENT_PROJECT_VERSION: "6"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
-    # 免费的个人开发者账号：第一次在 Xcode 的 Signing & Capabilities 里选自己的 Personal Team
-    DEVELOPMENT_TEAM: ""
+# 开发团队 ID 写在本地的 ShiJing/Local.xcconfig（已 gitignore，不进公开仓库），Signing.xcconfig 可选地引用它
+configFiles:
+  Debug: ShiJing/Signing.xcconfig
+  Release: ShiJing/Signing.xcconfig
 targets:
   ShiJing:
     type: application

@@ -1,3 +1,5 @@
 xcuserdata/
 *.xcuserstate
 DerivedData/
+ShiJing/Local.xcconfig
+build/

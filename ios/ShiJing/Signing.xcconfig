@@ -1,0 +1,4 @@
+// 签名用的开发团队 ID 放在同目录的 Local.xcconfig（gitignore 了），内容只有一行：
+//   DEVELOPMENT_TEAM = 你的团队 ID
+// 没有这个文件也能打开工程、在模拟器上跑；装到真机前需要它。
+#include? "Local.xcconfig"

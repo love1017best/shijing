@@ -10,11 +10,24 @@ SwiftUI 写的原生 iPhone / iPad 应用，在局域网里遥控 Mac 上的拾�
 
 需要完整的 Xcode（App Store 免费下载，只有命令行工具不够）。
 
-1. 用 Xcode 打开 `ios/ShiJing.xcodeproj`。
-2. 选中 ShiJing target → Signing & Capabilities → Team 选自己的 Apple ID（Personal Team）。没有的话在 Xcode › Settings › Accounts 里登录一个。
-   如果提示 bundle id 已被占用，把 `com.love1017best.shijing.ios` 改成别的（比如结尾加上自己的名字）。
-3. iPhone 用线连上 Mac（或同一 Wi-Fi 下配对过的无线调试），在 Xcode 顶部选这台手机，点运行。
-4. 第一次装：手机上打开「设置 › 隐私与安全性 › 开发者模式」并重启；然后到「设置 › 通用 › VPN 与设备管理」里信任自己的开发者证书。
+1. 在 Xcode › Settings › Accounts 里登录自己的 Apple ID。
+2. 用 Xcode 打开 `ios/ShiJing.xcodeproj`，ShiJing target → Signing & Capabilities → Team 选自己的 Personal Team。
+   Xcode 会把团队 ID 写进工程文件；把它挪到 `ios/ShiJing/Local.xcconfig`（已 gitignore，内容只有一行 `DEVELOPMENT_TEAM = 团队ID`），再在 `ios/` 下跑 `xcodegen`，工程文件里就不留团队 ID 了。只需要做一次。
+   如果提示 bundle id 已被占用，把 `com.love1017best.shijing.ios` 改成别的。
+3. iPhone 用线连上 Mac，在 Xcode 顶部选这台手机点运行；或者用命令行（见下面）。
+4. 第一次装：手机上打开「设置 › 隐私与安全性 › 开发者模式」并重启确认；装上后到「设置 › 通用 › VPN 与设备管理」里信任自己的开发者证书。
+
+命令行构建并安装（`xcode-select` 指向命令行工具时用 `DEVELOPER_DIR` 指定 Xcode）：
+
+```bash
+export DEVELOPER_DIR=/Applications/Xcode-27.2.0.app/Contents/Developer
+xcrun devicectl list devices                     # 找手机的 Identifier
+cd ios
+xcodebuild -project ShiJing.xcodeproj -scheme ShiJing -destination 'generic/platform=iOS' \
+  -derivedDataPath build -allowProvisioningUpdates build
+xcrun devicectl device install app --device <Identifier> build/Build/Products/Debug-iphoneos/拾景.app
+xcrun devicectl device process launch --device <Identifier> com.love1017best.shijing.ios
+```
 
 免费账号的限制：
 

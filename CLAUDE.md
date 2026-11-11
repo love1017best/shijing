@@ -119,6 +119,8 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 遥控运行不弹桌面的删除确认框（Mac 前面可能没人），由手机先确认，`/api/run {"delete": false}` 时这次 `noDelete`，不改设置。日志里记一行「📱 由「xx」遥控运行」。
 - 配对：`/api/pair/start` 生成 6 位码在桌面弹层显示（`pairModal`，按 `pairCode` 判断是不是新请求，点拒绝后不会被下一帧重新打开），2 分钟有效、输错 5 次作废；令牌只存 SHA-256（`remote_devices.json`，0600）。同名手机重新配对会替换旧记录。
 - iOS 端在 `ios/`（SwiftUI，iOS 17+，XcodeGen 的 `project.yml` 生成工程）。用户没有付费开发者账号：免费签名 7 天过期、没有 APNs 推送；不上架。版本号和桌面端同步，见「版本号规则」。
+- 本机装了 Xcode（`/Applications/Xcode-27.2.0.app`，2026-11-11），但 `xcode-select` 仍指向命令行工具（切换要用户输密码）：命令行里用 `DEVELOPER_DIR=/Applications/Xcode-27.2.0.app/Contents/Developer` 前缀跑 `xcodebuild` / `xcrun`。模拟器 MCP 工具只认 `xcode-select`，没切换前用不了，用 `xcrun simctl` 装、启动、截图代替。
+- 真机安装：团队 ID 在 gitignore 的 `ios/ShiJing/Local.xcconfig`（由 `Signing.xcconfig` 的 `#include?` 引用），**不要写进 `project.yml` 或提交的工程文件**——仓库公开。用户 Xcode 里选 Team 后工程文件会出现 `DEVELOPMENT_TEAM`，挪到 Local.xcconfig 再 `xcodegen`。构建 `-destination 'generic/platform=iOS' -allowProvisioningUpdates`，`xcrun devicectl device install app` / `process launch` 装到手机（命令见 `ios/README.md`）。免费签名 7 天过期，过期了重新构建安装即可。
 - 本机没装完整 Xcode 时，Swift 代码用命令行工具在 macOS SDK 上类型检查（命令见 `ios/README.md`）；必须用 `MacOSX26.5.sdk`，27.x 的 SwiftUI `@State` 是宏、命令行工具缺宏插件。iOS 专有修饰符包在 `PairView.swift` 底部的 `iOSKeyboard` / `iOSInlineTitle` 等扩展里。
 - 两边 JSON 对接验证过的方法：写个临时的 Go 测试用 `newRemoteHarness` 起服务并把地址和令牌写到文件，再用 `swiftc Models.swift APIClient.swift main.swift` 编一个命令行客户端去连。时间字段一律用 Unix 秒（Go 的 RFC3339 纳秒精度 Swift 解析不稳）。
 
