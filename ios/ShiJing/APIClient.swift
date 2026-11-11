@@ -106,6 +106,30 @@ struct APIClient: Sendable {
         try await send(request("POST", "api/stop", body: [:]), as: RemoteState.self)
     }
 
+    // MARK: 壁纸（第 2 期）
+
+    func wallpapers() async throws -> WallpaperList {
+        try await send(request("GET", "api/wallpapers"), as: WallpaperList.self)
+    }
+
+    /// 一张壁纸的 JPEG：缩略图或大图。
+    func imageData(_ name: String, kind: ImageKind) async throws -> Data {
+        let req = request("GET", "api/wallpapers/\(name)/\(kind.rawValue)", timeout: kind == .image ? 40 : 20)
+        let (data, resp) = try await Self.session.data(for: req)
+        try Self.check(resp, data: data)
+        return data
+    }
+
+    /// 移出壁纸文件夹（原图不动）；exclude 时还让以后的采样跳过这张原图。
+    func removeWallpaper(_ name: String, exclude: Bool) async throws -> RemoteState {
+        try await send(request("POST", "api/wallpapers/\(name)/remove", body: ["exclude": exclude]), as: RemoteState.self)
+    }
+
+    /// 删除图库里的原图（不可撤销，记进删除记录），同时移出壁纸文件夹。
+    func deleteOriginal(_ name: String) async throws -> RemoteState {
+        try await send(request("POST", "api/wallpapers/\(name)/delete", body: [:]), as: RemoteState.self)
+    }
+
     /// 状态事件流（SSE）：连上先收到一次当前状态，之后状态变了就收到一次。
     func events() -> AsyncThrowingStream<RemoteState, Error> {
         let req = request("GET", "api/events", timeout: 30)

@@ -30,6 +30,8 @@ struct RemoteState: Codable, Equatable {
     /// 下一次自动换的时间（Unix 秒），没开自动换时为 nil
     var nextAuto: Double?
     var wallpapers: Int
+    /// 壁纸列表的指纹，变了就重新拉 /api/wallpapers（旧版桌面端没有这个字段）
+    var wallsRev: String?
     var dest: String
     var sampleCount: Int
     var libraryDirs: Int
@@ -50,6 +52,26 @@ struct LastRun: Codable, Equatable {
     var detail: String?
 
     var date: Date { Date(timeIntervalSince1970: at) }
+}
+
+/// 壁纸文件夹里的一张（desktop/remotewalls.go 的 remoteWall）。
+struct Wallpaper: Codable, Identifiable, Hashable {
+    /// 壁纸文件夹里的文件名，也是接口路径里的 id
+    var name: String
+    /// 原图路径；旧版本换上的没有记录，只能移出
+    var source: String?
+    var id: String { name }
+    var hasSource: Bool { !(source ?? "").isEmpty }
+}
+
+struct WallpaperList: Codable {
+    var rev: String
+    var items: [Wallpaper]
+}
+
+/// 要哪种尺寸的图：缩略图（360 宽）或大图（2048 宽）。
+enum ImageKind: String {
+    case thumb, image
 }
 
 struct ServerInfo: Codable {

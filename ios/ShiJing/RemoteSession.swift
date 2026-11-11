@@ -21,6 +21,11 @@ final class RemoteSession {
     private(set) var busy = false
     /// 上一次操作失败的原因（界面上弹提示）
     var actionError: String?
+    /// 壁纸文件夹里的图（和桌面同样的顺序）；walls_rev 变了就重新拉
+    private(set) var walls: [Wallpaper] = []
+    private(set) var wallsRev: String?
+    /// 正在移出 / 删除的那张
+    private(set) var acting: String?
 
     private let store: MacStore
     private var task: Task<Void, Never>?
@@ -31,7 +36,7 @@ final class RemoteSession {
         self.store = store
     }
 
-    private func client() throws -> APIClient {
+    func client() throws -> APIClient {
         try APIClient(address: mac.address, token: store.token(for: macID))
     }
 
@@ -56,6 +61,7 @@ final class RemoteSession {
                 for try await s in try client().events() {
                     state = s
                     connection = .live
+                    if s.wallsRev != wallsRev { Task { await refreshWalls() } }
                     delay = 1
                     failures = 0
                 }
@@ -104,6 +110,55 @@ final class RemoteSession {
         await act { try await $0.stop() }
     }
 
+    // MARK: 壁纸
+
+    /// 重新拉壁纸列表（状态里的 walls_rev 变了时自动调）。
+    func refreshWalls() async {
+        guard let rev = state?.wallsRev, rev != wallsRev else { return }
+        do {
+            let list = try await client().wallpapers()
+            walls = list.items
+            wallsRev = list.rev
+        } catch {
+            // 列表拉不到不影响别的，下次状态推送再试
+        }
+    }
+
+    /// 移出壁纸文件夹；exclude 时以后的采样也跳过这张原图。成功返回 true。
+    @discardableResult
+    func removeWallpaper(_ w: Wallpaper, exclude: Bool) async -> Bool {
+        await wallAct(w) { try await $0.removeWallpaper(w.name, exclude: exclude) }
+    }
+
+    /// 删除图库里的原图（界面上已经二次确认过）。
+    @discardableResult
+    func deleteOriginal(_ w: Wallpaper) async -> Bool {
+        await wallAct(w) { try await $0.deleteOriginal(w.name) }
+    }
+
+    private func wallAct(_ w: Wallpaper, _ op: (APIClient) async throws -> RemoteState) async -> Bool {
+        acting = w.name
+        defer { acting = nil }
+        #if DEBUG
+        if Self.demoMode != nil { // 演示模式：只在本地去掉
+            walls.removeAll { $0.name == w.name }
+            return true
+        }
+        #endif
+        do {
+            state = try await op(client())
+            // 先在本地去掉，不用等重新拉列表
+            walls.removeAll { $0.name == w.name }
+            await refreshWalls()
+            return true
+        } catch APIError.unauthorized(let msg) {
+            connection = .unpaired(msg)
+        } catch {
+            actionError = Self.describe(error)
+        }
+        return false
+    }
+
     private func act(_ op: (APIClient) async throws -> RemoteState) async {
         busy = true
         defer { busy = false }
@@ -123,7 +178,8 @@ final class RemoteSession {
 extension RemoteSession {
     static var demoMode: String? {
         let args = ProcessInfo.processInfo.arguments
-        return args.contains("-demoRunning") ? "running" : (args.contains("-demo") ? "idle" : nil)
+        if args.contains("-demoRunning") { return "running" }
+        return args.contains("-demo") || args.contains("-demoPreview") ? "idle" : nil
     }
 
     static func demo(_ mode: String, store: MacStore) -> RemoteSession {
@@ -144,8 +200,15 @@ extension RemoteSession {
             last: running ? nil : LastRun(at: now - 3600, status: "ok", error: nil, selected: 300, copied: 300, failed: 0,
                                          elapsed: 73, brief: "重合 4% · 删 3 张",
                                          detail: "和上一轮相比：新换上 288 张，重复 12 张（重合率 4%）\n筛选删除 3 张\n覆盖 300 / 415 个文件夹"),
-            nextAuto: now + 6 * 3600, wallpapers: 300, dest: "~/Pictures/Wallpapers0", sampleCount: 300, libraryDirs: 3)
+            nextAuto: now + 6 * 3600, wallpapers: 300, wallsRev: "demo", dest: "~/Pictures/Wallpapers0", sampleCount: 300, libraryDirs: 3)
         s.connection = .live
+        let places = ["冰岛", "阿尔卑斯", "京都", "黄石", "新西兰", "巴塔哥尼亚", "挪威", "托斯卡纳", "大理", "落基山"]
+        s.walls = (0..<300).map { i in
+            Wallpaper(name: "风景-\(places[i % places.count])-\(String(format: "%04d", i)).jpg",
+                      source: i % 7 == 6 ? nil : "/Volumes/Media0/风景/\(places[i % places.count])/\(String(format: "%04d", i)).jpg")
+        }
+        s.wallsRev = "demo"
+        ImageStore.shared.demo = true
         return s
     }
 }

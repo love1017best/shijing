@@ -24,8 +24,11 @@ struct RootView: View {
                 .navigationTitle("拾景")
         } detail: {
             if let session {
-                DashboardView(session: session, store: store)
-                    .id(session.macID)
+                // 详情栏自己的导航栈：从概览进「全部壁纸」
+                NavigationStack {
+                    DashboardView(session: session, store: store)
+                }
+                .id(session.macID)
             } else {
                 ContentUnavailableView {
                     Label("选一台 Mac", systemImage: "desktopcomputer")

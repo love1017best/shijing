@@ -12,9 +12,11 @@
 		1AB452A220F4A1469B9CCD00 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2824E0235535F38B05ADDF55 /* APIClient.swift */; };
 		21220E16DFE4ED934EEDE0FB /* Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */; };
 		32FAC1FD1E3F25C80AC63004 /* PairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F148DFA81C0AF1A9841A39B7 /* PairView.swift */; };
+		679FCD5B5F3188967A723F62 /* WallpapersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27D8BD3049F3539DD7DA7537 /* WallpapersView.swift */; };
 		94215927670239EE363E48CE /* ShiJingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04551D48684EF104173433F5 /* ShiJingApp.swift */; };
 		BD12CD4B6997209CA3570CAB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EBBECD2386D5DFE983684B8F /* Assets.xcassets */; };
 		D6C6708F80AFC875451C3BDD /* RemoteSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D7F2A21A98AC8FD6910260 /* RemoteSession.swift */; };
+		D7E126223CA530FF96744B6D /* ImageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */; };
 		DA6264799C3CF66C5F9F9994 /* MacStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */; };
 		F223669D3393FCDE9438804C /* MacListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FB9144ACC689795E105A27 /* MacListView.swift */; };
 /* End PBXBuildFile section */
@@ -24,13 +26,16 @@
 		04551D48684EF104173433F5 /* ShiJingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiJingApp.swift; sourceTree = "<group>"; };
 		15FB9144ACC689795E105A27 /* MacListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacListView.swift; sourceTree = "<group>"; };
 		1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
+		27D8BD3049F3539DD7DA7537 /* WallpapersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpapersView.swift; sourceTree = "<group>"; };
 		2824E0235535F38B05ADDF55 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacStore.swift; sourceTree = "<group>"; };
 		57D7F2A21A98AC8FD6910260 /* RemoteSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSession.swift; sourceTree = "<group>"; };
 		6AC7C4670660D49C3BD8F942 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		725B2CCDED437B4D2F84E0BD /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageStore.swift; sourceTree = "<group>"; };
 		A5CD57E5BA5441C8D0006947 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		D86F178096ED4F9BDCD820EE /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
+		E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 		EBBECD2386D5DFE983684B8F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F148DFA81C0AF1A9841A39B7 /* PairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -59,7 +64,9 @@
 				EBBECD2386D5DFE983684B8F /* Assets.xcassets */,
 				A5CD57E5BA5441C8D0006947 /* DashboardView.swift */,
 				1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */,
+				A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */,
 				6AC7C4670660D49C3BD8F942 /* Info.plist */,
+				E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */,
 				15FB9144ACC689795E105A27 /* MacListView.swift */,
 				35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */,
 				725B2CCDED437B4D2F84E0BD /* Models.swift */,
@@ -67,6 +74,7 @@
 				57D7F2A21A98AC8FD6910260 /* RemoteSession.swift */,
 				04551D48684EF104173433F5 /* ShiJingApp.swift */,
 				D86F178096ED4F9BDCD820EE /* Signing.xcconfig */,
+				27D8BD3049F3539DD7DA7537 /* WallpapersView.swift */,
 			);
 			path = ShiJing;
 			sourceTree = "<group>";
@@ -144,12 +152,14 @@
 				1AB452A220F4A1469B9CCD00 /* APIClient.swift in Sources */,
 				099E53CA17FB750EED57745A /* DashboardView.swift in Sources */,
 				21220E16DFE4ED934EEDE0FB /* Discovery.swift in Sources */,
+				D7E126223CA530FF96744B6D /* ImageStore.swift in Sources */,
 				F223669D3393FCDE9438804C /* MacListView.swift in Sources */,
 				DA6264799C3CF66C5F9F9994 /* MacStore.swift in Sources */,
 				0BAE969FA5B1F7CEA43055C5 /* Models.swift in Sources */,
 				32FAC1FD1E3F25C80AC63004 /* PairView.swift in Sources */,
 				D6C6708F80AFC875451C3BDD /* RemoteSession.swift in Sources */,
 				94215927670239EE363E48CE /* ShiJingApp.swift in Sources */,
+				679FCD5B5F3188967A723F62 /* WallpapersView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

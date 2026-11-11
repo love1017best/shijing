@@ -58,6 +58,7 @@ struct DashboardView: View {
                         controlSection(state)
                     }
                     List {
+                        wallsSection(rows: 3)
                         lastRunSection(state)
                         overviewSection(state)
                     }
@@ -67,6 +68,7 @@ struct DashboardView: View {
                     connectionSection
                     statusSection(state)
                     controlSection(state)
+                    wallsSection(rows: 3)
                     lastRunSection(state)
                     overviewSection(state)
                 }
@@ -175,6 +177,25 @@ struct DashboardView: View {
                 } else if s.willDelete {
                     Text("会先删除图库里不合格的原图，点了之后可以选只模拟。")
                 }
+            }
+        }
+    }
+
+    /// 当前壁纸：前几张缩略图，点开看大图、长按整理；「全部」进整个网格。
+    @ViewBuilder private func wallsSection(rows: Int) -> some View {
+        if !session.walls.isEmpty {
+            Section {
+                WallGrid(session: session, rows: rows)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))
+                NavigationLink {
+                    AllWallpapersView(session: session)
+                } label: {
+                    LabeledContent("全部壁纸", value: "\(session.walls.count) 张")
+                }
+            } header: {
+                Text("当前壁纸")
+            } footer: {
+                Text("点一张看大图，长按可以移出或删除原图。")
             }
         }
     }

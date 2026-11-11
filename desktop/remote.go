@@ -78,13 +78,16 @@ type remoteServer struct {
 	port      int
 	listenErr string
 	stopAd    func()
+	walls     wallsSnapshot // 壁纸列表（remotewalls.go），主线程发布
+	decodeSem chan struct{} // 限制同时解码的大图张数
 }
 
 func newRemoteServer(a *app, file string) *remoteServer {
 	rs := &remoteServer{
 		a: a, file: file, host: "Mac",
-		online: map[string]int{},
-		subs:   map[chan struct{}]struct{}{},
+		online:    map[string]int{},
+		decodeSem: make(chan struct{}, remoteDecodeWorkers),
+		subs:      map[chan struct{}]struct{}{},
 		listen: func() (net.Listener, error) {
 			ln, err := net.Listen("tcp", fmt.Sprintf(":%d", remotePort))
 			if err != nil {
@@ -303,6 +306,7 @@ func (rs *remoteServer) handler() http.Handler {
 	mux.HandleFunc("GET /api/events", rs.authed(rs.handleEvents))
 	mux.HandleFunc("POST /api/run", rs.authed(rs.handleRun))
 	mux.HandleFunc("POST /api/stop", rs.authed(rs.handleStop))
+	rs.wallRoutes(mux)
 	return mux
 }
 
@@ -581,6 +585,7 @@ type remoteState struct {
 	Last       *remoteLast `json:"last,omitempty"`
 	NextAuto   int64       `json:"next_auto,omitempty"` // Unix 秒，0 表示没开自动换
 	Wallpapers int         `json:"wallpapers"`          // 壁纸文件夹里现在有几张
+	WallsRev   string      `json:"walls_rev"`           // 壁纸列表的指纹，变了手机就重新拉 /api/wallpapers
 	Dest       string      `json:"dest"`
 	Sample     int         `json:"sample_count"`
 	Library    int         `json:"library_dirs"`
@@ -609,6 +614,7 @@ func (a *app) remoteSnapshot() remoteState {
 		Unmounted:  a.unmountedCount(),
 		WillDelete: a.willDelete(),
 		Wallpapers: len(a.walls.all),
+		WallsRev:   wallsRev(a.walls.all),
 		Dest:       tildify(a.cfg.DestDir),
 		Sample:     int(a.num),
 		Library:    len(a.allDirs()),
@@ -660,7 +666,9 @@ func (a *app) publishRemote() {
 	if port, _ := a.remote.status(); port == 0 {
 		return
 	}
-	data, err := json.Marshal(a.remoteSnapshot())
+	snap := a.remoteSnapshot()
+	a.remote.publishWalls(snap.WallsRev, &a.walls)
+	data, err := json.Marshal(snap)
 	if err != nil {
 		return
 	}
