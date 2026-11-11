@@ -29,9 +29,14 @@ func (a *app) deletedPage(c *ui.Context) {
 		return
 	}
 
-	// 概要：一共删了多少、最近一次什么时候
-	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+	// 概要：按筛选规则删了多少、手动删了多少，最近一次什么时候
+	byFilter, manual := core.CountDeletions(recs)
+	ui.Row(c).Gap(10).AlignItems(ui.Center).Wrap().Children(func() {
 		pill(c, fmt.Sprintf("共 %s 张", humanCount(len(recs))), t.Danger)
+		pill(c, fmt.Sprintf("筛选删除 %s 张", humanCount(byFilter)), t.TextMuted).
+			Tooltip("筛选时按规则删掉的（竖屏、接近正方形、分辨率不足）")
+		pill(c, fmt.Sprintf("手动删除 %s 张", humanCount(manual)), t.TextMuted).
+			Tooltip("在预览、右键菜单或手机上点「删除图库里的原图」删掉的")
 		muted(c, "最近一次 "+recs[0].At.Format("2006年1月2日 15:04"))
 	})
 

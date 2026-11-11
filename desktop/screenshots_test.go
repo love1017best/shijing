@@ -164,6 +164,7 @@ func TestScreenshots(t *testing.T) {
 			{"/Volumes/NAS/Photos/风景/新疆 2026/IMG_2231.jpg", "分辨率不足 1920×1080"},
 			{"/Volumes/NAS/Photos/风景/新疆 2026/IMG_2240.jpg", "接近正方形 3000×3000"},
 			{"/Volumes/NAS/Photos/城市/东京/DSC_0912.jpg", "竖屏 2160×3840"},
+			{"/Volumes/NAS/Photos/城市/东京/DSC_0957.jpg", core.ReasonManual},
 		} {
 			core.LogDeletion(f.paths.DeleteLog, d.path, 3840, 2160, d.reason)
 		}

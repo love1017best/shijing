@@ -202,6 +202,14 @@ struct DeletionsView: View {
                     ContentUnavailableView("没有删除过原图", systemImage: "trash.slash")
                 } else {
                     List {
+                        if let f = list.filter, let m = list.manual {
+                            Section {
+                                LabeledContent("按筛选规则删除", value: "\(f) 张")
+                                LabeledContent("手动删除", value: "\(m) 张")
+                            } footer: {
+                                Text("筛选删的是竖屏、接近正方形、分辨率不足的图；手动删的是在预览或手机上点「删除图库里的原图」的。")
+                            }
+                        }
                         ForEach(groups(list.items), id: \.day) { g in
                             Section(g.day.formatted(.dateTime.year().month().day().weekday())) {
                                 ForEach(g.items) { d in

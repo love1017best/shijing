@@ -198,7 +198,7 @@ func (a *app) deleteOriginal(wall string) {
 		a.showErr("删除原图失败", err.Error())
 		return
 	}
-	core.LogDeletion(a.paths.DeleteLog, src, int(a.minW), int(a.minH), "手动删除")
+	core.LogDeletion(a.paths.DeleteLog, src, int(a.minW), int(a.minH), core.ReasonManual)
 	a.appendLog(fmt.Sprintf("🔥 手动删除原图: %s", src))
 	_ = os.Remove(wall)
 	a.dropWall(wall)

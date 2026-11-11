@@ -105,6 +105,9 @@ struct Deletion: Codable, Identifiable, Hashable {
 
 struct DeletionList: Codable {
     var total: Int
+    /// 按筛选规则删的、手动删的张数（全部记录，不只是 items 里这些）；旧版桌面端没有
+    var filter: Int?
+    var manual: Int?
     var items: [Deletion]
 }
 

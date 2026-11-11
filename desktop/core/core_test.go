@@ -746,4 +746,9 @@ func TestReadDeleteLog(t *testing.T) {
 	if len(recs) != 2 || recs[0].Path != "/new/b.jpg" || recs[0].Reason != "竖屏 1080×1920" || recs[1].Path != "/old/a.jpg" || recs[1].Reason != "" {
 		t.Errorf("应从新到旧、兼容没有原因的旧格式: %+v", recs)
 	}
+	LogDeletion(p, "/new/c.jpg", 3840, 2160, ReasonManual)
+	// 没有原因的旧日志也是筛选删的
+	if f, m := CountDeletions(ReadDeleteLog(p)); f != 2 || m != 1 {
+		t.Errorf("应是筛选删除 2、手动删除 1，实际 %d、%d", f, m)
+	}
 }

@@ -263,7 +263,8 @@ func (rs *remoteServer) handleDeletions(w http.ResponseWriter, r *http.Request, 
 	for _, d := range recs[:min(len(recs), remoteDeleteShown)] {
 		items = append(items, remoteDeletion{At: d.At.Unix(), Name: filepath.Base(d.Path), Dir: tildify(filepath.Dir(d.Path)), Reason: d.Reason})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"total": len(recs), "items": items})
+	byFilter, manual := core.CountDeletions(recs)
+	writeJSON(w, http.StatusOK, map[string]any{"total": len(recs), "filter": byFilter, "manual": manual, "items": items})
 }
 
 // handleWallOriginal 给壁纸文件夹里这张图的原文件（手机上分享、存到相册用）。

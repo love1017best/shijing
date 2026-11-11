@@ -119,6 +119,25 @@ func LogDeletion(logPath, file string, minW, minH int, reason string) {
 	fmt.Fprintf(f, "%s\t(阈值 %dx%d)\t%s\t%s\n", time.Now().Format("2006-01-02 15:04:05"), minW, minH, file, reason)
 }
 
+// ReasonManual 是手动删除（预览 / 右键菜单 / 手机上的「删除图库里的原图」）记进日志的原因；
+// 别的原因（竖屏、分辨率不足…，以及没有原因的旧日志）都是筛选按规则删的。
+const ReasonManual = "手动删除"
+
+// CountDeletions 把删除记录分成按筛选规则删的和手动删的两类计数。
+func CountDeletions(recs []DeleteRecord) (byFilter, manual int) {
+	for _, r := range recs {
+		if r.Manual() {
+			manual++
+		} else {
+			byFilter++
+		}
+	}
+	return byFilter, manual
+}
+
+// Manual 表示这一条是手动删除的（不是筛选按规则删的）。
+func (r DeleteRecord) Manual() bool { return r.Reason == ReasonManual }
+
 // DeleteRecord 是删除日志里的一行。
 type DeleteRecord struct {
 	At     time.Time

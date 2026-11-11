@@ -108,7 +108,7 @@ func TestRemoteLogDeletionsOriginal(t *testing.T) {
 	core.LogDeletion(h.paths.DeleteLog, "/Volumes/Media0/Lib/set1/p.jpg", 3840, 2160, "竖屏 1080×1920")
 	_, data = h.do(t, "GET", "/api/deletions", tok, nil)
 	items := data["items"].([]any)
-	if data["total"] != float64(1) || len(items) != 1 {
+	if data["total"] != float64(1) || len(items) != 1 || data["filter"] != float64(1) || data["manual"] != float64(0) {
 		t.Fatalf("deletions = %v", data)
 	}
 	if d := items[0].(map[string]any); d["name"] != "p.jpg" || d["reason"] != "竖屏 1080×1920" || d["at"].(float64) <= 0 {
