@@ -9,42 +9,28 @@ struct ShiJingApp: App {
     }
 }
 
-/// 顶层：左栏是 Mac 列表，右栏是选中那台的遥控面板。
-/// 窄屏（竖着拿的手机、折叠状态、分屏的窄半边）自动收成一栏导航栈，宽屏左右两栏。
+/// 顶层：没配对过任何 Mac 时整屏是「找 Mac / 配对」；配对过之后只有遥控面板，
+/// 切换、添加、移除 Mac 收在标题菜单里（点顶部的 Mac 名字）——这些只在第一次装的时候用，不值得常驻一个侧栏。
 struct RootView: View {
     @State private var store = MacStore()
     @State private var discovery = Discovery()
     @State private var session: RemoteSession?
-    @State private var compactColumn = NavigationSplitViewColumn.detail
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        NavigationSplitView(preferredCompactColumn: $compactColumn) {
-            MacListView(store: store, discovery: discovery)
-                .navigationTitle("拾景")
-        } detail: {
+        Group {
             if let session {
-                // 详情栏自己的导航栈：从概览进「全部壁纸」
                 NavigationStack {
                     DashboardView(session: session, store: store)
+                        .macTitleMenu(store: store, discovery: discovery)
                 }
                 .id(session.macID)
             } else {
-                ContentUnavailableView {
-                    Label("选一台 Mac", systemImage: "desktopcomputer")
-                } description: {
-                    Text("在电脑上的拾景里打开「设置 › 手机遥控」，这台 Mac 会出现在列表里，点它配对。")
-                }
+                SetupView(store: store, discovery: discovery)
             }
         }
-        .onAppear {
-            syncSession()
-            if session == nil { compactColumn = .sidebar }
-        }
-        .onChange(of: store.selectedID) {
-            syncSession()
-            if store.selectedID != nil { compactColumn = .detail }
-        }
+        .onAppear { syncSession() }
+        .onChange(of: store.selectedID) { syncSession() }
         .onChange(of: scenePhase) { _, phase in
             #if DEBUG
             if RemoteSession.demoMode != nil { return }

@@ -1,27 +1,101 @@
 import SwiftUI
 
-/// 左栏：配对过的 Mac；还没配对过任何 Mac 时直接列出附近找到的，配对过之后点「添加其他 Mac」才去找。
-struct MacListView: View {
+/// 还没配对过任何 Mac 时的首页：列出局域网里找到的拾景，点一台配对，或者手动输入地址。
+struct SetupView: View {
+    let store: MacStore
+    let discovery: Discovery
+    @State private var width: CGFloat = 0
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.largeTitle)
+                            .foregroundStyle(.tint)
+                        Text("在手机上遥控电脑上的拾景：换一批壁纸、看当前的壁纸、整理不想要的。")
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 6)
+                }
+                NearbySection(store: store, discovery: discovery)
+            }
+            .navigationTitle("拾景")
+            // 内屏、iPad 上内容别拉得太宽（只收窄内容，背景照样铺满）
+            .contentMargins(.horizontal, max(0, (width - 640) / 2), for: .scrollContent)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        }
+        .onAppear { discovery.want("setup", true) }
+        .onDisappear { discovery.want("setup", false) }
+    }
+}
+
+extension View {
+    /// 遥控面板的标题菜单（点顶部的 Mac 名字）：切换 Mac、添加其他 Mac、管理已配对的。
+    func macTitleMenu(store: MacStore, discovery: Discovery) -> some View {
+        modifier(MacTitleMenu(store: store, discovery: discovery))
+    }
+}
+
+private struct MacTitleMenu: ViewModifier {
     let store: MacStore
     let discovery: Discovery
     @State private var adding = false
+    @State private var managing = false
+
+    func body(content: Content) -> some View {
+        content
+            .toolbarTitleMenu {
+                if store.macs.count > 1 {
+                    Picker("切换 Mac", selection: Binding(get: { store.selectedID }, set: { store.selectedID = $0 })) {
+                        ForEach(store.macs) { mac in
+                            Label(mac.name, systemImage: "desktopcomputer").tag(Optional(mac.id))
+                        }
+                    }
+                    Divider()
+                }
+                Button("添加其他 Mac…", systemImage: "plus") { adding = true }
+                Button("管理已配对的 Mac…", systemImage: "list.bullet") { managing = true }
+            }
+            .sheet(isPresented: $adding) {
+                AddMacView(store: store, discovery: discovery)
+            }
+            .sheet(isPresented: $managing) {
+                ManageMacsView(store: store)
+            }
+    }
+}
+
+/// 已配对的 Mac：点一台切换过去，左滑或长按移除。
+struct ManageMacsView: View {
+    let store: MacStore
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        List(selection: Binding(get: { store.selectedID }, set: { store.selectedID = $0 })) {
-            if store.macs.isEmpty {
-                NearbySection(store: store, discovery: discovery)
-            } else {
-                Section("已配对") {
+        NavigationStack {
+            List {
+                Section {
                     ForEach(store.macs) { mac in
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(mac.name)
-                                Text("\(mac.host):\(String(mac.port))").font(.caption).foregroundStyle(.secondary)
+                        Button {
+                            store.selectedID = mac.id
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(mac.name).foregroundStyle(.primary)
+                                        Text("\(mac.host):\(String(mac.port))").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: "desktopcomputer")
+                                }
+                                Spacer()
+                                if mac.id == store.selectedID {
+                                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                                }
                             }
-                        } icon: {
-                            Image(systemName: "desktopcomputer")
                         }
-                        .tag(mac.id)
                         .swipeActions {
                             Button("移除", role: .destructive) { store.remove(mac.id) }
                         }
@@ -29,19 +103,17 @@ struct MacListView: View {
                             Button("移除这台 Mac", systemImage: "trash", role: .destructive) { store.remove(mac.id) }
                         }
                     }
-                }
-                Section {
-                    Button("添加其他 Mac…", systemImage: "plus") { adding = true }
+                } footer: {
+                    Text("移除后要在电脑上重新配对才能再连。电脑上的拾景也可以在「设置 › 手机遥控」里取消这台手机的配对。")
                 }
             }
+            .navigationTitle("已配对的 Mac")
+            .iOSInlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
+            }
         }
-        .sheet(isPresented: $adding) {
-            AddMacView(store: store, discovery: discovery)
-        }
-        // 一台都没配对时侧栏里直接列出附近的 Mac，要搜索；配对过之后侧栏不再搜
-        .onAppear { discovery.want("sidebar", store.macs.isEmpty) }
-        .onChange(of: store.macs.isEmpty) { _, empty in discovery.want("sidebar", empty) }
-        .onDisappear { discovery.want("sidebar", false) }
+        .onChange(of: store.macs.isEmpty) { _, empty in if empty { dismiss() } }
     }
 }
 

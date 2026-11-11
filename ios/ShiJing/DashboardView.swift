@@ -44,7 +44,7 @@ struct DashboardView: View {
             ContentUnavailableView {
                 Label("配对已失效", systemImage: "lock.slash")
             } description: {
-                Text(msg + "\n移除后在列表里重新配对。")
+                Text(msg + "\n移除后重新配对。")
             } actions: {
                 Button("移除这台 Mac", role: .destructive) { store.remove(session.macID) }
                     .buttonStyle(.borderedProminent)
