@@ -307,6 +307,7 @@ func (rs *remoteServer) handler() http.Handler {
 	mux.HandleFunc("POST /api/run", rs.authed(rs.handleRun))
 	mux.HandleFunc("POST /api/stop", rs.authed(rs.handleStop))
 	rs.wallRoutes(mux)
+	rs.extraRoutes(mux)
 	return mux
 }
 
@@ -589,6 +590,10 @@ type remoteState struct {
 	Dest       string      `json:"dest"`
 	Sample     int         `json:"sample_count"`
 	Library    int         `json:"library_dirs"`
+	// 第 3 期（remoteextra.go）
+	Settings *remoteSettings `json:"settings,omitempty"`  // 手机上能改的几项设置
+	UndoName string          `json:"undo_name,omitempty"` // 最近一次可以撤销的移出
+	Excluded int             `json:"excluded"`            // 「不再选」名单里有几张
 }
 
 type remoteLast struct {
@@ -618,6 +623,9 @@ func (a *app) remoteSnapshot() remoteState {
 		Dest:       tildify(a.cfg.DestDir),
 		Sample:     int(a.num),
 		Library:    len(a.allDirs()),
+		Settings:   a.remoteSettings(),
+		UndoName:   a.undoName(),
+		Excluded:   len(a.cfg.Excluded),
 	}
 	if s.WillDelete {
 		s.DeleteNote = a.deleteNotice()
