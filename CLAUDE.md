@@ -73,6 +73,7 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
   - **缩略图 → 原图**：`last_selection.json` 里 `dests` 和 `sources` 一一对应，`core.WallpaperSources` 读成「壁纸文件名 → 原图」；旧版本换上的没有 `dests`，缩略图菜单里就不出现「不再选它 / 删除原图」。
   - **定时自动换**（`auto_run_hours`）：`main.go` 里每分钟 `maybeAutoRun`，从上次运行（没运行过从应用启动）开始计时；`startRunWith(true)` 会强制 `DeleteDuringFilter=false`，自动运行永远不删原图。
   - 图库统计、空间预估用 `a.lastGood`（最近一次成功运行，存在 `ui_state.json` 的 `last_success`），因为运行中 / 失败后 `a.last` 不是成功的结果。
+- 页面宽度策略（`view.go`）：概览页铺满；其余页面按上一帧量到的内容区宽度 `a.viewW` 决定——`a.twoCol()`（内容区 ≥ `twoColMin`）时设置 / 图库 / 归档用 `a.columns` 排成左右两栏、最宽 `twoColMax`，窄时单栏、最宽 `contentMax`；关于页始终单栏居中。新加设置分组时放进 `columns` 的左栏或右栏，注意两栏高度大致平衡。概览横幅图（`walls.heroPath`）也能点开预览，所以预览序号从横幅图算起。
 - 「上次运行」的「新换 N 张 / 重合率」来自 `core.compareSelection`：按**原图路径**比（壁纸文件夹里的文件名会因重名被改写，不能拿来比），上一轮的选择存在数据目录的 `last_selection.json`（命令行也会写），没有记录（刚升级、换了壁纸文件夹）时，在清空壁纸文件夹**之前**读里面现有的文件名，按 `destName`（「上级文件夹-原名」）近似比较（`PrevByName`）。只在复制完整跑完后写，被停止的不算一轮。运行卡片上的删除计数是 `app.countDeletion` 从日志行里数的，改 `sorter.go` 的「待删除 / 已删除 / 删除失败」日志格式要同步改这里。
 - 停止靠 `core.Reporter.Stop`：筛选在文件夹之间检查（没检查的目录不写进增量状态，否则下次会被当成"没变化"跳过）、清空壁纸目录前检查一次、复制时不再开始新任务；被停止返回 `core.ErrCanceled`。新加耗时步骤时记得在安全点检查它。
 - 删除原图前的确认框是注入的 `app.confirmDelete`（测试里可以替换）；「不再提示」存在 `ui_state.json`，`view` 发现「删除不合格原图」被重新打开时恢复确认。

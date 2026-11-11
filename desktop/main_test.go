@@ -364,6 +364,47 @@ func TestThumbnailOpensItsImage(t *testing.T) {
 	}
 }
 
+func TestHeroOpensItsImage(t *testing.T) {
+	f, tt := newFakeApp(t)
+	img := image.NewRGBA(image.Rect(0, 0, 16, 10))
+	opened := ""
+	f.openPath = func(p string) { opened = p }
+	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), total: 3, hero: ui.NewBitmap(img), heroPath: "/w/hero.jpg",
+		thumbs: []*ui.Bitmap{ui.NewBitmap(img)}, paths: []string{"/w/a.jpg"},
+		all: []string{"/w/hero.jpg", "/w/a.jpg", "/w/b.jpg"}}
+	f.wallsLoadedGen = f.wallsGen
+	tt.Frame()
+	click(t, tt, "打开壁纸文件夹")
+	tt.Frame()
+	if f.preview || opened == "" {
+		t.Fatalf("点横幅上的按钮不应打开预览: preview=%v opened=%q", f.preview, opened)
+	}
+	click(t, tt, "横幅壁纸")
+	tt.Frame()
+	if !f.preview || !tt.HasText("hero.jpg") || !tt.HasText("1 / 3") {
+		t.Errorf("点横幅应打开横幅图的大图: %q", tt.Texts())
+	}
+}
+
+func TestSettingsColumnsFollowWindowWidth(t *testing.T) {
+	for _, tc := range []struct {
+		w    int
+		want bool
+	}{{1500, true}, {800, false}} {
+		f, _ := newFakeApp(t)
+		f.page = pageSettings
+		tt := ui.NewTesterWith(f.view, tc.w, 800, ui.TesterOptions{})
+		tt.Frame()
+		tt.Frame()
+		if f.twoCol() != tc.want {
+			t.Errorf("窗口宽 %d 时两栏应为 %v（内容区宽 %.0f）", tc.w, tc.want, f.viewW)
+		}
+		if !tt.HasText("输出") || !tt.HasText("配置文件") {
+			t.Errorf("两种布局都要显示全部设置: %q", tt.Texts())
+		}
+	}
+}
+
 func TestRunNeedsDestDir(t *testing.T) {
 	f, tt := newFakeApp(t)
 	f.cfg.SampleOnlyDirs = []string{"/Volumes/Media0/Fav"}

@@ -15,8 +15,10 @@ var (
 
 const (
 	sidebarWidth   = 216
-	titleBarHeight = 52 // 隐藏标题栏后，红绿灯按钮占的那一条
-	contentMax     = 860
+	titleBarHeight = 52   // 隐藏标题栏后，红绿灯按钮占的那一条
+	contentMax     = 860  // 单栏页面的最大宽度：表单再宽就不好读了
+	twoColMin      = 1040 // 内容区宽度到这里时，设置类页面改成左右两栏（每栏约 500）
+	twoColMax      = 1360 // 两栏时的最大宽度
 )
 
 // applyTheme 在系统明暗主题的基础上换上品牌色，并统一圆角。

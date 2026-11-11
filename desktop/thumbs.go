@@ -27,27 +27,29 @@ const (
 
 // wallpapers 是壁纸文件夹的快照。
 type wallpapers struct {
-	dir     string
-	total   int               // 文件夹里的图片数
-	hero    *ui.Bitmap        // 横幅背景；没有图片时为 nil
-	thumbs  []*ui.Bitmap      // 缩略图
-	paths   []string          // 每张缩略图对应的文件，点击时打开
-	rest    []string          // 还没解码的文件（已打乱），需要更多缩略图时从这里取
-	all     []string          // 文件夹里全部图片（已打乱，横幅图也在内），大图预览按这个顺序翻
-	sources map[string]string // 壁纸文件名 → 原图路径（core.WallpaperSources）；旧版本换上的为 nil
-	loading bool
-	more    bool // 正在后台解码更多缩略图
+	dir      string
+	total    int               // 文件夹里的图片数
+	hero     *ui.Bitmap        // 横幅背景；没有图片时为 nil
+	heroPath string            // 横幅图对应的文件，点横幅打开它的大图
+	thumbs   []*ui.Bitmap      // 缩略图
+	paths    []string          // 每张缩略图对应的文件，点击时打开
+	rest     []string          // 还没解码的文件（已打乱），需要更多缩略图时从这里取
+	all      []string          // 文件夹里全部图片（已打乱，横幅图也在内），大图预览按这个顺序翻
+	sources  map[string]string // 壁纸文件名 → 原图路径（core.WallpaperSources）；旧版本换上的为 nil
+	loading  bool
+	more     bool // 正在后台解码更多缩略图
 }
 
 // scannedWallpapers 是后台扫描的结果（image.Image 在主线程上才转成 Bitmap）。
 type scannedWallpapers struct {
-	dir    string
-	total  int
-	hero   image.Image
-	thumbs []image.Image
-	paths  []string
-	rest   []string
-	all    []string
+	dir      string
+	total    int
+	hero     image.Image
+	heroPath string
+	thumbs   []image.Image
+	paths    []string
+	rest     []string
+	all      []string
 }
 
 // scanWallpapers 列出文件夹里的图片，打乱后解码横幅图和前几张缩略图。读不了的图片直接跳过。
@@ -77,7 +79,7 @@ func scanWallpapers(dir string) scannedWallpapers {
 			continue
 		}
 		if img.Bounds().Dx() >= thumbWidth*2 {
-			res.hero = img
+			res.hero, res.heroPath = img, f
 			break
 		}
 		res.thumbs, res.paths = append(res.thumbs, shrink(img, thumbWidth)), append(res.paths, f)
@@ -157,7 +159,7 @@ func (a *app) loadWallpapers() {
 		s := a.scanWallpapers(dir)
 		sources := core.WallpaperSources(a.paths.Selection, dir)
 		a.update(func() {
-			w := wallpapers{dir: s.dir, total: s.total, paths: s.paths, rest: s.rest, all: s.all, sources: sources}
+			w := wallpapers{dir: s.dir, total: s.total, heroPath: s.heroPath, paths: s.paths, rest: s.rest, all: s.all, sources: sources}
 			if s.hero != nil {
 				w.hero = ui.NewBitmap(s.hero)
 			}

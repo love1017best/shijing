@@ -51,11 +51,19 @@ func (a *app) view(c *ui.Context) {
 			// 隐藏标题栏后，内容区顶部这一条用来拖动窗口
 			ui.Box(c).Height(max(c.TitleBar().Height, 24)).Shrink(0).DragWindow()
 			sc := ui.Scroll(c).Grow(1)
-			a.viewH = sc.LayoutBounds().H
+			a.viewH, a.viewW = sc.LayoutBounds().H, sc.LayoutBounds().W
 			sc.Children(func() {
 				col := ui.Column(c).Padding(0, 36, 32, 36).Gap(22)
-				if a.page != pageOverview {
-					col.MaxWidth(contentMax) // 设置之类的表单太宽不好读；概览页铺满窗口，缩略图跟着变多
+				// 概览页铺满窗口，缩略图跟着变多；设置类页面窗口宽时分两栏，窄时单栏（表单太宽不好读）
+				switch {
+				case a.page == pageOverview:
+				case a.page == pageAbout:
+					// 关于页内容少，铺宽了显得空：保持单栏宽度，居中放
+					col.Width(min(max(a.viewW, 1), contentMax)).AlignSelf(ui.Center)
+				case a.twoCol():
+					col.MaxWidth(twoColMax)
+				default:
+					col.MaxWidth(contentMax)
 				}
 				a.pageH = col.LayoutBounds().H
 				col.Children(func() {
@@ -183,7 +191,16 @@ func (a *app) hero(c *ui.Context) {
 	dirs := a.allDirs()
 	white := ui.RGB(255, 255, 255)
 
-	ui.Box(c).Height(236).Radius(16).Clip().Background(duskTop).Children(func() {
+	box := ui.Box(c).Height(236).Radius(16).Clip().Background(duskTop)
+	if a.walls.hero != nil && a.walls.heroPath != "" && !a.running {
+		// 横幅图也是壁纸文件夹里的一张：点空白处打开它的大图（按钮各管各的）
+		box.Label("横幅壁纸").Cursor(ui.CursorPointer).Tooltip(filepath.Base(a.walls.heroPath) + "（点击查看大图，右键更多操作）").
+			ContextMenu(func(m *ui.Menu) { a.wallMenu(m, a.walls.heroPath) })
+		if box.Clicked() {
+			a.openPreviewOf(a.walls.heroPath)
+		}
+	}
+	box.Children(func() {
 		if a.walls.hero != nil {
 			ui.Image(c, a.walls.hero).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 		} else {
@@ -246,6 +263,22 @@ func (a *app) hero(c *ui.Context) {
 					Disabled(!a.canRun()).OnClick(a.requestRun)
 			})
 		})
+	})
+}
+
+// twoCol 表示设置类页面这一帧是否用左右两栏（按上一帧量到的内容区宽度判断）。
+func (a *app) twoCol() bool {
+	return a.viewW-72 >= twoColMin
+}
+
+// columns 在宽窗口里把 left、right 并排成两栏（顶部对齐、等宽），窄窗口里上下排成一栏。
+func (a *app) columns(c *ui.Context, gap float32, left, right func()) ui.Element {
+	if !a.twoCol() {
+		return ui.Column(c).Gap(gap).Children(func() { left(); right() })
+	}
+	return ui.Row(c).Gap(gap + 4).AlignItems(ui.Start).Children(func() {
+		ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(gap).Children(left)
+		ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(gap).Children(right)
 	})
 }
 
@@ -806,13 +839,14 @@ func (a *app) libraryPage(c *ui.Context) {
 	pageHeader(c, "图库", "两类目录都会参与采样，区别在于是否先删除不合格的图片。", func() {
 		iconButton(c, iconRefresh, "重新检查挂载", false).OnClick(a.checkMounts)
 	})
-	ui.Column(c).Gap(26).Disabled(a.running).Children(func() {
+	a.columns(c, 26, func() {
 		a.dirSection(c, "filter", "筛选 + 采样", iconScissors,
 			"先删除竖屏、正方形、分辨率不足的图片，再参与采样。会直接删除原图，删除记录写在数据目录的删除日志里。", &a.filter)
+	}, func() {
 		a.dirSection(c, "sample", "仅采样", iconHeart,
 			"不删除任何文件，采样时跳过不合格的图片。适合收藏夹这类不想动的目录。", &a.sample)
 		a.excludedSection(c)
-	})
+	}).Disabled(a.running)
 }
 
 // commonParent 返回所有目录共同的上级目录（由配置里的目录算出来，不是写死的）；不一致时返回 ""。
@@ -952,7 +986,7 @@ func (a *app) pathInput(c *ui.Context, value *string, label, dialogTitle string)
 func (a *app) settingsPage(c *ui.Context) {
 	t := c.Theme()
 	pageHeader(c, "设置", "改动会立即自动保存，下次运行生效。", nil)
-	ui.Column(c).Gap(24).Disabled(a.running).Children(func() {
+	a.columns(c, 24, func() {
 		group(c, "输出", "",
 			func() {
 				wideRow(c, "壁纸文件夹", "每次运行会先清空这个文件夹，再放入新选出的图片。系统壁纸幻灯片指向这里。", func() {
@@ -1020,6 +1054,7 @@ func (a *app) settingsPage(c *ui.Context) {
 			})
 		}
 		group(c, "画质要求", "只有横屏（宽高比大于 1.1）且不低于这个分辨率的图片才会被选中。", resRows...)
+	}, func() {
 
 		group(c, "筛选", "只作用于「筛选 + 采样」目录。",
 			func() {
@@ -1071,7 +1106,7 @@ func (a *app) settingsPage(c *ui.Context) {
 					ui.Button(c, "导入配置…").OnClick(a.importConfig)
 				})
 			})
-	})
+	}).Disabled(a.running)
 }
 
 // ── 归档 ──────────────────────────────────────────────────────────────────
@@ -1095,7 +1130,7 @@ func (a *app) archivePage(c *ui.Context) {
 				})
 			})
 
-		ui.Column(c).Gap(24).Disabled(!a.cfg.ArchiveEnabled).Opacity(archiveOpacity(a.cfg.ArchiveEnabled)).Children(func() {
+		a.columns(c, 24, func() {
 			group(c, "位置", "",
 				func() {
 					settingRow(c, "归档文件夹名", "建在每个归档位置下的子文件夹。", func(ui.Element) {
@@ -1107,7 +1142,7 @@ func (a *app) archivePage(c *ui.Context) {
 						a.pathInput(c, &a.cfg.ArchiveDirOverride, "归档位置", "选择归档位置（留空则自动使用各源目录的上级路径）")
 					})
 				})
-
+		}, func() {
 			group(c, "跨挂载点硬链接", "两项都留空则不做换算。采样和复制始终走图库里配置的路径。",
 				func() {
 					ui.Column(c).Gap(12).Padding(14, 16).Children(func() {
@@ -1126,7 +1161,7 @@ func (a *app) archivePage(c *ui.Context) {
 						a.pathInput(c, &a.cfg.ArchiveNFSRoot, "NFS 根路径", "选择同一份数据的 NFS 挂载根路径")
 					})
 				})
-		})
+		}).Disabled(!a.cfg.ArchiveEnabled).Opacity(archiveOpacity(a.cfg.ArchiveEnabled))
 	})
 }
 

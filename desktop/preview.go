@@ -89,6 +89,9 @@ func (a *app) previewBitmap(wall string) *ui.Bitmap {
 	if i := slices.Index(a.walls.paths, wall); i >= 0 {
 		return a.walls.thumbs[i]
 	}
+	if wall != "" && wall == a.walls.heroPath {
+		return a.walls.hero
+	}
 	return nil
 }
 

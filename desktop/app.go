@@ -134,6 +134,7 @@ type app struct {
 	pendingDelWall string // 要删除原图的那张壁纸（壁纸文件夹里的路径）
 	// 概览页缩略图网格：上一帧量到的可视高度、整页高度，和据此算出的行列数（stripLayout）
 	viewH, pageH         float32
+	viewW                float32 // 内容滚动区的宽度（上一帧），设置类页面据此决定单栏还是两栏
 	stripCols, stripRows int
 	update               func(fn func())             // 在主线程上执行 fn 并重绘
 	pickDir              func(title string) string   // 选择目录，取消返回 ""
