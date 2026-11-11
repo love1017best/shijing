@@ -150,8 +150,11 @@ struct DashboardView: View {
                 } label: {
                     // 文字和图标整体在按钮里居中；忙的时候换成转圈，按钮宽度不变
                     ZStack {
+                        // 列表行会把按钮里的图标染成强调色，和按钮底色一样就看不见了（文字因此看着偏右），显式用白色
                         Label("换一批壁纸", systemImage: "shuffle")
+                            .labelStyle(.titleAndIcon)
                             .font(.headline)
+                            .foregroundStyle(.white)
                             .opacity(session.busy ? 0 : 1)
                         if session.busy { ProgressView() }
                     }
