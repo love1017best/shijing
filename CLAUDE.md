@@ -153,6 +153,7 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 发布完**用 arm64 dmg 安装到本机，替换 `/Applications/拾景.app`**，再从 `/Applications` 启动。**不要直接运行 `build/` 下的 `.app`**（用户规定）。迭代后主动打开应用给用户预览、试用时也一样，任何时候都不 `open build/...app`。
   - 用 `desktop/scripts/install-local.sh`：构建 arm64 → 退出旧版 → 挂载 dmg 用 `ditto` 替换 `/Applications/拾景.app` → 启动，最后输出一行版本和运行路径（不一致时退出码非 0）。约 10 秒。
   - 发布时 arm64 dmg 刚构建过，用 `scripts/install-local.sh --no-build` 直接安装。
+  - **连着 iPhone / iPad 时，每次构建都要顺带把 iOS 版装上去**（用户规定，2026-11-11；没连就算了）。`install-local.sh` 最后会自动调 `scripts/install-ios-device.sh`：用 `devicectl list devices --json-output` 找连着的真机（模拟器不算），有就 `xcodebuild … -allowProvisioningUpdates` 构建、`devicectl` 安装并启动，一台都没有就跳过；iOS 失败只提示，不影响 macOS 的退出码。只改了 iOS、不需要动 Mac 时可以单独跑这个脚本。设备锁屏或没信任这台电脑时安装会失败，提示用户解锁就行。
   - 预览只需要 arm64；通用版只在发布时构建（发布仍然两个都要传）。`.app` 是 dmg 的中间产物，`mygo build` 省不掉它。
 
 ## 调试小抄

@@ -2,6 +2,7 @@
 # 构建 arm64 dmg，用 dmg 安装到 /Applications（替换旧版）并启动。
 # 用法：scripts/install-local.sh            # 构建后安装
 #       scripts/install-local.sh --no-build # 直接安装已有的 dmg（比如发布时刚构建过）
+#       加 --no-ios 不管手机；默认连着 iPhone / iPad 时也构建 iOS 版装上去（scripts/install-ios-device.sh）
 # 通用版（darwin/universal）只在发布时构建，这个脚本不管。
 set -euo pipefail
 
@@ -11,7 +12,7 @@ APP=/Applications/拾景.app
 VERSION=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' mygo.json | head -1)
 DMG=build/darwin-arm64/shi-jing-$VERSION-arm64.dmg
 
-if [[ "${1:-}" != "--no-build" ]]; then
+if [[ " $* " != *" --no-build "* ]]; then
 	mkdir -p build && go tool mygo build -skip-notarize >build/install-local.log 2>&1 || { tail -20 build/install-local.log; exit 1; }
 fi
 [[ -f "$DMG" ]] || { echo "找不到 $DMG"; exit 1; }
@@ -34,4 +35,11 @@ sleep 1
 INSTALLED=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Contents/Info.plist")
 RUNNING=$(lsappinfo info -only bundlepath -app "$BUNDLE_ID" 2>/dev/null | sed -n 's/.*="\(.*\)"/\1/p')
 echo "已安装 v$INSTALLED → $APP，正在运行：${RUNNING:-未检测到}"
-[[ "$INSTALLED" == "$VERSION" && "$RUNNING" == "$APP" ]]
+OK=0
+[[ "$INSTALLED" == "$VERSION" && "$RUNNING" == "$APP" ]] || OK=1
+
+# 连着 iPhone / iPad 时顺手把 iOS 版也装上（没连就跳过；失败只提示，不影响上面 macOS 的结果）
+if [[ " $* " != *" --no-ios "* ]]; then
+	scripts/install-ios-device.sh || true
+fi
+exit $OK
