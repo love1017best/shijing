@@ -51,6 +51,7 @@ struct WallPreview: View {
     private var wall: Wallpaper? { index.map { walls[$0] } }
     private var dragProgress: CGFloat { min(max(dragY, 0) / 400, 1) }
     private var zoomed: Bool { scale > 1.01 }
+    private var organizeDisabled: Bool { session.acting != nil || session.state?.running == true }
 
     var body: some View {
         GeometryReader { geo in
@@ -82,6 +83,7 @@ struct WallPreview: View {
                 .transition(.opacity)
             }
         }
+        .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 60) }
         .presentationBackground(.clear)
         .preferredColorScheme(.dark)
         .statusBarHiddenCompat(!chrome || axis == .dismiss)
@@ -363,7 +365,6 @@ struct WallPreview: View {
                 VStack(alignment: .leading, spacing: 8) { actionButtons(w) }
             }
             .buttonStyle(.bordered)
-            .disabled(session.acting != nil || session.state?.running == true)
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -374,10 +375,18 @@ struct WallPreview: View {
     @ViewBuilder
     private func actionButtons(_ w: Wallpaper) -> some View {
         Button {
+            Task { await session.saveOriginal(w) }
+        } label: {
+            Label(session.saving == w.name ? "正在下载…" : "存到相册", systemImage: "square.and.arrow.down").fixedSize()
+        }
+        .disabled(session.saving != nil)
+        .accessibilityHint(WallAction.saveHint)
+        Button {
             Task { await session.removeWallpaper(w, exclude: false) }
         } label: {
             Label("移出", systemImage: "minus.circle").fixedSize()
         }
+        .disabled(organizeDisabled)
         .accessibilityHint(WallAction.removeHint)
         if w.hasSource {
             Button {
@@ -385,12 +394,14 @@ struct WallPreview: View {
             } label: {
                 Label("不再选它", systemImage: "nosign").fixedSize()
             }
+            .disabled(organizeDisabled)
             .accessibilityHint(WallAction.excludeHint)
             Button(role: .destructive) {
                 confirmDelete = w
             } label: {
                 Label("删除原图…", systemImage: "trash").fixedSize()
             }
+            .disabled(organizeDisabled)
         }
         if session.acting == w.name {
             ProgressView()

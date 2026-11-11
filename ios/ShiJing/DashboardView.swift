@@ -21,6 +21,7 @@ struct DashboardView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
             }
+            .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 8) }
             .alert("操作没有完成", isPresented: Binding(
                 get: { session.actionError != nil },
                 set: { if !$0 { session.actionError = nil } })

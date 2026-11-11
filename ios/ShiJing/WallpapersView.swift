@@ -5,6 +5,8 @@ enum WallAction {
     static let remove = "移出壁纸文件夹"
     static let exclude = "移出并不再选它"
     static let delete = "删除图库里的原图…"
+    static let save = "存到相册"
+    static let saveHint = "从电脑下载原文件（不是预览图），原样存进相册。"
     static let removeHint = "只删壁纸文件夹里的这一份，图库里的原图不动。"
     static let excludeHint = "还会让以后的采样跳过这张原图（可以在电脑上的「图库」页恢复）。"
 }
@@ -91,6 +93,11 @@ struct WallActionButtons: View {
 
     var body: some View {
         let busy = session.acting != nil || session.state?.running == true
+        Button(WallAction.save, systemImage: "square.and.arrow.down") {
+            Task { await session.saveOriginal(wall) }
+        }
+        .disabled(session.saving != nil)
+        Divider()
         Button(WallAction.remove, systemImage: "minus.circle") {
             Task { await session.removeWallpaper(wall, exclude: false) }
         }
@@ -250,3 +257,22 @@ struct ActivitySheet: View {
     var body: some View { Text("只在 iOS 上可用") }
 }
 #endif
+
+/// 「已存到相册」这类一闪而过的提示。
+struct NoticeBubble: View {
+    let text: String?
+
+    var body: some View {
+        Group {
+            if let text {
+                Label(text, systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.3), value: text)
+        .allowsHitTesting(false)
+    }
+}

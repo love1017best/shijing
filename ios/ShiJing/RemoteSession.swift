@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Photos
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -196,6 +197,50 @@ final class RemoteSession {
             actionError = Self.describe(error)
         }
         return nil
+    }
+
+    // MARK: 存原图到相册
+
+    /// 正在下载 / 存到相册的那张
+    private(set) var saving: String?
+    /// 一闪而过的提示（「已存到相册」），界面上显示两秒
+    var notice: String?
+
+    /// 从电脑下载原文件，原样存进相册（不重新编码，保留原分辨率和 EXIF）。
+    func saveOriginal(_ w: Wallpaper) async {
+        saving = w.name
+        defer { saving = nil }
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard status == .authorized || status == .limited else {
+            actionError = "没有存照片的权限：到「设置 › 隐私与安全性 › 照片 › 拾景」里允许「仅添加照片」。"
+            return
+        }
+        do {
+            let file = try await client().downloadOriginal(w.name)
+            defer { try? FileManager.default.removeItem(at: file) }
+            try await PHPhotoLibrary.shared().performChanges {
+                let opts = PHAssetResourceCreationOptions()
+                opts.originalFilename = w.name
+                PHAssetCreationRequest.forAsset().addResource(with: .photo, fileURL: file, options: opts)
+            }
+            showNotice("已存到相册")
+        } catch APIError.unauthorized(let msg) {
+            connection = .unpaired(msg)
+        } catch let e as APIError {
+            actionError = e.localizedDescription
+        } catch let e as URLError {
+            actionError = Self.describe(e)
+        } catch {
+            actionError = "存不进相册：\(error.localizedDescription)"
+        }
+    }
+
+    func showNotice(_ text: String) {
+        notice = text
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            if notice == text { notice = nil }
+        }
     }
 
     // MARK: 壁纸
