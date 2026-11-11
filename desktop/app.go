@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
 	"slices"
@@ -27,6 +28,7 @@ const (
 	pageArchive  = "archive"
 	pageDeleted  = "deleted"
 	pageAbout    = "about"
+	pageKeys     = "keys"
 )
 
 // autoRunHours 是「自动换壁纸」的选项（小时，0 为关闭），和设置页的分段控件一一对应。
@@ -151,6 +153,13 @@ type app struct {
 	// onRunState 在主线程上报运行开始（running=true）和结束（running=false，err 为结果），
 	// 用来更新 Dock 角标；可以为 nil。
 	onRunState func(running bool, err error)
+	// setMenuKeys 把菜单栏命令（keyActions 里 menu 为 true 的）的快捷键交给菜单；测试里为 nil。
+	setMenuKeys func(map[string]string)
+
+	recording    string   // 正在录制快捷键的操作 id
+	recordIgnore []ui.Key // 开始录制时已经按着的键（比如按空格点的录制按钮），松开前不算
+	keyErr       string   // 上次录制被拒绝的原因
+	keyErrFor    string
 
 	pendMu    sync.Mutex
 	pendLog   []string
@@ -214,6 +223,7 @@ func (a *app) buildConfig() core.Config {
 	cfg.MinHeight = int(a.minH)
 	cfg.Mode = modes[a.modeIdx]
 	cfg.Excluded = slices.Clone(a.cfg.Excluded)
+	cfg.Shortcuts = maps.Clone(a.cfg.Shortcuts)
 	if a.autoIdx >= 0 {
 		cfg.AutoRunHours = autoRunHours[a.autoIdx]
 	}
@@ -539,6 +549,7 @@ func (a *app) importConfig() {
 		}
 		a.update(func() {
 			a.setConfig(cfg)
+			a.syncMenuKeys()
 			a.checkMounts()
 			a.toast = "已导入配置"
 			a.appendLog("📥 已导入配置: " + path)

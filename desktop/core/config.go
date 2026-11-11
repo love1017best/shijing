@@ -38,6 +38,9 @@ type Config struct {
 	// AutoRunHours 大于 0 时，应用开着（包括关窗后在后台）每隔这么多小时自动换一批；
 	// 自动运行不删除原图（筛选只模拟），删除只在手动运行时发生。
 	AutoRunHours int `json:"auto_run_hours"`
+	// Shortcuts 是界面里改过的快捷键（操作 id → "Cmd+Shift+Backspace"，空字符串表示不用快捷键）；
+	// 没出现的用默认值。只有拾景界面用，命令行不管。
+	Shortcuts map[string]string `json:"shortcuts,omitempty"`
 }
 
 const (

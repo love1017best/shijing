@@ -4,46 +4,30 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 )
 
-// 预览里的快捷键（按钮上用 keycap 标出来）：浏览、整理全程可以只用键盘。
-// 回车不行：弹层会把焦点放在按钮上，回车归那个按钮。别用菜单栏占着的组合（⌘R 换一批壁纸、⌘O 打开壁纸文件夹），菜单会先接走。
-const (
-	keyRemove  = "⌫"
-	keyExclude = "⇧⌫"
-	keyDelete  = "⌘⌫"
-	keyOpen    = "O"
-	keyReveal  = "F"
-)
-
-// previewKeys 处理预览里的键盘操作。要在 Modal 里面调用：Modal 外面的 Shortcut 被弹层挡住收不到；
-// 删除确认框弹出时预览在它后面，这里同样收不到，回车 / Esc 归确认框。
+// previewKeys 处理预览里的键盘操作（快捷键在「快捷键」页可以改，见 shortcuts.go）。要在 Modal 里面调用：
+// Modal 外面的 Shortcut 被弹层挡住收不到；删除确认框弹出时预览在它后面，这里同样收不到，回车 / Esc 归确认框。
+// 回车不能当快捷键：弹层会把焦点放在按钮上，回车归那个按钮。
 func (a *app) previewKeys(c *ui.Context, wall string, hasSrc bool, step func(int)) {
-	// 移出、删除这类操作不吃按住不放的自动重复，免得一下子移出一串
-	once := func(mods ui.Modifiers, keys ...ui.Key) bool {
-		for _, k := range keys {
-			if c.Shortcut(mods, k) {
-				return !c.ShortcutRepeated()
-			}
-		}
-		return false
-	}
+	// 移出、删除这类操作不吃按住不放的自动重复（once），免得一下子移出一串
 	switch {
-	case c.Shortcut(0, ui.KeyLeft):
+	case a.pressed(c, "prev", false):
 		step(-1)
-	case c.Shortcut(0, ui.KeyRight), c.Shortcut(0, ui.KeySpace):
+	case a.pressed(c, "next", false), c.Shortcut(0, ui.KeySpace):
 		step(1)
-	case once(0, ui.KeyBackspace, ui.KeyDelete):
+	case a.pressed(c, "remove", true):
 		a.removeWallpaper(wall, false)
-	case hasSrc && once(ui.Shift, ui.KeyBackspace, ui.KeyDelete):
+	case hasSrc && a.pressed(c, "exclude", true):
 		a.removeWallpaper(wall, true)
-	case hasSrc && once(ui.Cmd, ui.KeyBackspace, ui.KeyDelete):
+	case hasSrc && a.pressed(c, "delete", true):
 		a.askDeleteOriginal(wall)
-	case once(0, ui.KeyO):
+	case a.pressed(c, "open", true):
 		a.openPath(wall)
-	case hasSrc && once(0, ui.KeyF):
+	case hasSrc && a.pressed(c, "reveal", true):
 		a.openPath(filepath.Dir(a.wallSource(wall)))
 	}
 }
@@ -51,7 +35,7 @@ func (a *app) previewKeys(c *ui.Context, wall string, hasSrc bool, step func(int
 // keyButton 是带快捷键标注的按钮：文字后面跟一个小 keycap。icon 可以为 nil。
 func keyButton(c *ui.Context, icon *ui.SVG, label, key string) ui.Element {
 	t := c.Theme()
-	return ui.Button(c, "").Label(label).Tooltip("快捷键 " + key).Children(func() {
+	return ui.Button(c, "").Label(label).Tooltip(withKey(label, key)).Children(func() {
 		if icon != nil {
 			ui.Icon(c, icon)
 		}
@@ -218,21 +202,21 @@ func (a *app) previewModal(c *ui.Context) {
 					ui.Text(c, sub).FontSize(11.5).TextColor(t.TextMuted).SingleLine().Tooltip(src)
 				})
 				ui.Text(c, fmt.Sprintf("%d / %d", a.previewIdx+1, len(w.all))).FontSize(12).TextColor(t.TextMuted)
-				iconOnly(c, iconChevronLeft, "上一张", "上一张（←）").OnClick(func() { step(-1) })
-				iconOnly(c, iconChevronRight, "下一张", "下一张（→ 或空格）").OnClick(func() { step(1) })
+				iconOnly(c, iconChevronLeft, "上一张", withKey("上一张", a.keyLabel("prev"))).OnClick(func() { step(-1) })
+				iconOnly(c, iconChevronRight, "下一张", withKey("下一张", a.keyLabel("next"))+"，空格也行").OnClick(func() { step(1) })
 			})
 
 			ui.Box(c).AlignSelf(ui.Stretch).Height(1).Background(hairline(t))
 			ui.Row(c).AlignSelf(ui.Stretch).Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
-				keyButton(c, nil, "打开", keyOpen).Tooltip("用默认应用打开").OnClick(func() { a.openPath(wall) })
+				keyButton(c, nil, "打开", a.keyLabel("open")).Tooltip(withKey("用默认应用打开", a.keyLabel("open"))).OnClick(func() { a.openPath(wall) })
 				if src != "" {
-					keyButton(c, nil, "显示原图", keyReveal).Tooltip("在 Finder 中显示原图").OnClick(func() { a.openPath(filepath.Dir(src)) })
+					keyButton(c, nil, "显示原图", a.keyLabel("reveal")).Tooltip(withKey("在 Finder 中显示原图", a.keyLabel("reveal"))).OnClick(func() { a.openPath(filepath.Dir(src)) })
 				}
 				ui.Spacer(c)
-				keyButton(c, nil, actRemove, keyRemove).Tooltip(actRemoveTip).OnClick(func() { a.removeWallpaper(wall, false) })
+				keyButton(c, nil, actRemove, a.keyLabel("remove")).Tooltip(actRemoveTip).OnClick(func() { a.removeWallpaper(wall, false) })
 				if src != "" {
-					keyButton(c, nil, actExclude, keyExclude).Tooltip(actExcludeTip).OnClick(func() { a.removeWallpaper(wall, true) })
-					keyButton(c, nil, actDelete, keyDelete).TextColor(t.Danger).Tooltip(actDeleteTip).OnClick(func() { a.askDeleteOriginal(wall) })
+					keyButton(c, nil, actExclude, a.keyLabel("exclude")).Tooltip(actExcludeTip).OnClick(func() { a.removeWallpaper(wall, true) })
+					keyButton(c, nil, actDelete, a.keyLabel("delete")).TextColor(t.Danger).Tooltip(actDeleteTip).OnClick(func() { a.askDeleteOriginal(wall) })
 				}
 			})
 			note := "「移出」只删壁纸文件夹里的这一份，图库里的原图不动；「不再选它」还会让以后的采样跳过它。"
@@ -241,7 +225,7 @@ func (a *app) previewModal(c *ui.Context) {
 			} else {
 				note += "这张是之前的版本换上的，找不到对应的原图，只能移出。"
 			}
-			muted(c, note+"按钮上标着快捷键；← → 切换图片，⌘⌫ 后按回车确认删除，Esc 关闭。").AlignSelf(ui.Stretch)
+			muted(c, note+a.previewKeyHint()).AlignSelf(ui.Stretch)
 		})
 	}).Label("壁纸预览")
 
@@ -253,4 +237,19 @@ func (a *app) previewModal(c *ui.Context) {
 			a.deleteOriginal(a.pendingDelWall)
 		}
 	}
+}
+
+// previewKeyHint 是预览底部那句键盘说明，跟着自定义的快捷键变。
+func (a *app) previewKeyHint() string {
+	nav := strings.TrimSpace(a.keyLabel("prev") + " " + a.keyLabel("next"))
+	hint := "按钮上标着快捷键（可以在「快捷键」页修改）；"
+	if nav != "" {
+		hint += nav + " 或空格切换图片，"
+	} else {
+		hint += "空格切换图片，"
+	}
+	if d := a.keyLabel("delete"); d != "" {
+		hint += d + " 后按回车确认删除，"
+	}
+	return hint + "Esc 关闭。"
 }

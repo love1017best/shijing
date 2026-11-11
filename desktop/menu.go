@@ -14,6 +14,21 @@ func setupMenu(a *app, win *mygo.Window) {
 	page := func(label, key, id string) *mygo.MenuItem {
 		return &mygo.MenuItem{Label: label, Accelerator: "Cmd+" + key, Click: do(func() { a.page = id })}
 	}
+	// 这三项的快捷键可以在「快捷键」页改（keyActions 里 menu 为 true 的），改了由 a.setMenuKeys 同步
+	run := &mygo.MenuItem{Label: "换一批壁纸", Accelerator: a.accel("run"), Click: do(func() {
+		a.page = pageOverview
+		a.requestRun()
+	})}
+	stop := &mygo.MenuItem{Label: "停止", Accelerator: a.accel("stop"), Click: do(a.stopRun)}
+	openDest := &mygo.MenuItem{Label: "打开壁纸文件夹", Accelerator: a.accel("open_dest"), Click: do(a.openWallpapers)}
+	items := map[string]*mygo.MenuItem{"run": run, "stop": stop, "open_dest": openDest}
+	a.setMenuKeys = func(keys map[string]string) {
+		for id, acc := range keys {
+			if it := items[id]; it != nil && it.Accelerator != acc {
+				it.SetAccelerator(acc)
+			}
+		}
+	}
 	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
 		{Label: appName, Submenu: []*mygo.MenuItem{
 			{Label: "关于" + appName, Click: do(func() { a.page = pageAbout })},
@@ -33,13 +48,10 @@ func setupMenu(a *app, win *mygo.Window) {
 		{Role: mygo.RoleFileMenu},
 		{Role: mygo.RoleEditMenu},
 		{Label: "壁纸", Submenu: []*mygo.MenuItem{
-			{Label: "换一批壁纸", Accelerator: "Cmd+R", Click: do(func() {
-				a.page = pageOverview
-				a.requestRun()
-			})},
-			{Label: "停止", Accelerator: "Cmd+.", Click: do(a.stopRun)},
+			run,
+			stop,
 			mygo.Separator(),
-			{Label: "打开壁纸文件夹", Accelerator: "Cmd+O", Click: do(a.openWallpapers)},
+			openDest,
 		}},
 		{Label: "显示", Submenu: []*mygo.MenuItem{
 			page("概览", "1", pageOverview),
@@ -47,6 +59,7 @@ func setupMenu(a *app, win *mygo.Window) {
 			page("设置", "3", pageSettings),
 			page("归档", "4", pageArchive),
 			page("删除记录", "5", pageDeleted),
+			page("快捷键", "6", pageKeys),
 		}},
 		{Role: mygo.RoleWindowMenu},
 	}))

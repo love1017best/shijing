@@ -66,6 +66,9 @@ func (a *app) view(c *ui.Context) {
 					col.MaxWidth(contentMax)
 				}
 				a.pageH = col.LayoutBounds().H
+				if a.page != pageKeys && a.recording != "" {
+					a.stopRecording() // 录制到一半切走了
+				}
 				col.Children(func() {
 					switch a.page {
 					case pageLibrary:
@@ -74,6 +77,8 @@ func (a *app) view(c *ui.Context) {
 						a.settingsPage(c)
 					case pageArchive:
 						a.archivePage(c)
+					case pageKeys:
+						a.keysPage(c)
 					case pageDeleted:
 						a.deletedPage(c)
 					case pageAbout:
@@ -130,6 +135,7 @@ func (a *app) sidebar(c *ui.Context, vibrant bool) {
 				ui.Badge(c, humanCount(n))
 			}
 		})
+		ui.SidebarItem(c, pageKeys, iconKeyboard, "快捷键")
 		ui.SidebarItem(c, pageAbout, iconInfo, "关于")
 	}).Grow(1).Padding(0, 8).Label("页面")
 	list.Background(ui.Transparent)
@@ -649,7 +655,7 @@ func (a *app) runningCard(c *ui.Context) {
 					ui.Button(c, "正在停止…").Disabled(true).
 						Tooltip("正在复制的几张会先复制完；筛选会在当前文件夹检查完后停下")
 				} else {
-					iconButton(c, iconStop, "停止", false).Tooltip("停止这次运行（⌘.）").OnClick(a.stopRun)
+					iconButton(c, iconStop, "停止", false).Tooltip(withKey("停止这次运行", a.keyLabel("stop"))).OnClick(a.stopRun)
 				}
 			})
 			ui.Progress(c, value).Label(label)

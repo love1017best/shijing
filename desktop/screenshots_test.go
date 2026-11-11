@@ -215,6 +215,10 @@ func TestScreenshots(t *testing.T) {
 		shot("deleted")
 		click(t, tt, "关于")
 		shot("about")
+		click(t, tt, "快捷键")
+		f.setShortcut("open", "Cmd+Shift+O")
+		shot("keys")
+		f.setShortcut("open", "O")
 
 		// 展开日志
 		click(t, tt, "概览")
