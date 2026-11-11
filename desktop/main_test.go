@@ -405,6 +405,86 @@ func TestSettingsColumnsFollowWindowWidth(t *testing.T) {
 	}
 }
 
+func TestPreviewKeyboard(t *testing.T) {
+	f, tt := newFakeApp(t)
+	dir := t.TempDir()
+	var walls []string
+	srcs := map[string]string{}
+	for _, n := range []string{"s-a.jpg", "s-b.jpg", "s-c.jpg", "s-d.jpg"} {
+		w, s := filepath.Join(dir, "wall", n), filepath.Join(dir, "lib", n)
+		for _, p := range []string{w, s} {
+			os.MkdirAll(filepath.Dir(p), 0o755)
+			os.WriteFile(p, []byte("x"), 0o644)
+		}
+		walls, srcs[n] = append(walls, w), s
+	}
+	opened := ""
+	f.openPath = func(p string) { opened = p }
+	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), total: 4, all: slices.Clone(walls), sources: srcs}
+	f.wallsLoadedGen = f.wallsGen
+	f.preview, f.previewIdx = true, 0
+	tt.Frame()
+
+	tt.Key(0, ui.KeyRight)
+	tt.Frame()
+	if f.previewIdx != 1 || !tt.HasText("s-b.jpg") {
+		t.Fatalf("→ 应切到下一张: idx=%d", f.previewIdx)
+	}
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	if f.previewIdx != 2 {
+		t.Fatalf("空格应切到下一张: idx=%d", f.previewIdx)
+	}
+	tt.Key(0, ui.KeyLeft)
+	tt.Key(0, ui.KeyLeft)
+	tt.Key(0, ui.KeyLeft)
+	tt.Frame()
+	if f.previewIdx != 3 {
+		t.Fatalf("← 应切到上一张并循环: idx=%d", f.previewIdx)
+	}
+	tt.Key(0, ui.KeyO)
+	if opened != walls[3] {
+		t.Errorf("O 应打开当前这张: %q", opened)
+	}
+	tt.Key(0, ui.KeyF)
+	if opened != filepath.Dir(srcs["s-d.jpg"]) {
+		t.Errorf("F 应在 Finder 中显示原图: %q", opened)
+	}
+	tt.Key(0, ui.KeyBackspace)
+	tt.Frame()
+	if _, err := os.Stat(walls[3]); !os.IsNotExist(err) || len(f.walls.all) != 3 || !f.preview {
+		t.Fatalf("⌫ 应移出当前这张、预览留着看下一张: all=%q", f.walls.all)
+	}
+	if _, err := os.Stat(srcs["s-d.jpg"]); err != nil {
+		t.Error("⌫ 不应动原图")
+	}
+	cur := f.walls.all[f.previewIdx]
+	tt.Key(ui.Shift, ui.KeyBackspace)
+	tt.Frame()
+	if len(f.walls.all) != 2 || !slices.Contains(f.cfg.Excluded, srcs[filepath.Base(cur)]) {
+		t.Fatalf("⇧⌫ 应移出并加进不再选: excluded=%q", f.cfg.Excluded)
+	}
+	cur = f.walls.all[f.previewIdx]
+	tt.Key(ui.Cmd, ui.KeyBackspace)
+	tt.Frame()
+	if !f.confirmDelSrc {
+		t.Fatal("⌘⌫ 应先弹删除确认")
+	}
+	tt.Key(0, ui.KeyRight) // 确认框开着时预览不应翻页
+	tt.Frame()
+	if f.walls.all[f.previewIdx] != cur {
+		t.Error("确认框打开时方向键不应作用到预览")
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if _, err := os.Stat(srcs[filepath.Base(cur)]); !os.IsNotExist(err) {
+		t.Error("回车确认后应删除原图")
+	}
+	if !tt.HasText("⌘⌫") && len(f.walls.all) > 0 {
+		t.Errorf("按钮上应标出快捷键: %q", tt.Texts())
+	}
+}
+
 func TestRunNeedsDestDir(t *testing.T) {
 	f, tt := newFakeApp(t)
 	f.cfg.SampleOnlyDirs = []string{"/Volumes/Media0/Fav"}
