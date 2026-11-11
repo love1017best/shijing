@@ -102,6 +102,7 @@ func RunPipeline(cfg Config, paths Paths, rep Reporter, r *rand.Rand) (Summary, 
 		HistoryFile:        paths.History,
 		PreferUnseen:       cfg.PreferUnseen,
 		Excluded:           cfg.Excluded,
+		Rejected:           sum.Sort.Remaining,
 	}, rep, r)
 	if err != nil {
 		sum.Elapsed = time.Since(start)

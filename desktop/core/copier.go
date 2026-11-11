@@ -38,7 +38,8 @@ type CopyOptions struct {
 	// HistoryFile 记录这一轮轮换里换上过的原图；PreferUnseen 时优先选不在里面的。
 	HistoryFile  string
 	PreferUnseen bool
-	Excluded     []string // 不参与采样的原图
+	Excluded     []string // 不参与采样的原图（「不再选」）
+	Rejected     []string // 筛选查出不合格、但这次没删的原图（SortResult.Remaining），同样不参与采样
 }
 
 // sourceImage 是一张候选图片：它来自哪个源目录、文件路径是什么。
@@ -432,6 +433,13 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 		all, grouped, leafOrder, dropped = dropExcluded(all, grouped, leafOrder, o.Excluded)
 		if dropped > 0 {
 			logf("🚫 跳过 %d 张已排除的图片", dropped)
+		}
+	}
+	if len(o.Rejected) > 0 {
+		var dropped int
+		all, grouped, leafOrder, dropped = dropExcluded(all, grouped, leafOrder, o.Rejected)
+		if dropped > 0 {
+			logf("🚫 跳过 %d 张不合格的图片（筛选查出来、这次没有删除）", dropped)
 		}
 	}
 	res.Candidates, res.LeafFolders = len(all), len(grouped)

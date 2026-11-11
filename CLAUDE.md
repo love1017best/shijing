@@ -135,6 +135,7 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 ### 15. 横竖屏要按 EXIF 方向判断（v0.3.18）
 不少照片是「像素横着存 + EXIF Orientation 标记转 90°」：像素 6240×4160，系统壁纸、Finder、预览里显示的却是 4160×6240 的竖图（例：`[织梦映像]NO.098 …/0163.jpg`，Orientation=8）。以前 `ImageVerdict` 只看 `image.DecodeConfig` 的像素宽高，这种竖图被当成横屏选进壁纸。现在先用 `core/orientation.go` 的 `exifOrientation`（纯 Go，只读 JPEG 的 APP1 / TIFF 的 IFD0）读方向，5–8 时宽高互换再判断。2026-11 只读统计：全库 27464 张里有 287 张因此从合格变成竖屏。
 - `sips -g orientation` 对这张图报 `<nil>`，但 PIL 的 `getexif()[274]` 是 8——**查方向别信 sips**，用 PIL 或 `exifOrientation`。
+- 「仅采样目录」采样时走同一个 `ImageVerdict`（`scanImages` → `checkResolutions`）。「筛选并采样目录」只有真删时才干净：只模拟、定时自动换、手机「只模拟」都不删原图，以前不合格的图留在图库里、采样时又不查，竖图照样会被选进壁纸（增量模式还会把目录记成查过、以后一直跳过）。现在筛选把「不合格但没删」的图记进增量状态的 `rejected`（按目录），跳过的目录也带上，经 `SortResult.Remaining` → `CopyOptions.Rejected` 在采样时排除。`TestSimulatedFilterNeverSamplesRejected` 盖住了这条。
 - 判断逻辑改了要把 `sorter.go` 的 `verdictRules` 加 1：它记在增量状态的 `thresholds.rules` 里，不一样就整体重扫，否则以前判过、之后没动过的目录会一直被跳过，新规则永远不生效。
 
 ## 两个会话并行开发（2026-11-11 起）

@@ -73,6 +73,9 @@ type SortResult struct {
 	Rejected  int // 不合格的图片数
 	Deleted   int // 实际删除成功的数量（模拟运行时为 0）
 	Simulated bool
+	// Remaining 是不合格但还留在图库里的图（模拟运行、删除失败，包括没变化被跳过的目录里以前查出来的），
+	// 采样时要排除，否则只模拟、定时自动换（不删原图）时竖图照样会被选进壁纸。
+	Remaining []string `json:"-"`
 }
 
 // CopyResult 是采样复制步骤的结果。

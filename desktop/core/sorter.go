@@ -59,14 +59,18 @@ type thresholds struct {
 	// Rules 是判断规则的版本：ImageVerdict 的逻辑改了就加 1，让旧的增量缓存失效，
 	// 否则以前判过、之后没动过的目录会一直被跳过，新规则对它们永远不生效。
 	// 2：按 EXIF 方向转正后再判断横竖屏（v0.3.18）
+	// 3：状态里记下不合格但没删的图（Rejected），采样时排除（v0.3.19）
 	Rules int `json:"rules,omitempty"`
 }
 
-const verdictRules = 2
+const verdictRules = 3
 
 type sorterState struct {
 	Thresholds *thresholds        `json:"thresholds,omitempty"`
 	Dirs       map[string]float64 `json:"dirs,omitempty"`
+	// Rejected 是各目录里不合格、但还留在图库里的图（模拟运行、删除失败）：目录没变化被跳过时，
+	// 靠它仍然知道里面哪些图不能选（SortResult.Remaining → 采样时排除）。
+	Rejected map[string][]string `json:"rejected,omitempty"`
 }
 
 func loadState(path string) sorterState {
@@ -181,6 +185,7 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 	start := time.Now()
 	totalImages, deleteCount, deleted, processedDirs := 0, 0, 0, 0
 	dirMtimes := map[string]float64{} // 已检查完的目录的 mtime，保存状态时复用
+	dirRejected := map[string][]string{}
 
 	// 先遍历出所有含图片的目录（边遍历边上报找到了几个文件夹），再按遍历顺序逐个处理：
 	// 增量模式下各目录的 mtime 在后台并发计算（dirMtime 要 lstat 目录下每个文件，
@@ -255,6 +260,7 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 		if o.Incremental {
 			<-ready[i]
 			if mtimes[i] <= state.Dirs[d.root] {
+				res.Remaining = append(res.Remaining, state.Rejected[d.root]...)
 				res.Skipped++
 				logf("  ├─ %s: ⏭️ 已跳过（无变化）", rel)
 				rep.progress(StageFilter, i+1, len(dirs))
@@ -264,6 +270,7 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 		processedDirs++
 		logf("\n📂 处理文件夹: %s", rel)
 		dirDelete := 0
+		var kept []string                                               // 不合格但没删掉的
 		ok, reasons := checkVerdicts(d.images, o.MinWidth, o.MinHeight) // 并发读文件头，删除和日志仍按顺序串行
 		for k, file := range d.images {
 			totalImages++
@@ -276,10 +283,12 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 			// 每张不合格的图只打一行：模拟运行「待删除」，真删「已删除」或「删除失败」
 			if !o.Delete {
 				logf("    [%s] 🗑️ 待删除: %s  (%s)", rel, name, reasons[k])
+				kept = append(kept, file)
 				continue
 			}
 			if err := os.Remove(file); err != nil {
 				logf("    [%s] ❌ 删除失败: %s - %v", rel, name, err)
+				kept = append(kept, file)
 				continue
 			}
 			deleted++
@@ -287,8 +296,10 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 			logf("    [%s] 🔥 已删除: %s  (%s)", rel, name, reasons[k])
 		}
 		logf("  └─ %s: 处理 %d 张，删除 %d 张", rel, len(d.images), dirDelete)
+		res.Remaining = append(res.Remaining, kept...)
 		if o.Incremental {
 			dirMtimes[d.root] = mtimes[i]
+			dirRejected[d.root] = kept
 		}
 		rep.progress(StageFilter, i+1, len(dirs))
 	}
@@ -300,6 +311,16 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 		}
 		for k, v := range dirMtimes {
 			state.Dirs[k] = v
+		}
+		if state.Rejected == nil {
+			state.Rejected = map[string][]string{}
+		}
+		for k, v := range dirRejected {
+			if len(v) > 0 {
+				state.Rejected[k] = v
+			} else {
+				delete(state.Rejected, k)
+			}
 		}
 		if err := saveState(o.StateFile, state); err != nil {
 			logf("⚠️ 保存增量状态失败: %v", err)

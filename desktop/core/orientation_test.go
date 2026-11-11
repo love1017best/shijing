@@ -79,3 +79,54 @@ func TestTiffOrientationBadInput(t *testing.T) {
 		}
 	}
 }
+
+// 筛选只模拟（不删原图，定时自动换也是这样）时，不合格的图留在图库里，采样时也不能选到；
+// 第二次目录没变化被跳过，仍要记得那几张不能选。仅采样目录按同样的规则（含 EXIF 方向）过滤。
+func TestSimulatedFilterNeverSamplesRejected(t *testing.T) {
+	root := t.TempDir()
+	lib, fav := filepath.Join(root, "lib"), filepath.Join(root, "fav")
+	os.MkdirAll(filepath.Join(lib, "s1"), 0o755)
+	os.MkdirAll(filepath.Join(fav, "s2"), 0o755)
+	writeJPEGOrient(t, filepath.Join(lib, "s1", "good.jpg"), 300, 200, 0, nil)
+	writeJPEGOrient(t, filepath.Join(lib, "s1", "turned.jpg"), 300, 200, 8, binary.LittleEndian)
+	writeJPEGOrient(t, filepath.Join(lib, "s1", "tall.jpg"), 200, 300, 0, nil)
+	writeJPEGOrient(t, filepath.Join(fav, "s2", "good.jpg"), 300, 200, 0, nil)
+	writeJPEGOrient(t, filepath.Join(fav, "s2", "turned.jpg"), 300, 200, 6, binary.BigEndian)
+	stubRefresh(t, func() error { return nil })
+
+	cfg := Defaults()
+	cfg.FilterAndSampleDirs = []string{lib}
+	cfg.SampleOnlyDirs = []string{fav}
+	cfg.DestDir = filepath.Join(root, "dest")
+	cfg.MinWidth, cfg.MinHeight = 100, 100
+	cfg.DeleteDuringFilter = false
+	cfg.Incremental = true
+	cfg.SampleCount = 10
+	paths := PathsIn(filepath.Join(root, "data"))
+	for run := 1; run <= 2; run++ {
+		var lines []string
+		sum, err := RunPipeline(cfg, paths, Reporter{Log: collect(&lines)}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run == 2 && sum.Sort.Skipped != 1 {
+			t.Fatalf("第二次目录没变化应跳过: %+v", sum.Sort)
+		}
+		entries, _ := os.ReadDir(cfg.DestDir)
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		if len(names) != 2 {
+			t.Fatalf("第 %d 次：只应选到两张横图，实际 %q", run, names)
+		}
+		for _, n := range names {
+			if !strings.Contains(n, "good") {
+				t.Errorf("第 %d 次选到了不合格的图: %q", run, names)
+			}
+		}
+		if !exists(filepath.Join(lib, "s1", "turned.jpg")) {
+			t.Fatal("只模拟时不应删除原图")
+		}
+	}
+}
