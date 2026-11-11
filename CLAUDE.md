@@ -118,20 +118,26 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 遥控运行前在后台重新 `probeMount` 一遍图库目录：桌面的挂载状态只在启动 / 导入配置时查，NAS 后挂上的话 `canRun` 一直是 false。
 - 遥控运行不弹桌面的删除确认框（Mac 前面可能没人），由手机先确认，`/api/run {"delete": false}` 时这次 `noDelete`，不改设置。日志里记一行「📱 由「xx」遥控运行」。
 - 配对：`/api/pair/start` 生成 6 位码在桌面弹层显示（`pairModal`，按 `pairCode` 判断是不是新请求，点拒绝后不会被下一帧重新打开），2 分钟有效、输错 5 次作废；令牌只存 SHA-256（`remote_devices.json`，0600）。同名手机重新配对会替换旧记录。
-- iOS 端在 `ios/`（SwiftUI，iOS 17+，XcodeGen 的 `project.yml` 生成工程）。用户没有付费开发者账号：免费签名 7 天过期、没有 APNs 推送；不上架。`MARKETING_VERSION` 跟桌面端 `mygo.json` 的版本保持一致，`CURRENT_PROJECT_VERSION` 用 Z。
+- iOS 端在 `ios/`（SwiftUI，iOS 17+，XcodeGen 的 `project.yml` 生成工程）。用户没有付费开发者账号：免费签名 7 天过期、没有 APNs 推送；不上架。版本号和桌面端同步，见「版本号规则」。
 - 本机没装完整 Xcode 时，Swift 代码用命令行工具在 macOS SDK 上类型检查（命令见 `ios/README.md`）；必须用 `MacOSX26.5.sdk`，27.x 的 SwiftUI `@State` 是宏、命令行工具缺宏插件。iOS 专有修饰符包在 `PairView.swift` 底部的 `iOSKeyboard` / `iOSInlineTitle` 等扩展里。
 - 两边 JSON 对接验证过的方法：写个临时的 Go 测试用 `newRemoteHarness` 起服务并把地址和令牌写到文件，再用 `swiftc Models.swift APIClient.swift main.swift` 编一个命令行客户端去连。时间字段一律用 Unix 秒（Go 的 RFC3339 纳秒精度 Swift 解析不稳）。
 
 ## 版本号规则（用户规定）
 
 - 格式 `vX.Y.Z`（如 `v0.2.101`），写在 `desktop/mygo.json` 的 `version`（那里不带 `v`，macOS 的 Info.plist 只认数字）。
+- **macOS 和 iOS 两端永远用同一个版本号，每次发布两端一起发，不管哪一端有没有改动**（用户规定，2026-11-11）。这样不用分别维护两套版本号，分别负责 macOS 和 iOS 的会话也不会各自升版本撞车。
+  - 改版本号只用 `desktop/scripts/bump-version.sh`（不带参数 Z 加 1，带参数直接设成某个版本）：同时改 `desktop/mygo.json`、`ios/project.yml` 的 `MARKETING_VERSION`（= 版本号）和 `CURRENT_PROJECT_VERSION`（= Z），并重新生成 Xcode 工程。不要手改其中一处。
+  - `desktop/version_test.go` 检查这几处一致，`go test ./...` 会挡住只改了一端的情况。
+  - 多个会话并行时：只在发布那一步升版本号，升之前先 `git pull`，看清 `mygo.json` 当前是哪个版本再加 1；不要在功能分支 / 各自的改动里提前升。
 - `X.Y` 是大版本号，**只有用户明确要求大迭代时才提升**，不要自己改。
 - `Z`：每次有代码改动并重新构建（`mygo build`），就先把 Z 加 1 再构建。没有改动的重复构建不加。
 - 起点：v0.2.100。
 
 ## 发布规则（用户规定）
 
-- 每次版本构建（Z 加 1 那种）都要发布到 GitHub Release，只传 dmg，**两个都传**：
+- 每次发布都是两端一起：同一个提交、同一个 tag `v<版本>`、同一个 Release。说明里分「macOS」「iOS」两节写这一版各自的改动，某一端没改就写「无改动，仅同步版本号」。
+- iOS 端没有上架、也不传安装包（免费签名的包只能装到签名者自己的设备上，传了别人也装不了）：Release 里只说明 iOS 源码在 `ios/`、按 `ios/README.md` 自己用 Xcode 装。本机装了完整 Xcode 之后，发布前要至少跑一次模拟器构建确认能编译通过（`xcodebuild -project ios/ShiJing.xcodeproj -scheme ShiJing -destination 'generic/platform=iOS Simulator' build`）；没装 Xcode 时退而用 `ios/README.md` 里的 `swiftc -typecheck` 做类型检查，并在说明里如实写明没在真机上验证。
+- 每次版本构建（Z 加 1 那种）都要发布到 GitHub Release，macOS 只传 dmg，**两个都传**：
   - 通用版（Intel + Apple Silicon，纯 Go 无 cgo 所以直接支持）：`go tool mygo build -skip-notarize -platform darwin/universal` → `build/darwin-universal/shi-jing-<版本>.dmg`（文件名不带架构）
   - Apple Silicon 版（体积约一半，本机运行的也是它）：`go tool mygo build -skip-notarize` → `build/darwin-arm64/shi-jing-<版本>-arm64.dmg`
 - 发布顺序：代码先提交并推送 → 给那个提交打 tag `v<版本>` 并推送 → `gh release create v<版本> <通用版 dmg> <arm64 dmg> --verify-tag --title "拾景 v<版本>" --notes ...`。`--target` 不认短 sha，所以先打 tag。说明开头写清两个包怎么选。
