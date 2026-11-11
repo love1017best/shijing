@@ -9,8 +9,11 @@ struct DashboardView: View {
     @State private var confirmDelete = false
     /// 宽屏两栏的列表要自己让开左右安全区
     @State private var safe = EdgeInsets()
-    /// 点横幅图打开的大图预览
-    @State private var previewHero: Wallpaper?
+    /// 正在看的大图（横幅、概览里的缩略图、小组件点进来的都走这里）。
+    /// 放在这一层而不是缩略图网格里：转屏时宽窄两种排版换来换去，网格会被重建，状态放在里面预览就被关掉了。
+    @State private var previewing: Wallpaper?
+    /// 「全部壁纸」页；同理用状态推页面，不用放在分组标题里的 NavigationLink（转屏时它被重建，推出去的页面会被弹回来）
+    @State private var showAll = false
 
     /// 内容区宽于这个值时分两栏（按实际宽度判断，不按机型写死）
     private static let twoColumnWidth: CGFloat = 680
@@ -24,9 +27,21 @@ struct DashboardView: View {
                 ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
             }
             .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 8) }
-            .fullScreenCoverCompat(item: $previewHero) { w in
+            .fullScreenCoverCompat(item: $previewing) { w in
                 WallPreview(session: session, startName: w.name)
             }
+            .navigationDestination(isPresented: $showAll) { AllWallpapersView(session: session) }
+            // 小组件点进来：要看的那张（壁纸列表可能还没拉到，拉到了再打开）
+            .onChange(of: session.openRequest, initial: true) { openRequested() }
+            .onChange(of: session.walls) { openRequested() }
+            #if DEBUG
+            .onAppear {
+                // 演示模式截图用：启动参数带 -demoPreview 时直接打开第 3 张的大图预览
+                if ProcessInfo.processInfo.arguments.contains("-demoPreview"), session.walls.count > 2 {
+                    previewing = session.walls[2]
+                }
+            }
+            #endif
             .alert("操作没有完成", isPresented: Binding(
                 get: { session.actionError != nil },
                 set: { if !$0 { session.actionError = nil } })
@@ -125,6 +140,13 @@ struct DashboardView: View {
 
     private static let wideGap: CGFloat = 20
 
+    private func openRequested() {
+        guard let name = session.openRequest, let w = session.walls.first(where: { $0.name == name }) else { return }
+        session.openRequest = nil
+        showAll = false
+        previewing = w
+    }
+
     /// 顶部的横幅卡：背景是当前壁纸里的一张（和电脑上概览顶部同一张），点图片看大图。
     /// 窄屏：上面露出图片，下面压一整块毛玻璃放状态和按钮。
     /// 宽屏：图片铺满整张卡，左下角浮一块毛玻璃放状态，右下角是按钮；运行中毛玻璃撑满整行放步骤和进度。
@@ -151,7 +173,7 @@ struct DashboardView: View {
                 Color.clear
                     .frame(height: wide ? 60 : (s.running ? 100 : 150))
                     .contentShape(Rectangle())
-                    .onTapGesture { if let hero { previewHero = hero } }
+                    .onTapGesture { if let hero { previewing = hero } }
                     .accessibilityAddTraits(hero == nil ? [] : .isButton)
                     .accessibilityLabel(hero.map { "查看大图：\($0.name)" } ?? "")
                 heroPanel(s, wide: wide)
@@ -170,7 +192,7 @@ struct DashboardView: View {
         if let hero {
             WallImage(session: session, wall: hero, kind: session.heroName != nil ? .hero : .image)
                 .contentShape(Rectangle())
-                .onTapGesture { previewHero = hero }
+                .onTapGesture { previewing = hero }
         } else {
             Color.groupedCell
         }
@@ -297,7 +319,7 @@ struct DashboardView: View {
     @ViewBuilder private func wallsSection(rows: Int) -> some View {
         if !session.walls.isEmpty || session.state?.undoName != nil {
             Section {
-                WallGrid(session: session, rows: rows)
+                WallGrid(session: session, rows: rows, onOpen: { previewing = $0 })
                     .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))
                 UndoRemoveButton(session: session)
             } header: {
@@ -305,8 +327,8 @@ struct DashboardView: View {
                 HStack {
                     Text("当前壁纸")
                     Spacer()
-                    NavigationLink {
-                        AllWallpapersView(session: session)
+                    Button {
+                        showAll = true
                     } label: {
                         HStack(spacing: 2) {
                             Text("全部 \(session.walls.count) 张")

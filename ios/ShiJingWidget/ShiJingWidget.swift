@@ -1,132 +1,311 @@
 import AppIntents
 import ImageIO
 import SwiftUI
+import UIKit
 import WidgetKit
 
 @main
 struct ShiJingWidgets: WidgetBundle {
-    var body: some Widget { StatusWidget() }
+    var body: some Widget {
+        StatusWidget()
+        PhotoWidget()
+        if #available(iOS 18.0, *) {
+            RunControl()
+        }
+    }
 }
 
-/// 主屏幕小组件：背景是当前壁纸里的一张（一刻钟换一张），上面是 Mac 上拾景的状态和「换一批」/「停止」按钮。
-/// 连的是 App 里选中的那台 Mac（共享钥匙串里的 CurrentMac）。
+// MARK: - 两种小组件
+
+/// 功能小组件：背景是当前壁纸里的一张（按设定的间隔换），上面是 Mac 上拾景的状态和「换一批」/「停止」按钮。
+/// 锁定屏幕上（圆形 / 矩形 / 一行字）只显示状态。连的是 App 里选中的那台 Mac（共享钥匙串里的 CurrentMac）。
 struct StatusWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "status", provider: Provider()) { entry in
+        AppIntentConfiguration(kind: "status", intent: StatusWidgetConfig.self, provider: StatusProvider()) { entry in
             StatusView(entry: entry)
-                .containerBackground(for: .widget) { Backdrop(image: entry.image) }
+                .widgetURL(entry.openURL)
+                .containerBackground(for: .widget) { WidgetBackdrop(entry: entry) }
         }
         .configurationDisplayName("拾景")
-        .description("当前壁纸轮流当背景，看状态、一键换一批。")
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
+        .description("看 Mac 上换壁纸的状态，一键换一批；背景轮流显示当前壁纸。长按可以改换图间隔。")
+        .supportedFamilies(WidgetFamilies.status)
         .contentMarginsDisabled()
     }
 }
 
-struct Provider: TimelineProvider {
-    /// 不在换壁纸时，一次排几张背景、每张显示多久
-    private static let rotateCount = 3
-    private static let rotateEvery: TimeInterval = 15 * 60
+/// 壁纸小组件：只显示当前壁纸里的一张，按设定的间隔换。点一下在拾景里打开这张的大图。
+struct PhotoWidget: Widget {
+    var body: some WidgetConfiguration {
+        AppIntentConfiguration(kind: "photo", intent: PhotoWidgetConfig.self, provider: PhotoProvider()) { entry in
+            PhotoView(entry: entry)
+                .widgetURL(entry.openURL)
+                .containerBackground(for: .widget) { WidgetBackdrop(entry: entry, dim: false) }
+        }
+        .configurationDisplayName("拾景壁纸")
+        .description("轮流展示 Mac 壁纸文件夹里的图。长按可以改换图间隔；点一下看大图。")
+        .supportedFamilies(WidgetFamilies.photo)
+        .contentMarginsDisabled()
+    }
+}
 
+/// 控制中心 / 锁定屏幕底部 / 操作按钮里的「换一批壁纸」。
+@available(iOS 18.0, *)
+struct RunControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "com.love1017best.shijing.ios.run") {
+            ControlWidgetButton(action: RunWallpaperIntent()) {
+                Label("换一批壁纸", systemImage: "shuffle")
+            }
+        }
+        .displayName("换一批壁纸")
+        .description("让 Mac 上的拾景换一批新壁纸（不删原图）。")
+    }
+}
+
+// MARK: - 长按「编辑小组件」里的选项
+
+enum RotateInterval: Int, AppEnum {
+    case m5 = 300, m15 = 900, m30 = 1800, h1 = 3600, h3 = 10800, h6 = 21600, h12 = 43200, d1 = 86400
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "换图间隔"
+    static let caseDisplayRepresentations: [RotateInterval: DisplayRepresentation] = [
+        .m5: "5 分钟", .m15: "15 分钟", .m30: "30 分钟", .h1: "1 小时",
+        .h3: "3 小时", .h6: "6 小时", .h12: "12 小时", .d1: "1 天",
+    ]
+}
+
+struct StatusWidgetConfig: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "拾景"
+    static let description = IntentDescription("背景每隔多久换一张壁纸。")
+
+    @Parameter(title: "背景换图间隔", default: .m15)
+    var interval: RotateInterval
+}
+
+struct PhotoWidgetConfig: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "拾景壁纸"
+    static let description = IntentDescription("每隔多久换一张壁纸，要不要显示文件名。")
+
+    @Parameter(title: "换图间隔", default: .m15)
+    var interval: RotateInterval
+
+    @Parameter(title: "显示文件名", default: false)
+    var showName: Bool
+}
+
+// MARK: - 时间线
+
+struct StatusProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> Entry { .sample }
 
-    func getSnapshot(in context: Context, completion: @escaping @Sendable (Entry) -> Void) {
-        Task { completion(await entries(context, count: 1).first ?? .sample) }
+    func snapshot(for configuration: StatusWidgetConfig, in context: Context) async -> Entry {
+        await TimelineMaker.make(context, interval: configuration.interval, photo: false, preview: true).entries.first ?? .sample
     }
 
-    func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<Entry>) -> Void) {
-        Task {
-            let list = await entries(context, count: Self.rotateCount)
-            let policy: TimelineReloadPolicy = if list.first?.state?.running == true {
-                .after(Date().addingTimeInterval(60)) // 运行中一分钟刷一次（系统会限流，实际可能更慢）
-            } else if list.first?.state == nil {
-                .after(Date().addingTimeInterval(15 * 60))
-            } else {
-                .atEnd // 背景轮完一圈再取一次状态
-            }
-            completion(Timeline(entries: list, policy: policy))
-        }
+    func timeline(for configuration: StatusWidgetConfig, in context: Context) async -> Timeline<Entry> {
+        await TimelineMaker.make(context, interval: configuration.interval, photo: false, preview: false)
+    }
+}
+
+struct PhotoProvider: AppIntentTimelineProvider {
+    func placeholder(in context: Context) -> Entry { .sample }
+
+    func snapshot(for configuration: PhotoWidgetConfig, in context: Context) async -> Entry {
+        var e = await TimelineMaker.make(context, interval: configuration.interval, photo: true, preview: true).entries.first ?? .sample
+        e.showName = configuration.showName
+        return e
     }
 
-    /// 取一次状态，再按时间排几张背景图。运行中只排一张（马上就要刷新）。
-    private func entries(_ context: Context, count: Int) async -> [Entry] {
-        guard let mac = CurrentMac.load() else {
-            return [Entry(problem: "打开拾景配对一台 Mac")]
-        }
-        let client: APIClient
-        let state: RemoteState
-        do {
-            client = try mac.client()
-            state = try await client.state()
-        } catch APIError.unauthorized {
-            return [Entry(mac: mac.name, problem: "配对已失效，打开拾景重新配对")]
-        } catch {
-            return [Entry(mac: mac.name, problem: "连不上，Mac 可能睡着了")]
-        }
-        RunNotifier.observe(old: nil, new: state, mac: mac.name)
-
-        let base = Entry(mac: mac.name, state: state)
-        guard let list = try? await client.wallpapers(), !list.items.isEmpty else { return [base] }
-        let n = state.running ? 1 : count
-        let names = Self.pick(list, count: n)
-        let maxPixels = Self.maxPixels(context)
-        // 几张图并发下载；读不了的那张就没有背景
-        let images = await withTaskGroup(of: (Int, UIImage?).self) { group in
-            for (i, name) in names.enumerated() {
-                group.addTask { (i, await Self.image(client, name, hasHero: list.hero != nil, maxPixels: maxPixels)) }
-            }
-            var out = [UIImage?](repeating: nil, count: names.count)
-            for await (i, img) in group { out[i] = img }
-            return out
-        }
-        let now = Date()
-        return names.indices.map { i in
-            var e = base
-            e.date = now.addingTimeInterval(Double(i) * Self.rotateEvery)
-            e.image = images[i]
-            e.wallName = names[i]
+    func timeline(for configuration: PhotoWidgetConfig, in context: Context) async -> Timeline<Entry> {
+        let t = await TimelineMaker.make(context, interval: configuration.interval, photo: true, preview: false)
+        let entries = t.entries.map { e in
+            var e = e
+            e.showName = configuration.showName
             return e
         }
+        return Timeline(entries: entries, policy: t.policy)
     }
+}
 
-    /// 选哪几张：第一张是桌面横幅那张，之后按时间段在整个壁纸文件夹里跳着轮（每一刻钟换一批起点，看着随机）。
-    private static func pick(_ list: WallpaperList, count: Int) -> [String] {
-        let all = list.items.map(\.name)
-        let slot = Int(Date().timeIntervalSince1970 / rotateEvery)
-        var out: [String] = []
-        for i in 0..<min(count, all.count) {
-            let idx = (slot &* 7919 &+ i &* 104_729) % all.count
-            out.append(all[(idx + all.count) % all.count])
+/// 两种小组件共用：取状态和壁纸列表（取不到就用上次缓存的），按换图间隔排几张背景。
+///
+/// 背景图在小组件自己的缓存目录里存一份缩好的 JPEG（按 Mac、文件名、像素尺寸），
+/// 时间线里只放文件路径、显示时才解码：小组件进程内存只有几十 MB，不能把几张大图一起放在内存里。
+/// 不在局域网里、Mac 睡着时，用缓存的状态和已经下过的图接着轮换，标上「离线」，一刻钟后再试。
+enum TimelineMaker {
+    static func make(_ context: TimelineProviderContext, interval: RotateInterval, photo: Bool, preview: Bool) async -> Timeline<Entry> {
+        let now = Date()
+        guard let mac = CurrentMac.load() else {
+            return Timeline(entries: [Entry(problem: "打开拾景配对一台 Mac")], policy: .after(now.addingTimeInterval(3600)))
         }
-        return out
+        let key = "\(mac.host):\(mac.port)"
+        let accessory = context.family.isAccessory
+
+        // 1. 状态和列表：在线就取新的并缓存，取不到用缓存
+        var snap: WidgetCache.Snapshot?
+        var offlineSince: Date?
+        var problem: String?
+        var client: APIClient?
+        do {
+            let c = try mac.client()
+            let state = try await c.state()
+            // 锁定屏幕上的功能小组件不用图，不拉列表
+            let list = (photo || !accessory) ? (try? await c.wallpapers()) : nil
+            let cachedList = WidgetCache.load(key)?.list
+            snap = WidgetCache.Snapshot(state: state, list: list ?? cachedList, at: now)
+            WidgetCache.save(snap!, key)
+            client = c
+            if !preview { RunNotifier.observe(old: nil, new: state, mac: mac.name) }
+        } catch APIError.unauthorized {
+            problem = "配对已失效，打开拾景重新配对"
+        } catch {
+            snap = WidgetCache.load(key)
+            offlineSince = snap?.at
+            if snap == nil { problem = "连不上 \(mac.name)，Mac 可能睡着了或不在同一个网络" }
+        }
+
+        var base = Entry(date: now, mac: mac.name, state: snap?.state, problem: problem)
+        base.offlineSince = offlineSince
+        let retry = now.addingTimeInterval(15 * 60)
+        guard let snap, !(accessory && !photo) else {
+            let running = snap?.state.running == true
+            return Timeline(entries: [base], policy: .after(running ? now.addingTimeInterval(60) : retry))
+        }
+
+        // 2. 这段时间里依次显示哪几张：按「第几个间隔」挑，同一个间隔里重新取时间线还是同一张
+        let step = TimeInterval(interval.rawValue)
+        let running = snap.state.running && !photo
+        let count = preview || running ? 1 : min(12, max(2, Int((2 * 3600 / step).rounded(.up))))
+        let slot0 = Int(now.timeIntervalSince1970 / step)
+        var names = snap.list?.items.map(\.name) ?? []
+        if client == nil {
+            // 离线：只在已经下过的图里轮
+            let px = pixels(context)
+            names = names.filter { WidgetCache.hasImage(key, $0, px) }
+        }
+        let px = pixels(context)
+        var entries: [Entry] = []
+        for i in 0..<count {
+            var e = base
+            e.date = i == 0 ? now : Date(timeIntervalSince1970: Double(slot0 + i) * step)
+            if !names.isEmpty {
+                let name = names[pick(slot0 + i, names.count)]
+                e.wallName = name
+                e.imageFile = await image(key, name, px, client: client, hasHero: snap.list?.hero != nil)
+            }
+            entries.append(e)
+        }
+
+        // 3. 什么时候再取：离线一刻钟后重试；运行中一分钟；功能小组件最多半小时刷一次状态；壁纸小组件轮完或 6 小时
+        let end = Date(timeIntervalSince1970: Double(slot0 + count) * step)
+        let next: Date = if client == nil {
+            retry
+        } else if running {
+            now.addingTimeInterval(60)
+        } else {
+            min(end, now.addingTimeInterval(photo ? 6 * 3600 : 30 * 60))
+        }
+        WidgetCache.prune()
+        return Timeline(entries: entries, policy: .after(next))
     }
 
-    /// 背景图要多少像素：按小组件的实际尺寸（3 倍屏），封顶 1200（小组件进程内存很紧）。
-    private static func maxPixels(_ context: Context) -> Int {
+    /// 第 slot 个间隔显示第几张：在整个壁纸文件夹里跳着取，看着随机，但同一个间隔总是同一张。
+    private static func pick(_ slot: Int, _ count: Int) -> Int {
+        var x = UInt64(truncatingIfNeeded: slot) &* 0x9E37_79B9_7F4A_7C15
+        x ^= x >> 29
+        return Int(x % UInt64(count))
+    }
+
+    /// 背景图要多少像素：按小组件实际尺寸（3 倍屏、宽图铺满高的小组件时按 16:10 算宽），封顶 1600（横幅图本来就这么宽）。
+    /// 取整到 200 一档，缓存好命中。
+    private static func pixels(_ context: TimelineProviderContext) -> Int {
         let s = context.displaySize
-        return min(1200, Int(max(s.width, s.height) * 3))
+        let need = max(s.width, s.height * 1.6) * 3
+        return min(1600, max(400, Int((need / 200).rounded(.up)) * 200))
     }
 
-    private static func image(_ client: APIClient, _ name: String, hasHero: Bool, maxPixels: Int) async -> UIImage? {
-        // 有横幅尺寸（1600 宽，电脑上有磁盘缓存）就用它，旧版桌面端退回缩略图
+    /// 缓存里有就直接用；没有且在线就下载（横幅尺寸，旧版桌面端退回缩略图）、缩好存起来。
+    private static func image(_ key: String, _ name: String, _ px: Int, client: APIClient?, hasHero: Bool) async -> URL? {
+        let file = WidgetCache.imageFile(key, name, px)
+        if FileManager.default.fileExists(atPath: file.path) {
+            WidgetCache.touch(file)
+            return file
+        }
+        guard let client else { return nil }
         let kinds: [ImageKind] = hasHero ? [.hero, .thumb] : [.thumb]
         for kind in kinds {
-            if let data = try? await client.imageData(name, kind: kind), let img = downsample(data, maxPixels: maxPixels) {
-                return img
+            if let data = try? await client.imageData(name, kind: kind),
+               let jpeg = downsample(data, maxPixels: px) {
+                try? jpeg.write(to: file)
+                return file
             }
         }
         return nil
     }
 
-    /// 解码时直接缩到目标尺寸，不在内存里放整张大图。
-    private static func downsample(_ data: Data, maxPixels: Int) -> UIImage? {
+    /// 解码时直接缩到目标尺寸，再存成 JPEG。
+    private static func downsample(_ data: Data, maxPixels: Int) -> Data? {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         let opts: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixels,
             kCGImageSourceCreateThumbnailWithTransform: true,
         ]
-        return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary).map { UIImage(cgImage: $0) }
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg).jpegData(compressionQuality: 0.85)
     }
 }
 
+/// 小组件自己的缓存目录（免费签名没有 App Groups，和 App 不共享，也用不着共享）。
+enum WidgetCache {
+    struct Snapshot: Codable {
+        var state: RemoteState
+        var list: WallpaperList?
+        var at: Date
+    }
+
+    private static let dir: URL = {
+        let d = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appending(path: "widget", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }()
+
+    private static func hash(_ s: String) -> String {
+        var h: UInt64 = 0xcbf2_9ce4_8422_2325
+        for b in s.utf8 { h = (h ^ UInt64(b)) &* 0x100_0000_01b3 }
+        return String(h, radix: 36)
+    }
+
+    private static func stateFile(_ key: String) -> URL { dir.appending(path: "state-\(hash(key)).json") }
+
+    static func save(_ s: Snapshot, _ key: String) {
+        if let data = try? JSONEncoder().encode(s) { try? data.write(to: stateFile(key), options: .atomic) }
+    }
+
+    static func load(_ key: String) -> Snapshot? {
+        (try? Data(contentsOf: stateFile(key))).flatMap { try? JSONDecoder().decode(Snapshot.self, from: $0) }
+    }
+
+    static func imageFile(_ key: String, _ name: String, _ px: Int) -> URL {
+        dir.appending(path: "img-\(hash(key + "|" + name))-\(px).jpg")
+    }
+
+    static func hasImage(_ key: String, _ name: String, _ px: Int) -> Bool {
+        FileManager.default.fileExists(atPath: imageFile(key, name, px).path)
+    }
+
+    /// 用到的图更新修改时间，清理时按它留最近用过的。
+    static func touch(_ file: URL) {
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
+    }
+
+    /// 图最多留 120 张（离线时够轮好一阵），多了删最久没用的。
+    static func prune(keep: Int = 120) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        let imgs = files.filter { $0.lastPathComponent.hasPrefix("img-") }
+        guard imgs.count > keep else { return }
+        let dated = imgs.map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
+        for (f, _) in dated.sorted(by: { $0.1 > $1.1 }).dropFirst(keep) { try? fm.removeItem(at: f) }
+    }
+}

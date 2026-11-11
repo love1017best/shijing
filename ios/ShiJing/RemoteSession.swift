@@ -206,6 +206,8 @@ final class RemoteSession {
 
     /// 正在下载 / 存到相册的那张
     private(set) var saving: String?
+    /// 要打开大图的那张（从小组件点进来），概览页看到就打开
+    var openRequest: String?
     /// 一闪而过的提示（「已存到相册」），界面上显示两秒
     var notice: String?
 

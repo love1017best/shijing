@@ -6,6 +6,18 @@
 	<!-- 和小组件共用的钥匙串组（带团队前缀，见 Shared/SharedKeychain.swift） -->
 	<key>ShiJingKeychainGroup</key>
 	<string>$(AppIdentifierPrefix)com.love1017best.shijing.shared</string>
+	<!-- 小组件点进来：shijing://wall/<壁纸文件名> -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.love1017best.shijing.ios</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>shijing</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_shijing._tcp</string>

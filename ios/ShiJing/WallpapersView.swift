@@ -17,6 +17,8 @@ struct WallGrid: View {
     /// 只显示前几行（概览里用），nil 显示全部
     var rows: Int? = nil
     var minThumb: CGFloat = 104
+    /// 点一张时由外面打开预览（概览页这样做，转屏不会丢）；nil 时自己弹
+    var onOpen: ((Wallpaper) -> Void)? = nil
     @State private var previewing: Wallpaper?
     @State private var confirmDelete: Wallpaper?
     @State private var width: CGFloat = 0
@@ -34,7 +36,7 @@ struct WallGrid: View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Self.gap), count: columns), spacing: Self.gap) {
             ForEach(Array(shown.enumerated()), id: \.element.id) { i, w in
                 Button {
-                    previewing = w
+                    if let onOpen { onOpen(w) } else { previewing = w }
                 } label: {
                     WallImage(session: session, wall: w)
                         .aspectRatio(16 / 10, contentMode: .fill)
@@ -70,14 +72,6 @@ struct WallGrid: View {
             }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-        #if DEBUG
-        .onAppear {
-            // 演示模式截图用：启动参数带 -demoPreview 时直接打开第 3 张的大图预览
-            if rows != nil, ProcessInfo.processInfo.arguments.contains("-demoPreview"), session.walls.count > 2 {
-                previewing = session.walls[2]
-            }
-        }
-        #endif
         .fullScreenCoverCompat(item: $previewing) { w in
             WallPreview(session: session, startName: w.name)
         }

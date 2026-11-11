@@ -64,7 +64,8 @@ cd ios && xcodegen
 | `Shared/RunNotifier.swift` | 换完发通知（App 和小组件共用「通知过哪次」的记录，同一次只发一条） |
 | `Discovery.swift` | Bonjour（`_shijing._tcp`）发现和解析 |
 | `MacStore.swift` | 配对过的 Mac（UserDefaults），选中的那台同步写进共享钥匙串 |
-| `../ShiJingWidget/` | 主屏幕小组件 |
+| `../ShiJingWidget/ShiJingWidget.swift` | 两种小组件（「拾景」/「拾景壁纸」）、控制中心按钮、时间线和离线缓存 |
+| `../ShiJingWidget/WidgetViews.swift` | 小组件各尺寸的界面（App 的 Debug 构建也编译它，`-demoWidgets` 演示页用） |
 
 没装 Xcode 时可以用命令行工具先做类型检查（iOS 专有的修饰符包在 `#if os(iOS)` 里，所以能在 macOS SDK 上检查）：
 

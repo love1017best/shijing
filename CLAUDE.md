@@ -137,7 +137,8 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 换完发通知没有推送可用：App 进后台时如果正在换，用 `beginBackgroundTask` 多连 ~30 秒；小组件运行中按分钟刷新。两边经 `RunNotifier` 共用钥匙串里「通知过的那次 `last.at`」，第一次只记不发，结束超过 15 分钟的不发。通知权限在第一次从手机换一批时才问。
 - 签名到期：`SigningExpiry` 读 `embedded.mobileprovision` 的 `ExpirationDate`；模拟器里用启动参数 `-demoExpiring` 假装 36 小时后到期，看提醒横幅。
 - 横幅图（v0.3.102）：`/api/wallpapers` 带 `hero`（桌面 `walls.heroPath` 的文件名），`/api/wallpapers/{name}/hero` 给 `heroWidth`（1600）宽、走桌面的磁盘缓存。手机概览的横幅卡和小组件背景都用它；旧版桌面没有 `hero` 时手机用第一张的大图、小组件用缩略图。
-- 小组件背景每 15 分钟换一张：一次时间线排 3 条（`Provider.rotateCount`），用 ImageIO 按小组件像素尺寸缩着解码、封顶 1200（小组件进程内存只有几十 MB，别放整张大图）。界面在 `ShiJingWidget/WidgetViews.swift`，App 的 Debug 构建也编译它：启动参数 `-demoWidgets` 把四种尺寸摆在一页上看排版（模拟器里很难用鼠标长按主屏幕添加小组件）。
+- 小组件（v0.3.104 起）有两种：「拾景」（状态 + 按钮，`StatusWidget`）和「拾景壁纸」（只有图，`PhotoWidget`），都是 `AppIntentConfiguration`，长按编辑改换图间隔（`RotateInterval`）。尺寸表在 `WidgetViews.swift` 的 `WidgetFamilies`；iOS 27 的 `systemExtraLargePortrait` 要包 `#available`。时间线由 `TimelineMaker` 排：按「时间段 + 哈希」挑图（同一时段总是同一张），一次排 2–12 条，图用 ImageIO 按小组件像素缩着解码、封顶 1600（小组件进程内存只有几十 MB，别放整张大图），条目里只存文件路径、显示时才解码。**离线缓存**：小组件没有 App Groups，缓存放小组件自己的 Caches（`WidgetCache`：状态 JSON + 最多 120 张 JPEG），连不上时读缓存、在已缓存的图里轮换、标「离线」，15 分钟后重试。点小组件走深链 `shijing://wall/<文件名>`（Info.plist 的 `CFBundleURLTypes`）→ `session.openRequest` → `DashboardView` 打开大图。界面 App 的 Debug 构建也编译：启动参数 `-demoWidgets` 把所有尺寸摆在一页上看排版（模拟器里很难用鼠标长按主屏幕添加小组件）；`xcrun simctl openurl` 测深链时系统会先弹「Open in 拾景?」。
+- 大图预览的状态（`previewing`）和「全部壁纸」页（`navigationDestination(isPresented: $showAll)`）都挂在 `DashboardView` 上：概览按宽度在宽 / 窄两种排版之间切换，转屏时 `WallGrid` 和 header 里的 `NavigationLink` 会被重建，状态放在它们里面就会丢、预览关掉回到首页（v0.3.103 及以前的 bug）。
 - `release.sh --version X.Y.Z` 直接发成指定版本（v0.3.100 就是这样发的），只在用户要求某个版本号时用。
 - 两边 JSON 对接验证过的方法：写个临时的 Go 测试用 `newRemoteHarness` 起服务并把地址和令牌写到文件，再用 `swiftc Models.swift APIClient.swift main.swift` 编一个命令行客户端去连。时间字段一律用 Unix 秒（Go 的 RFC3339 纳秒精度 Swift 解析不稳）。
 

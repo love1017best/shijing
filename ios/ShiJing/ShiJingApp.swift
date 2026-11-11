@@ -29,6 +29,7 @@ struct RootView: View {
     @State private var store = MacStore()
     @State private var discovery = Discovery()
     @State private var session: RemoteSession?
+    @State private var pendingWall: String?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -44,6 +45,12 @@ struct RootView: View {
             }
         }
         .onAppear { syncSession() }
+        // 小组件点进来：shijing://wall/<壁纸文件名>，打开那张的大图
+        .onOpenURL { url in
+            guard url.scheme == "shijing", url.host() == "wall" else { return }
+            pendingWall = url.lastPathComponent
+            deliverPendingWall()
+        }
         .onChange(of: store.selectedID) { syncSession() }
         .onChange(of: scenePhase) { _, phase in
             #if DEBUG
@@ -81,6 +88,13 @@ struct RootView: View {
         let s = RemoteSession(mac: mac, store: store)
         session = s
         s.start()
+        deliverPendingWall()
+    }
+
+    private func deliverPendingWall() {
+        guard let name = pendingWall, let session else { return }
+        session.openRequest = name
+        pendingWall = nil
     }
 }
 
@@ -119,12 +133,12 @@ enum Notifications {
 #if DEBUG
 import WidgetKit
 
-/// 演示页：四种尺寸的小组件摆在一起看排版（启动参数 -demoWidgets）。
+/// 演示页：各种尺寸的两种小组件摆在一起看排版（启动参数 -demoWidgets）。
 struct WidgetDemo: View {
     var body: some View {
         let now = Date().timeIntervalSince1970
         let idle = RemoteState(
-            version: "0.3.102", eyebrow: "", title: "已换上 300 张新壁纸", running: false, stopping: false,
+            version: "0.3.104", eyebrow: "", title: "已换上 300 张新壁纸", running: false, stopping: false,
             steps: [], stage: nil, done: 0, total: 0, fraction: -1, label: nil, lastLine: nil, runDelete: false,
             rejected: 0, deleted: 0, deleteFailed: 0, blocked: nil, unmounted: 0, willDelete: false, deleteNote: nil,
             last: LastRun(at: now - 3600, status: "ok", error: nil, selected: 300, copied: 300, failed: 0, elapsed: 73,
@@ -135,32 +149,69 @@ struct WidgetDemo: View {
         running.title = "正在拾一批新风景…"
         running.fraction = 0.43
         running.label = "复制 128 / 300 张"
-        let img = { (n: String) in ImageStore.demoImage(n, large: true) }
-        let e1 = Entry(mac: "演示 Mac", state: idle, image: img("风景-冰岛-0001.jpg"), wallName: "风景-冰岛-0001.jpg")
-        let e2 = Entry(mac: "演示 Mac", state: running, image: img("风景-京都-0002.jpg"), wallName: "风景-京都-0002.jpg")
+        let e1 = entry(idle, "风景-冰岛-0001.jpg")
+        let e2 = entry(running, "风景-京都-0002.jpg")
+        var off = entry(idle, "风景-挪威-0006.jpg")
+        off.offlineSince = Date().addingTimeInterval(-1800)
+        var named = entry(idle, "风景-大理-0014.jpg")
+        named.showName = true
         return ScrollView([.horizontal, .vertical]) {
-            HStack(alignment: .top, spacing: 20) {
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(spacing: 20) {
-                        tile(e1, .systemSmall, 170, 170)
-                        tile(e2, .systemSmall, 170, 170)
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .top, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 20) {
+                        HStack(spacing: 20) {
+                            tile(e1, .systemSmall, 170, 170)
+                            tile(e2, .systemSmall, 170, 170)
+                            tile(e1, .systemSmall, 170, 170, photo: true)
+                        }
+                        tile(off, .systemMedium, 364, 170)
+                        tile(e2, .systemMedium, 364, 170)
+                        tile(named, .systemMedium, 364, 170, photo: true)
                     }
-                    tile(e1, .systemMedium, 364, 170)
-                    tile(e2, .systemMedium, 364, 170)
+                    tile(e1, .systemLarge, 364, 382)
+                    tile(e1, .systemExtraLarge, 715, 382)
                 }
-                tile(e1, .systemLarge, 364, 382)
-                tile(e1, .systemExtraLarge, 715, 382)
+                HStack(alignment: .top, spacing: 20) {
+                    if #available(iOS 27.0, *) {
+                        tile(e1, .systemExtraLargePortrait, 364, 760)
+                        tile(named, .systemExtraLargePortrait, 364, 760, photo: true)
+                    }
+                    VStack(alignment: .leading, spacing: 20) {
+                        tile(e1, .accessoryRectangular, 160, 72, lock: true)
+                        tile(e2, .accessoryRectangular, 160, 72, lock: true)
+                        tile(e1, .accessoryRectangular, 160, 72, photo: true, lock: true)
+                        HStack(spacing: 20) {
+                            tile(e1, .accessoryCircular, 72, 72, lock: true)
+                            tile(e2, .accessoryCircular, 72, 72, lock: true)
+                        }
+                        tile(e1, .accessoryInline, 220, 24, lock: true)
+                    }
+                    .padding(20)
+                    .background(Color.black, in: RoundedRectangle(cornerRadius: 22))
+                }
             }
             .padding(30)
         }
         .background(Color.gray.opacity(0.3))
     }
 
-    private func tile(_ e: Entry, _ f: WidgetFamily, _ w: CGFloat, _ h: CGFloat) -> some View {
-        StatusView(entry: e, familyOverride: f)
-            .background(Backdrop(image: e.image))
-            .frame(width: w, height: h)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    private func entry(_ s: RemoteState, _ name: String) -> Entry {
+        let file = FileManager.default.temporaryDirectory.appending(path: "demo-\(name)")
+        if !FileManager.default.fileExists(atPath: file.path) {
+            try? ImageStore.demoImage(name, large: true)?.jpegData(compressionQuality: 0.8)?.write(to: file)
+        }
+        return Entry(mac: "演示 Mac", state: s, imageFile: file, wallName: name)
+    }
+
+    @ViewBuilder
+    private func tile(_ e: Entry, _ f: WidgetFamily, _ w: CGFloat, _ h: CGFloat, photo: Bool = false, lock: Bool = false) -> some View {
+        Group {
+            if photo { PhotoView(entry: e, familyOverride: f) } else { StatusView(entry: e, familyOverride: f) }
+        }
+        .foregroundStyle(lock ? Color.white : Color.primary)
+        .background(WidgetBackdrop(entry: e, dim: !photo, familyOverride: f))
+        .frame(width: w, height: h)
+        .clipShape(RoundedRectangle(cornerRadius: lock ? 0 : 22, style: .continuous))
     }
 }
 #endif

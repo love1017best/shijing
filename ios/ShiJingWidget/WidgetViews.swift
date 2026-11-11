@@ -2,43 +2,103 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-// 小组件的界面。App 的 Debug 构建也编译这个文件（启动参数 -demoWidgets 显示四种尺寸），方便在模拟器里看排版。
+// 小组件的界面。App 的 Debug 构建也编译这个文件（启动参数 -demoWidgets 把各种尺寸摆在一页上），方便在模拟器里看排版。
 
 struct Entry: TimelineEntry {
     var date = Date()
     var mac: String?
     var state: RemoteState?
-    /// 连不上 / 没配对的说明
+    /// 连不上 / 没配对的说明（而且没有缓存可用）
     var problem: String?
-    /// 背景图（已经按小组件尺寸缩好）
-    var image: UIImage?
+    /// 连不上、用的是这个时间缓存的状态
+    var offlineSince: Date?
+    /// 背景图：小组件缓存目录里缩好的 JPEG
+    var imageFile: URL?
     var wallName: String?
+    /// 壁纸小组件：图上标出文件名
+    var showName = false
 
     static let sample = Entry(mac: "我的 Mac")
+
+    /// 点小组件打开拾景；有图时直接打开这张的大图。
+    var openURL: URL {
+        guard let wallName else { return URL(string: "shijing://home")! }
+        return URL(string: "shijing://wall")!.appending(path: wallName)
+    }
+
+    var image: UIImage? { imageFile.flatMap { UIImage(contentsOfFile: $0.path) } }
+}
+
+enum WidgetFamilies {
+    /// 功能小组件：主屏幕全部尺寸（含 iOS 27 的 iPhone 整页）+ 锁定屏幕三种
+    static var status: [WidgetFamily] {
+        var f: [WidgetFamily] = [.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge,
+                                 .accessoryCircular, .accessoryRectangular, .accessoryInline]
+        if #available(iOS 27.0, *) { f.append(.systemExtraLargePortrait) }
+        return f
+    }
+
+    /// 壁纸小组件：主屏幕全部尺寸 + 锁定屏幕矩形（系统会把图渲染成单色）
+    static var photo: [WidgetFamily] {
+        var f: [WidgetFamily] = [.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge, .accessoryRectangular]
+        if #available(iOS 27.0, *) { f.append(.systemExtraLargePortrait) }
+        return f
+    }
+}
+
+extension WidgetFamily {
+    var isAccessory: Bool {
+        switch self {
+        case .accessoryCircular, .accessoryRectangular, .accessoryInline: true
+        default: false
+        }
+    }
+
+    /// 大号：大、超大、iPhone 整页
+    var isBig: Bool {
+        switch self {
+        case .systemLarge, .systemExtraLarge: return true
+        default:
+            if #available(iOS 27.0, *), self == .systemExtraLargePortrait { return true }
+            return false
+        }
+    }
 }
 
 private let accent = Color(red: 0.894, green: 0.361, blue: 0) // 和 App 的强调色一样（#E45C00）
 
-/// 背景：壁纸铺满，底下压一层渐暗，白字才看得清；没有图时用橙色日落渐变（和图标一个色调）。
-struct Backdrop: View {
-    let image: UIImage?
+/// 背景：壁纸铺满；功能小组件上下压一层渐暗，白字才看得清。没有图时用橙色日落渐变（和图标一个色调）。
+/// 锁定屏幕上不画背景（系统也不让画）。
+struct WidgetBackdrop: View {
+    let entry: Entry
+    var dim = true
+    var familyOverride: WidgetFamily?
+    @Environment(\.widgetFamily) private var envFamily
 
     var body: some View {
-        ZStack {
-            if let image {
-                Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
-            } else {
-                LinearGradient(colors: [Color(red: 0.98, green: 0.62, blue: 0.27), Color(red: 0.55, green: 0.17, blue: 0.24)],
-                               startPoint: .top, endPoint: .bottom)
+        if (familyOverride ?? envFamily).isAccessory {
+            Color.clear
+        } else {
+            ZStack {
+                if let image = entry.image {
+                    Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    LinearGradient(colors: [Color(red: 0.98, green: 0.62, blue: 0.27), Color(red: 0.55, green: 0.17, blue: 0.24)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+                if dim {
+                    LinearGradient(stops: [.init(color: .black.opacity(0.35), location: 0),
+                                           .init(color: .clear, location: 0.3),
+                                           .init(color: .clear, location: 0.45),
+                                           .init(color: .black.opacity(0.65), location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
             }
-            LinearGradient(stops: [.init(color: .black.opacity(0.35), location: 0),
-                                   .init(color: .clear, location: 0.3),
-                                   .init(color: .clear, location: 0.45),
-                                   .init(color: .black.opacity(0.65), location: 1)],
-                           startPoint: .top, endPoint: .bottom)
         }
     }
 }
+
+// MARK: - 功能小组件
 
 struct StatusView: View {
     let entry: Entry
@@ -47,10 +107,21 @@ struct StatusView: View {
     @Environment(\.widgetFamily) private var envFamily
     private var family: WidgetFamily { familyOverride ?? envFamily }
 
-    private var big: Bool { family == .systemLarge || family == .systemExtraLarge }
+    private var big: Bool { family.isBig }
     private var padding: CGFloat { family == .systemSmall ? 14 : 16 }
 
     var body: some View {
+        switch family {
+        case .accessoryInline: inline
+        case .accessoryCircular: circular
+        case .accessoryRectangular: rectangular
+        default: home
+        }
+    }
+
+    // MARK: 主屏幕
+
+    private var home: some View {
         VStack(alignment: .leading, spacing: 4) {
             header
             Spacer(minLength: 0)
@@ -68,10 +139,13 @@ struct StatusView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Image(systemName: "photo.on.rectangle.angled")
+            Image(systemName: entry.offlineSince == nil ? "photo.on.rectangle.angled" : "wifi.slash")
             Text(entry.mac ?? "拾景").lineLimit(1)
             Spacer(minLength: 0)
-            if big, let name = entry.wallName {
+            if let since = entry.offlineSince {
+                // 离线：用的是缓存的状态
+                Text("离线 · \(since.formatted(.dateTime.hour().minute()))").opacity(0.85)
+            } else if big, let name = entry.wallName {
                 Text(name).lineLimit(1).truncationMode(.middle).opacity(0.8)
                     .frame(maxWidth: 220, alignment: .trailing)
             }
@@ -99,7 +173,7 @@ struct StatusView: View {
             }
         default:
             VStack(alignment: .leading, spacing: 4) {
-                details(s, titleFont: family == .systemExtraLarge ? .largeTitle.bold() : .title2.bold())
+                details(s, titleFont: family == .systemLarge ? .title2.bold() : .largeTitle.bold())
             }
             HStack(spacing: 10) {
                 action(s)
@@ -120,7 +194,7 @@ struct StatusView: View {
             Text(s.label ?? "").font(.caption).opacity(0.9).lineLimit(1)
         } else {
             subtitle(s).font(big ? .subheadline : .caption).opacity(0.9).lineLimit(1)
-            if let next = s.nextAutoDate {
+            if let next = s.nextAutoDate, next > Date() {
                 Text("下次自动换 \(next.formatted(.dateTime.month().day().hour().minute()))")
                     .font(big ? .subheadline : .caption).opacity(0.9).lineLimit(1)
             }
@@ -137,6 +211,7 @@ struct StatusView: View {
     }
 
     /// 换一批 / 停止。电脑上开了「删除不合格原图」时，从小组件换一批只模拟筛选（删原图要在 App 里确认）。
+    /// 离线时按钮点了也连不上，灰掉。
     @ViewBuilder
     private func action(_ s: RemoteState) -> some View {
         Group {
@@ -146,18 +221,117 @@ struct StatusView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .tint(.red)
-                .disabled(s.stopping)
+                .disabled(s.stopping || entry.offlineSince != nil)
             } else {
                 Button(intent: RunWallpaperIntent(deleteOriginals: false)) {
                     Label("换一批", systemImage: "shuffle")
                         .frame(maxWidth: .infinity)
                 }
                 .tint(accent)
-                .disabled(s.blocked != nil)
+                .disabled(s.blocked != nil || entry.offlineSince != nil)
             }
         }
         .font((big ? Font.subheadline : .caption).bold())
         .buttonStyle(.borderedProminent)
         .shadow(radius: 0)
+    }
+
+    // MARK: 锁定屏幕
+
+    private var inline: some View {
+        Group {
+            if let s = entry.state {
+                if s.running {
+                    Label("换壁纸 \(s.fraction >= 0 ? Int(s.fraction * 100) : 0)%", systemImage: "shuffle")
+                } else {
+                    Label("拾景 \(s.wallpapers) 张壁纸", systemImage: "photo.on.rectangle.angled")
+                }
+            } else {
+                Label("拾景", systemImage: "photo.on.rectangle.angled")
+            }
+        }
+    }
+
+    private var circular: some View {
+        ZStack {
+            AccessoryWidgetBackground()
+            if let s = entry.state, s.running, s.fraction >= 0 {
+                Gauge(value: s.fraction) {
+                    Image(systemName: "shuffle")
+                }
+                .gaugeStyle(.accessoryCircularCapacity)
+            } else {
+                VStack(spacing: 1) {
+                    Image(systemName: entry.offlineSince == nil ? "photo.on.rectangle.angled" : "wifi.slash")
+                        .font(.caption)
+                    Text(entry.state.map { "\($0.wallpapers)" } ?? "—")
+                        .font(.system(.body, design: .rounded).weight(.semibold))
+                        .minimumScaleFactor(0.6)
+                }
+            }
+        }
+    }
+
+    private var rectangular: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Label(entry.mac ?? "拾景", systemImage: entry.offlineSince == nil ? "photo.on.rectangle.angled" : "wifi.slash")
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+            if let s = entry.state {
+                Text(s.running ? (s.label ?? "正在换壁纸…") : "\(s.wallpapers) 张壁纸")
+                    .font(.headline).lineLimit(1).minimumScaleFactor(0.8)
+                if s.running, s.fraction >= 0 {
+                    ProgressView(value: s.fraction)
+                } else if let l = s.last {
+                    Text("上次 \(l.date.formatted(.relative(presentation: .named)))").font(.caption2).lineLimit(1)
+                }
+            } else {
+                Text(entry.problem ?? "正在读取…").font(.caption2).lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - 壁纸小组件
+
+/// 只有图（图在 containerBackground 里铺满），需要时左下角标文件名；没有图时说明原因。
+struct PhotoView: View {
+    let entry: Entry
+    var familyOverride: WidgetFamily?
+    @Environment(\.widgetFamily) private var envFamily
+    private var family: WidgetFamily { familyOverride ?? envFamily }
+
+    var body: some View {
+        if family == .accessoryRectangular {
+            // 锁定屏幕：图本身就是内容（系统渲染成单色）
+            if let image = entry.image {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                Label("拾景壁纸", systemImage: "photo").font(.caption)
+            }
+        } else {
+            ZStack(alignment: .bottomLeading) {
+                Color.clear
+                if entry.image == nil {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Image(systemName: "photo.on.rectangle.angled").font(.title3)
+                        Text(entry.problem ?? (entry.state == nil ? "正在读取…" : "壁纸文件夹是空的"))
+                            .font(.footnote.weight(.medium))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(14)
+                } else if entry.showName, family != .systemSmall, let name = entry.wallName {
+                    Text(name)
+                        .font(.caption2.weight(.medium))
+                        .lineLimit(1).truncationMode(.middle)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.black.opacity(0.35), in: Capsule())
+                        .padding(10)
+                }
+            }
+        }
     }
 }
