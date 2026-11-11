@@ -40,6 +40,7 @@ type wallsSnapshot struct {
 	paths   map[string]string // 文件名 → 完整路径
 	list    []remoteWall
 	sources map[string]string // 文件名 → 原图完整路径
+	hero    string            // 横幅图的文件名（和桌面概览顶部那张一样），没有时为空
 }
 
 // wallsRev 是壁纸列表的指纹：换了一批、移出了几张都会变。
@@ -56,10 +57,14 @@ func wallsRev(all []string) string {
 func (rs *remoteServer) publishWalls(rev string, w *wallpapers) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	if rs.walls.rev == rev && rs.walls.dir == w.dir {
+	hero := ""
+	if w.heroPath != "" {
+		hero = filepath.Base(w.heroPath)
+	}
+	if rs.walls.rev == rev && rs.walls.dir == w.dir && rs.walls.hero == hero {
 		return
 	}
-	s := wallsSnapshot{rev: rev, dir: w.dir, paths: map[string]string{}, sources: map[string]string{}}
+	s := wallsSnapshot{rev: rev, dir: w.dir, hero: hero, paths: map[string]string{}, sources: map[string]string{}}
 	for _, p := range w.all {
 		name := filepath.Base(p)
 		src := w.sources[name]
@@ -82,6 +87,8 @@ func (rs *remoteServer) wallRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/wallpapers", rs.authed(rs.handleWalls))
 	mux.HandleFunc("GET /api/wallpapers/{name}/thumb", rs.authed(rs.handleWallImage(remoteThumbWidth, true)))
 	mux.HandleFunc("GET /api/wallpapers/{name}/image", rs.authed(rs.handleWallImage(remoteImageWidth, false)))
+	// 横幅图尺寸（桌面概览顶部用的同一份磁盘缓存）：手机概览的横幅、主屏幕小组件的背景
+	mux.HandleFunc("GET /api/wallpapers/{name}/hero", rs.authed(rs.handleWallImage(heroWidth, true)))
 	mux.HandleFunc("POST /api/wallpapers/{name}/remove", rs.authed(rs.handleWallRemove))
 	mux.HandleFunc("POST /api/wallpapers/{name}/delete", rs.authed(rs.handleWallDelete))
 }
@@ -92,7 +99,7 @@ func (rs *remoteServer) handleWalls(w http.ResponseWriter, r *http.Request, _ st
 	if list == nil {
 		list = []remoteWall{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rev": s.rev, "items": list})
+	writeJSON(w, http.StatusOK, map[string]any{"rev": s.rev, "hero": s.hero, "items": list})
 }
 
 // handleWallImage 返回缩小后的 JPEG。文件名带进缓存键，同一张图在手机上缓存住就不用再要。

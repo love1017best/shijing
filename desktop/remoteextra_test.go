@@ -128,3 +128,25 @@ func TestRemoteLogDeletionsOriginal(t *testing.T) {
 		t.Fatalf("original = %d %s %d 字节", resp.StatusCode, resp.Header.Get("Content-Type"), len(body))
 	}
 }
+
+func TestRemoteHero(t *testing.T) {
+	h := newRemoteHarness(t)
+	withWalls(t, h)
+	h.walls.heroPath = h.walls.all[1]
+	h.tt.Frame()
+	tok := h.pair(t, "iPhone")
+	_, data := h.do(t, "GET", "/api/wallpapers", tok, nil)
+	if data["hero"] != "风景-b.jpg" {
+		t.Fatalf("hero = %v", data["hero"])
+	}
+	req, _ := http.NewRequest("GET", h.base+"/api/wallpapers/风景-b.jpg/hero", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("hero 图 = %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+}
