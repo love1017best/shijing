@@ -30,6 +30,13 @@ struct APIClient: Sendable {
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 30 // 事件流每 15 秒有一次保活，不会被这个超时打断
         cfg.waitsForConnectivity = false
+        // 小组件自己把缩好的图存在 Caches/widget 里，系统的网络缓存再存一份原样下载的就是重复（实测 4 MB 左右），
+        // 小组件里关掉，并清掉以前攒下的。App 里留着：缩略图重新打开时快一些。
+        if Bundle.main.bundleURL.pathExtension == "appex" {
+            cfg.urlCache = nil
+            cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+            URLCache.shared.removeAllCachedResponses()
+        }
         return URLSession(configuration: cfg)
     }()
 

@@ -41,6 +41,8 @@ struct WallPreview: View {
 
     private static let pageGap: CGFloat = 16
     private static let dismissDistance: CGFloat = 120
+    /// 翻页至少要拖的距离上限（见 finishPage）
+    private static let pageDistance: CGFloat = 80
     private static let maxScale: CGFloat = 5
 
     init(session: RemoteSession, startName: String) {
@@ -225,14 +227,18 @@ struct WallPreview: View {
     }
 
     /// 横向拖动松手：拖过五分之一屏或甩得够快就翻页（首尾相接），否则弹回。
+    /// 门槛按屏宽算但有上限：竖着的手机五分之一屏约 80pt，展开的内屏横着有 900 多 pt 宽，
+    /// 按比例要拖 190pt 才翻，用户嫌太费劲，所以和竖屏手机取一样的距离。
     private func finishPage(_ v: DragGesture.Value, _ size: CGSize) {
         let w = size.width
         let moved = v.translation.width
         let flung = v.predictedEndTranslation.width
+        let need = min(w * 0.2, Self.pageDistance)
+        let fling = min(w * 0.6, Self.pageDistance * 3)
         var d = 0
         if walls.count > 1 {
-            if moved < -w * 0.2 || flung < -w * 0.6 { d = 1 }
-            if moved > w * 0.2 || flung > w * 0.6 { d = -1 }
+            if moved < -need || flung < -fling { d = 1 }
+            if moved > need || flung > fling { d = -1 }
         }
         guard d != 0 else {
             withAnimation(.spring(duration: 0.3)) { dragX = 0 }
