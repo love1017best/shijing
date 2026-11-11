@@ -178,17 +178,19 @@ func TestSettingsAutosaveAndPresets(t *testing.T) {
 		t.Errorf("自定义时宽高应可编辑: %+v %v", info, ok)
 	}
 
+	tt.SetSize(1024, 1600) // 设置页比默认窗口长
+	tt.Frame()
 	click(t, tt, "刷新系统壁纸")
 	if f.cfg.RefreshWallpaper {
 		t.Fatal("开关应关闭")
 	}
 }
 
-func TestArchiveToggleEnablesFields(t *testing.T) {
+func TestArchiveToggleShowsFields(t *testing.T) {
 	f, tt := newFakeApp(t)
-	click(t, tt, "归档")
-	if info, ok := tt.AccessByRole(ui.RoleTextField, "归档文件夹名"); !ok || !info.Disabled {
-		t.Errorf("归档未开启时字段应禁用: %+v %v", info, ok)
+	click(t, tt, "设置")
+	if _, ok := tt.AccessByRole(ui.RoleTextField, "归档文件夹名"); ok {
+		t.Error("归档没开启时不应显示它的设置")
 	}
 	click(t, tt, "启用归档")
 	if !f.cfg.ArchiveEnabled {
@@ -197,8 +199,8 @@ func TestArchiveToggleEnablesFields(t *testing.T) {
 	if info, ok := tt.AccessByRole(ui.RoleTextField, "归档文件夹名"); !ok || info.Disabled {
 		t.Errorf("开启归档后字段应可编辑: %+v %v", info, ok)
 	}
-	if !tt.HasText("开") {
-		t.Error("侧边栏应标出归档已开启")
+	if _, ok := tt.AccessByRole(ui.RoleTextField, "NFS 根路径"); !ok {
+		t.Error("开启归档后应显示跨挂载点的路径")
 	}
 }
 
@@ -335,23 +337,28 @@ func TestRunDisabledWhenAllUnmounted(t *testing.T) {
 
 func TestThumbnailOpensItsImage(t *testing.T) {
 	f, tt := newFakeApp(t)
-	img := image.NewRGBA(image.Rect(0, 0, 16, 10))
-	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), total: 9,
-		thumbs: []*ui.Bitmap{ui.NewBitmap(img), ui.NewBitmap(img)}, paths: []string{"/w/a.jpg", "/w/b.jpg"},
-		all: []string{"/w/hero.jpg", "/w/a.jpg", "/w/b.jpg", "/w/c.jpg"}}
+	img := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 16, 10)))
+	all := []string{"/w/hero.jpg"}
+	for i := range 40 {
+		all = append(all, fmt.Sprintf("/w/%c%d.jpg", 'a'+i%26, i))
+	}
+	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), heroPath: "/w/hero.jpg", all: all,
+		thumbs: map[string]*ui.Bitmap{all[1]: img, all[2]: img}}
 	f.wallsLoadedGen = f.wallsGen
 	tt.Frame()
 	click(t, tt, "壁纸 2")
 	tt.Frame()
-	if !f.preview || !tt.HasText("b.jpg") || !tt.HasText("3 / 4") {
+	if !f.preview || !tt.HasText(filepath.Base(all[2])) || !tt.HasText("3 / 41") {
 		t.Errorf("点缩略图应打开大图预览，能翻看文件夹里的全部图片: %q", tt.Texts())
 	}
 	click(t, tt, "下一张")
-	if !tt.HasText("c.jpg") || !tt.HasText("4 / 4") || !tt.HasText("正在载入…") {
+	if !tt.HasText(filepath.Base(all[3])) || !tt.HasText("正在载入…") {
 		t.Errorf("没有缩略图的图片也能预览: %q", tt.Texts())
 	}
+	f.previewIdx = len(all) - 1
+	tt.Frame()
 	click(t, tt, "下一张")
-	if !tt.HasText("1 / 4") {
+	if !tt.HasText("1 / 41") {
 		t.Error("下一张应循环到第一张")
 	}
 	if !tt.HasText("移出壁纸文件夹") || tt.HasText("删除图库里的原图…") {
@@ -359,8 +366,14 @@ func TestThumbnailOpensItsImage(t *testing.T) {
 	}
 	f.preview = false
 	tt.Frame()
-	if !tt.HasText("+7") {
-		t.Errorf("最后一格应显示剩下的张数: %q", tt.Texts())
+	shown := f.stripCols*f.stripRows - 1
+	if !tt.HasText(fmt.Sprintf("+%d", 40-shown)) {
+		t.Fatalf("最后一格应显示剩下的张数（%d 格）: %q", shown, tt.Texts())
+	}
+	click(t, tt, "查看全部壁纸")
+	tt.Frame()
+	if !f.preview || f.walls.all[f.previewIdx] != all[shown+1] || len(f.opened) != 0 {
+		t.Errorf("「+N」应在预览里从第一张没显示的开始翻: idx=%d opened=%q", f.previewIdx, f.opened)
 	}
 }
 
@@ -369,9 +382,9 @@ func TestHeroOpensItsImage(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 16, 10))
 	opened := ""
 	f.openPath = func(p string) { opened = p }
-	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), total: 3, hero: ui.NewBitmap(img), heroPath: "/w/hero.jpg",
-		thumbs: []*ui.Bitmap{ui.NewBitmap(img)}, paths: []string{"/w/a.jpg"},
-		all: []string{"/w/hero.jpg", "/w/a.jpg", "/w/b.jpg"}}
+	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), hero: ui.NewBitmap(img), heroPath: "/w/hero.jpg",
+		thumbs: map[string]*ui.Bitmap{"/w/a.jpg": ui.NewBitmap(img)},
+		all:    []string{"/w/hero.jpg", "/w/a.jpg", "/w/b.jpg"}}
 	f.wallsLoadedGen = f.wallsGen
 	tt.Frame()
 	click(t, tt, "打开壁纸文件夹")
@@ -420,7 +433,7 @@ func TestPreviewKeyboard(t *testing.T) {
 	}
 	opened := ""
 	f.openPath = func(p string) { opened = p }
-	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), total: 4, all: slices.Clone(walls), sources: srcs}
+	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), all: slices.Clone(walls), sources: srcs}
 	f.wallsLoadedGen = f.wallsGen
 	f.preview, f.previewIdx = true, 0
 	tt.Frame()
@@ -687,12 +700,12 @@ func TestWallpaperActions(t *testing.T) {
 	img := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 4, 4)))
 	reset := func() {
 		os.WriteFile(wall, []byte("x"), 0o644)
-		f.walls = wallpapers{total: 1, thumbs: []*ui.Bitmap{img}, paths: []string{wall}, all: []string{wall}, sources: map[string]string{"s-a.jpg": src}}
+		f.walls = wallpapers{thumbs: map[string]*ui.Bitmap{wall: img}, all: []string{wall}, sources: map[string]string{"s-a.jpg": src}}
 	}
 
 	reset()
 	f.removeWallpaper(wall, true)
-	if _, err := os.Stat(wall); !os.IsNotExist(err) || len(f.walls.paths) != 0 || len(f.walls.all) != 0 {
+	if _, err := os.Stat(wall); !os.IsNotExist(err) || len(f.walls.thumbs) != 0 || len(f.walls.all) != 0 {
 		t.Error("应从壁纸文件夹移除")
 	}
 	if !slices.Equal(f.cfg.Excluded, []string{src}) || !slices.Equal(f.buildConfig().Excluded, []string{src}) {

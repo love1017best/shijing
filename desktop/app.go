@@ -26,7 +26,6 @@ const (
 	pageOverview = "overview"
 	pageLibrary  = "library"
 	pageSettings = "settings"
-	pageArchive  = "archive"
 	pageDeleted  = "deleted"
 	pageAbout    = "about"
 	pageKeys     = "keys"
@@ -78,6 +77,36 @@ type progress struct {
 	done, total int
 }
 
+// runStats 是运行中的进度和筛选阶段的删除情况（删除数从日志行里数出来，见 countDeletion）。
+type runStats struct {
+	prog                                  progress
+	copyT0                                time.Time // 复制阶段开始的时间，算剩余时间用
+	runDelete                             bool      // 这次运行是否真删（否则是模拟运行，只判定不合格）
+	runRejected, runDeleted, runDelFailed int
+	lastDel                               logEntry // 最近一张待删除/已删除的图片
+}
+
+// previewState 是大图预览、删除原图确认、编号跳转和移出的撤销记录。
+type previewState struct {
+	preview        bool
+	previewIdx     int
+	previewImg     *ui.Bitmap
+	previewFor     string // previewImg 是哪个文件的
+	confirmDelSrc  bool
+	pendingDelWall string // 要删除原图的那张壁纸（壁纸文件夹里的路径）
+	jumpBuf        string // 正在输入的跳转编号
+	undo           []removedWall
+	undoSeq        int
+}
+
+// keyRecorder 是「快捷键」页正在录制的状态。
+type keyRecorder struct {
+	recording    string   // 正在录制快捷键的操作 id
+	recordIgnore []ui.Key // 开始录制时已经按着的键（比如按空格点的录制按钮），松开前不算
+	keyErr       string   // 上次录制被拒绝的原因
+	keyErrFor    string
+}
+
 // app 是窗口显示的全部状态。view 只在主线程运行；后台 goroutine 通过 update 改状态。
 type app struct {
 	cfgPath string
@@ -106,19 +135,17 @@ type app struct {
 	logParsedFirst  string
 	logProblemsOnly bool
 	running         bool
-	prog            progress
+	runStats        // 这次运行的进度和删除情况，开始运行时整体清零
 	last            *runResult
 	skipConfirm     bool        // 删除原图前不再弹确认框（重新打开删除开关后恢复）
 	prevDelete      bool        // 上一帧「删除不合格原图」的值，用来发现它被重新打开
 	stopReq         atomic.Bool // 用户点了「停止」，流程在安全的地方停下
-	// 这次运行筛选阶段的删除情况，从日志行里数出来（appendLog），运行中的进度卡片上显示。
-	runDelete                             bool // 这次运行是否真删（否则是模拟运行，只判定不合格）
-	runRejected, runDeleted, runDelFailed int
-	lastDel                               logEntry // 最近一张待删除/已删除的图片
-	toast                                 string
-	initialized                           bool
+	toast           string
+	initialized     bool
 
 	walls          wallpapers // 当前壁纸文件夹的缩略图
+	previewState              // 大图预览（preview.go、undo.go）
+	keyRecorder               // 「快捷键」页的录制状态（keysview.go）
 	wallsGen       int        // 每次运行结束 +1，提示需要重新读取壁纸文件夹
 	wallsLoadedGen int
 
@@ -126,19 +153,7 @@ type app struct {
 	autoIdx  int           // 「自动换壁纸」选中的是 autoRunHours 的第几项；配置里是别的值时为 -1
 	started  time.Time     // 应用启动时间：从没运行过时，自动换壁纸从这里开始计时
 	lastGood *core.Summary // 最近一次成功运行的结果（图库统计、空间预估用；运行中 a.last 是 nil）
-	copyT0   time.Time     // 复制阶段开始的时间，算剩余时间用
 	delCache deleteCache
-	// 缩略图的大图预览和「删除原图」确认
-	preview        bool
-	previewIdx     int
-	previewImg     *ui.Bitmap
-	previewFor     string // previewImg 是哪个文件的
-	confirmDelSrc  bool
-	pendingDelWall string // 要删除原图的那张壁纸（壁纸文件夹里的路径）
-	jumpBuf        string // 预览里正在输入的跳转编号
-	// 移出壁纸的撤销记录（undo.go）
-	undo    []removedWall
-	undoSeq int
 	// 概览页缩略图网格：上一帧量到的可视高度、整页高度，和据此算出的行列数（stripLayout）
 	viewH, pageH         float32
 	viewW                float32 // 内容滚动区的宽度（上一帧），设置类页面据此决定单栏还是两栏
@@ -165,11 +180,6 @@ type app struct {
 	remote     *remoteServer // 手机遥控服务，只在设置里打开时监听
 	pairOpen   bool          // 配对码弹层是否显示
 	pairCode   string        // 弹层显示的是哪一个配对码（新的请求来了重新弹出）
-
-	recording    string   // 正在录制快捷键的操作 id
-	recordIgnore []ui.Key // 开始录制时已经按着的键（比如按空格点的录制按钮），松开前不算
-	keyErr       string   // 上次录制被拒绝的原因
-	keyErrFor    string
 
 	pendMu    sync.Mutex
 	pendLog   []string
@@ -310,12 +320,7 @@ func (a *app) stopRun() {
 	}
 }
 
-func (a *app) startRun() {
-	if !a.canRun() {
-		return
-	}
-	a.startRunWith(runOpts{})
-}
+func (a *app) startRun() { a.startRunWith(runOpts{}) }
 
 // runOpts 是一次运行的来源和限制。
 type runOpts struct {
@@ -337,11 +342,8 @@ func (a *app) startRunWith(o runOpts) {
 	}
 	a.clearUndo() // 换一批会清空壁纸文件夹，之前的移出没法再放回去
 	a.running = true
-	a.prog = progress{}
 	a.last = nil
-	a.runDelete = cfg.DeleteDuringFilter
-	a.runRejected, a.runDeleted, a.runDelFailed = 0, 0, 0
-	a.lastDel = logEntry{}
+	a.runStats = runStats{runDelete: cfg.DeleteDuringFilter}
 	a.stopReq.Store(false)
 	a.appendLog(strings.Repeat("─", 50))
 	a.appendLog("▶ " + time.Now().Format("2006-01-02 15:04:05") + " 开始运行")

@@ -608,7 +608,7 @@ func (a *app) remoteSnapshot() remoteState {
 		Blocked:    a.remoteBlocked(),
 		Unmounted:  a.unmountedCount(),
 		WillDelete: a.willDelete(),
-		Wallpapers: a.walls.total,
+		Wallpapers: len(a.walls.all),
 		Dest:       tildify(a.cfg.DestDir),
 		Sample:     int(a.num),
 		Library:    len(a.allDirs()),

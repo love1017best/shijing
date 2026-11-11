@@ -241,10 +241,10 @@ func TestScreenshots(t *testing.T) {
 
 		// 大图预览
 		f.walls.sources = map[string]string{}
-		for _, p := range f.walls.paths {
+		for _, p := range f.walls.all {
 			f.walls.sources[filepath.Base(p)] = "/Volumes/NAS/Photos/旅行/冰岛 2024/" + filepath.Base(p)
 		}
-		f.openPreview(1)
+		f.openPreviewOf(f.walls.grid()[0])
 		shot("preview")
 		f.preview = false
 	}

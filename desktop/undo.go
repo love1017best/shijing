@@ -20,8 +20,7 @@ const maxUndo = 50
 type removedWall struct {
 	wall, stash string
 	idx         int        // 在 walls.all 里的位置
-	thumbIdx    int        // 在缩略图里的位置，-1 表示没有缩略图
-	thumb       *ui.Bitmap // 缩略图（放回时不用重新解码）
+	thumb       *ui.Bitmap // 缩略图（放回时不用重新解码）；没解码过为 nil
 	excluded    string     // 这次加进「不再选」的原图，撤销时去掉；没加为空
 }
 
@@ -105,14 +104,9 @@ func (a *app) undoRemove() {
 	w := &a.walls
 	i := min(max(r.idx, 0), len(w.all))
 	w.all = slices.Insert(w.all, i, r.wall)
-	if r.thumbIdx >= 0 && r.thumb != nil {
-		j := min(r.thumbIdx, len(w.paths))
-		w.paths = slices.Insert(w.paths, j, r.wall)
-		w.thumbs = slices.Insert(w.thumbs, j, r.thumb)
-	} else {
-		w.rest = slices.Insert(w.rest, 0, r.wall)
+	if r.thumb != nil && w.thumbs != nil {
+		w.thumbs[r.wall] = r.thumb
 	}
-	w.total++
 	if a.preview {
 		a.previewIdx = i
 	}

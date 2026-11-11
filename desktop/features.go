@@ -162,10 +162,7 @@ func (a *app) wallSource(wall string) string {
 
 // removeWallpaper 从壁纸文件夹里移除一张（不动原图），exclude 时还把原图加进排除名单。
 func (a *app) removeWallpaper(wall string, exclude bool) {
-	r := removedWall{wall: wall, idx: slices.Index(a.walls.all, wall), thumbIdx: slices.Index(a.walls.paths, wall)}
-	if r.thumbIdx >= 0 {
-		r.thumb = a.walls.thumbs[r.thumbIdx]
-	}
+	r := removedWall{wall: wall, idx: slices.Index(a.walls.all, wall), thumb: a.walls.thumbs[wall]}
 	stash, err := a.stashWall(wall)
 	if os.IsNotExist(err) {
 		stash = "" // 文件已经不在了：照样从列表里去掉，只是没法撤销
@@ -208,16 +205,11 @@ func (a *app) deleteOriginal(wall string) {
 	a.toast = "已删除图库里的原图，记进了删除记录"
 }
 
-// dropWall 把一张从缩略图里去掉（不重新扫描，其余缩略图不变）。
+// dropWall 把一张从列表里去掉（不重新扫描，其余缩略图不变）。
 func (a *app) dropWall(wall string) {
 	w := &a.walls
-	if i := slices.Index(w.paths, wall); i >= 0 {
-		w.paths = slices.Delete(w.paths, i, i+1)
-		w.thumbs = slices.Delete(w.thumbs, i, i+1)
-	}
 	w.all = slices.DeleteFunc(w.all, func(p string) bool { return p == wall })
-	w.rest = slices.DeleteFunc(w.rest, func(p string) bool { return p == wall })
-	w.total = max(0, w.total-1)
+	delete(w.thumbs, wall)
 	if a.preview {
 		// 停在原位置，看到的就是下一张
 		if len(w.all) == 0 {

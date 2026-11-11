@@ -9,8 +9,8 @@ options:
   createIntermediateGroups: true
 settings:
   base:
-    MARKETING_VERSION: "0.3.9" # 与桌面端 desktop/mygo.json 的 version 一致
-    CURRENT_PROJECT_VERSION: "9"
+    MARKETING_VERSION: "0.3.10" # 与桌面端 desktop/mygo.json 的 version 一致
+    CURRENT_PROJECT_VERSION: "10"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
 # 开发团队 ID 写在本地的 ShiJing/Local.xcconfig（已 gitignore，不进公开仓库），Signing.xcconfig 可选地引用它

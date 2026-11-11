@@ -24,7 +24,7 @@ func previewFixture(t *testing.T, names ...string) (*fakeApp, *ui.Tester, []stri
 		}
 		walls, srcs[n] = append(walls, w), s
 	}
-	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), total: len(walls), all: slices.Clone(walls), sources: srcs}
+	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), all: slices.Clone(walls), sources: srcs}
 	f.wallsLoadedGen = f.wallsGen
 	f.preview, f.previewIdx = true, 0
 	tt.Frame()
@@ -52,7 +52,7 @@ func TestUndoRemove(t *testing.T) {
 	}
 	tt.Key(ui.Cmd, ui.KeyZ)
 	tt.Frame()
-	if !slices.Equal(f.walls.all, walls) || f.walls.total != 3 || f.walls.all[f.previewIdx] != walls[1] {
+	if !slices.Equal(f.walls.all, walls) || f.walls.all[f.previewIdx] != walls[1] {
 		t.Fatalf("再按 ⌘Z 应放回 b、顺序复原: %q idx=%d", f.walls.all, f.previewIdx)
 	}
 	tt.Key(ui.Cmd, ui.KeyZ) // 没有可撤销的了，不应出错

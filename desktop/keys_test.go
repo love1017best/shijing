@@ -129,11 +129,7 @@ func TestPreviewUsesCustomShortcut(t *testing.T) {
 	if f.previewIdx != 1 {
 		t.Errorf("N 应切到下一张: %d", f.previewIdx)
 	}
-	found := false
-	for _, s := range tt.Texts() {
-		found = found || strings.Contains(s, "← N 或 空格 / ⇧空格 切换图片")
-	}
-	if !found {
-		t.Errorf("预览说明应显示新的快捷键: %q", tt.Texts())
+	if h := f.previewKeyHint(); !strings.Contains(h, "← N 或 空格 / ⇧空格 切换图片") {
+		t.Errorf("预览的键盘说明应显示新的快捷键: %q", h)
 	}
 }

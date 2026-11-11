@@ -239,3 +239,18 @@ func (a *app) logRow(c *ui.Context, e logEntry) {
 		})
 	})
 }
+
+// cleanLogLine 去掉日志行开头的 emoji（保留缩进），颜色由 logColor 表达。
+func cleanLogLine(s string) string {
+	trimmed := strings.TrimLeft(s, " ")
+	indent := s[:len(s)-len(trimmed)]
+	rs := []rune(trimmed)
+	i := 0
+	for i < len(rs) && (unicode.Is(unicode.So, rs[i]) || rs[i] == 0xFE0F || rs[i] == 0x200D) {
+		i++
+	}
+	if i == 0 {
+		return s
+	}
+	return indent + strings.TrimLeft(string(rs[i:]), " ")
+}

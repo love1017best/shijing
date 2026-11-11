@@ -130,13 +130,7 @@ func (a *app) askDeleteOriginal(wall string) {
 	a.pendingDelWall, a.confirmDelSrc = wall, true
 }
 
-// openPreview 打开第 i 张缩略图的大图；预览可以翻看壁纸文件夹里的全部图片，不只是缩略图里那几张。
-func (a *app) openPreview(i int) {
-	if i >= 0 && i < len(a.walls.paths) {
-		a.openPreviewOf(a.walls.paths[i])
-	}
-}
-
+// openPreviewOf 打开某张壁纸的大图；预览可以翻看壁纸文件夹里的全部图片，不只是缩略图里那几张。
 func (a *app) openPreviewOf(wall string) {
 	if i := slices.Index(a.walls.all, wall); i >= 0 {
 		a.preview, a.previewIdx = true, i
@@ -167,8 +161,8 @@ func (a *app) previewBitmap(wall string) *ui.Bitmap {
 	if a.previewImg != nil && a.previewFor == wall {
 		return a.previewImg
 	}
-	if i := slices.Index(a.walls.paths, wall); i >= 0 {
-		return a.walls.thumbs[i]
+	if bmp := a.walls.thumbs[wall]; bmp != nil {
+		return bmp
 	}
 	if wall != "" && wall == a.walls.heroPath {
 		return a.walls.hero
@@ -265,13 +259,16 @@ func (a *app) previewModal(c *ui.Context) {
 					keyButton(c, nil, actDelete, a.keyLabel("delete")).TextColor(t.Danger).Tooltip(actDeleteTip).OnClick(func() { a.askDeleteOriginal(wall) })
 				}
 			})
-			note := "「移出」只删壁纸文件夹里的这一份，图库里的原图不动；「不再选它」还会让以后的采样跳过它。"
-			if src != "" {
-				note += "只有「删除图库里的原图」会真的删掉原图，不可撤销。"
-			} else {
-				note += "这张是之前的版本换上的，找不到对应的原图，只能移出。"
+			// 只留一句最要紧的；完整说明和键盘用法放在 ⓘ 的提示里（按钮上已经标了快捷键）
+			note := "移出不动原图，可以 ⌘Z 撤销；只有「删除图库里的原图」会删掉原图，不可撤销。"
+			if src == "" {
+				note = "这张是之前的版本换上的，找不到对应的原图，只能移出（⌘Z 可以撤销）。"
 			}
-			muted(c, note+a.previewKeyHint()).AlignSelf(ui.Stretch)
+			ui.Row(c).AlignSelf(ui.Stretch).Gap(6).AlignItems(ui.Center).Children(func() {
+				muted(c, note).Grow(1).Shrink(1).MinWidth(0)
+				ui.Icon(c, iconInfo).FontSize(13).TextColor(t.TextMuted).Label("键盘用法").Tooltip(
+					"「移出」只删壁纸文件夹里的这一份，图库里的原图不动；「不再选它」还会让以后的采样跳过它。\n" + a.previewKeyHint())
+			})
 		})
 	}).Label("壁纸预览")
 	// 正在输入编号时按 Esc：弹层自己的 Esc 先于里面的快捷键生效，会把预览关掉；这里改成只放弃编号
