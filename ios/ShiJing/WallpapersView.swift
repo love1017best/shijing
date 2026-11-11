@@ -148,13 +148,22 @@ struct AllWallpapersView: View {
     }
 }
 
-/// 大图预览：左右滑翻看壁纸文件夹里的全部图片，底栏三种操作。操作完停在原位置，看到的就是下一张。
+/// 大图预览：左右滑翻看壁纸文件夹里的全部图片，往下拖关闭，底栏三种操作。操作完停在原位置，看到的就是下一张。
+///
+/// 翻页用按整屏宽度分页的 ScrollView，不用 TabView(.page)：TabView 按扣掉安全区后的宽度分页，
+/// iPhone Duo 内屏横放时侧边有传感器区，每页比屏幕窄，会露出下一张的一条、图片也铺不满。
 struct WallPreview: View {
     let session: RemoteSession
-    @State private var current: String
+    @State private var current: String?
     @State private var confirmDelete: Wallpaper?
     @State private var chrome = true
+    /// 往下拖的距离；dragging 为 nil 表示这次拖动还没判断方向，false 是横向翻页
+    @State private var dragY: CGFloat = 0
+    @State private var dragging: Bool?
     @Environment(\.dismiss) private var dismiss
+
+    /// 拖过这么远（或甩得够快）松手就关闭
+    private static let dismissDistance: CGFloat = 120
 
     init(session: RemoteSession, startName: String) {
         self.session = session
@@ -163,21 +172,33 @@ struct WallPreview: View {
 
     private var index: Int? { session.walls.firstIndex { $0.name == current } }
     private var wall: Wallpaper? { index.map { session.walls[$0] } }
+    private var dragProgress: CGFloat { min(max(dragY, 0) / 400, 1) }
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
-            TabView(selection: $current) {
-                ForEach(session.walls) { w in
-                    WallImage(session: session, wall: w, kind: .image, contentMode: .fit)
-                        .tag(w.name)
-                        .onTapGesture { withAnimation(.easeOut(duration: 0.2)) { chrome.toggle() } }
+            Color.black.opacity(1 - dragProgress * 0.85).ignoresSafeArea()
+            GeometryReader { geo in
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 0) {
+                        ForEach(session.walls) { w in
+                            WallImage(session: session, wall: w, kind: .image, contentMode: .fit)
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .contentShape(Rectangle())
+                                .onTapGesture { withAnimation(.easeOut(duration: 0.2)) { chrome.toggle() } }
+                                .id(w.name)
+                        }
+                    }
+                    .scrollTargetLayout()
                 }
+                .scrollTargetBehavior(.paging)
+                .scrollPosition(id: $current)
+                .scrollIndicators(.hidden)
+                .scrollDisabled(dragging == true)
             }
-            #if os(iOS)
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            #endif
             .ignoresSafeArea()
+            .scaleEffect(1 - dragProgress * 0.25)
+            .offset(y: max(dragY, 0))
+            .simultaneousGesture(dismissDrag)
 
             if chrome {
                 VStack(spacing: 0) {
@@ -185,11 +206,13 @@ struct WallPreview: View {
                     Spacer()
                     if let wall { bottomBar(wall) }
                 }
+                .opacity(dragging == true ? 0 : 1)
                 .transition(.opacity)
             }
         }
+        .presentationBackground(.clear)
         .preferredColorScheme(.dark)
-        .statusBarHiddenCompat(!chrome)
+        .statusBarHiddenCompat(!chrome || dragging == true)
         .deleteOriginalDialog(session: session, wall: $confirmDelete)
         .onChange(of: session.walls) { old, new in
             // 当前这张被移出了：停在原来的位置（就是下一张），删光了就关掉
@@ -202,6 +225,29 @@ struct WallPreview: View {
             current = new[min(oldIdx, new.count - 1)].name
         }
         .sensoryFeedback(.success, trigger: session.walls.count) { old, new in new < old }
+    }
+
+    /// 往下拖关闭：一次拖动开头往下为主才算，横着拖照常翻页。
+    private var dismissDrag: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { v in
+                if dragging == nil {
+                    dragging = v.translation.height > 0 && abs(v.translation.height) > abs(v.translation.width) * 1.2
+                }
+                if dragging == true { dragY = v.translation.height }
+            }
+            .onEnded { v in
+                guard dragging == true else {
+                    dragging = nil
+                    return
+                }
+                if v.translation.height > Self.dismissDistance || v.predictedEndTranslation.height > Self.dismissDistance * 3 {
+                    dismiss() // dragging 留着 true：关闭动画里不再闪出顶栏底栏
+                } else {
+                    dragging = nil
+                    withAnimation(.spring(duration: 0.3)) { dragY = 0 }
+                }
+            }
     }
 
     private var topBar: some View {
@@ -246,7 +292,7 @@ struct WallPreview: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial)
+        .background(.ultraThinMaterial, ignoresSafeAreaEdges: [.bottom, .horizontal])
     }
 
     @ViewBuilder
