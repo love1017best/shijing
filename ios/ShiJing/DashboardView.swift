@@ -1,0 +1,331 @@
+import SwiftUI
+
+/// 一台 Mac 的遥控面板：当前状态、换一批 / 停止、上次运行、壁纸设置概要。
+/// 窄的时候一栏从上往下排；宽的时候（横屏、展开的大屏、iPad）分成左右两栏：左边操作，右边结果。
+struct DashboardView: View {
+    let session: RemoteSession
+    let store: MacStore
+    @State private var width: CGFloat = 0
+    @State private var confirmDelete = false
+
+    /// 内容区宽于这个值时分两栏（按实际宽度判断，不按机型写死）
+    private static let twoColumnWidth: CGFloat = 680
+
+    var body: some View {
+        content
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            .navigationTitle(session.mac.name)
+            .iOSInlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
+            }
+            .alert("操作没有完成", isPresented: Binding(
+                get: { session.actionError != nil },
+                set: { if !$0 { session.actionError = nil } })
+            ) {
+                Button("好") {}
+            } message: {
+                Text(session.actionError ?? "")
+            }
+            .confirmationDialog("这次运行会删除不合格的原图", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("删除并换一批", role: .destructive) { Task { await session.run(deleteOriginals: true) } }
+                Button("只模拟筛选，不删除") { Task { await session.run(deleteOriginals: false) } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(session.state?.deleteNote ?? "")
+            }
+            .sensoryFeedback(.success, trigger: session.state?.last?.at) { old, new in
+                old != nil && new != nil && session.state?.last?.status == "ok"
+            }
+    }
+
+    @ViewBuilder private var content: some View {
+        if case .unpaired(let msg) = session.connection {
+            ContentUnavailableView {
+                Label("配对已失效", systemImage: "lock.slash")
+            } description: {
+                Text(msg + "\n移除后在列表里重新配对。")
+            } actions: {
+                Button("移除这台 Mac", role: .destructive) { store.remove(session.macID) }
+                    .buttonStyle(.borderedProminent)
+            }
+        } else if let state = session.state {
+            if width >= Self.twoColumnWidth {
+                HStack(alignment: .top, spacing: 0) {
+                    List {
+                        connectionSection
+                        statusSection(state)
+                        controlSection(state)
+                    }
+                    List {
+                        lastRunSection(state)
+                        overviewSection(state)
+                    }
+                }
+            } else {
+                List {
+                    connectionSection
+                    statusSection(state)
+                    controlSection(state)
+                    lastRunSection(state)
+                    overviewSection(state)
+                }
+            }
+        } else if case .offline(let msg) = session.connection {
+            ContentUnavailableView {
+                Label("连不上 \(session.mac.name)", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(msg)
+            } actions: {
+                Button("重试") { session.start() }.buttonStyle(.bordered)
+            }
+        } else {
+            ProgressView("正在连接 \(session.mac.name)…")
+        }
+    }
+
+    // MARK: 各个分组
+
+    /// 已经拿到过状态、之后断开了：顶部提示一下，下面显示的是断开前的样子。
+    @ViewBuilder private var connectionSection: some View {
+        if case .offline(let msg) = session.connection {
+            Section {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("连接已断开，正在重连").font(.subheadline.bold())
+                        Text(msg).font(.footnote).foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    private func statusSection(_ s: RemoteState) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(s.eyebrow).font(.subheadline).foregroundStyle(.secondary)
+                Text(s.title).font(.title2.bold())
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    @ViewBuilder private func controlSection(_ s: RemoteState) -> some View {
+        if s.running {
+            Section("进度") {
+                StepsView(state: s)
+                VStack(alignment: .leading, spacing: 8) {
+                    if s.fraction >= 0 {
+                        ProgressView(value: s.fraction) {
+                            progressLabel(s)
+                        }
+                    } else {
+                        ProgressView { progressLabel(s) }
+                    }
+                    if let line = s.lastLine, !line.isEmpty {
+                        Text(line).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }
+                .padding(.vertical, 4)
+                if s.steps.contains(Step.filter.rawValue) {
+                    deleteRow(s)
+                }
+                Button(role: .destructive) {
+                    Task { await session.stop() }
+                } label: {
+                    Label(s.stopping ? "正在停止…" : "停止", systemImage: "stop.circle")
+                }
+                .disabled(s.stopping || session.busy)
+            }
+        } else {
+            Section {
+                Button {
+                    if s.willDelete {
+                        confirmDelete = true
+                    } else {
+                        Task { await session.run(deleteOriginals: false) }
+                    }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if session.busy {
+                            ProgressView()
+                        } else {
+                            Label("换一批壁纸", systemImage: "shuffle").font(.headline)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .disabled(s.blocked != nil || session.busy || session.connection != .live)
+            } footer: {
+                if let b = s.blocked {
+                    Text(b)
+                } else if s.unmounted > 0 {
+                    Text("上次检查时有 \(s.unmounted) 个图库目录访问不了，换一批前会重新检查。")
+                } else if s.willDelete {
+                    Text("会先删除图库里不合格的原图，点了之后可以选只模拟。")
+                }
+            }
+        }
+    }
+
+    private func progressLabel(_ s: RemoteState) -> some View {
+        HStack {
+            Text(s.label ?? "").font(.subheadline.bold())
+            Spacer()
+            if s.fraction >= 0 {
+                Text(s.fraction, format: .percent.precision(.fractionLength(0)))
+                    .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+    }
+
+    private func deleteRow(_ s: RemoteState) -> some View {
+        let n = s.runDelete ? s.deleted : s.rejected
+        let title = s.runDelete ? "已删除 \(n) 张不合格原图" : "发现 \(n) 张不合格（模拟，没有删除）"
+        return Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                if s.deleteFailed > 0 {
+                    Text("\(s.deleteFailed) 张删除失败，详情看电脑上的日志").font(.footnote).foregroundStyle(.red)
+                }
+            }
+        } icon: {
+            Image(systemName: s.runDelete ? "trash" : "eye")
+                .foregroundStyle(n == 0 ? Color.secondary : (s.runDelete ? Color.red : Color.orange))
+        }
+    }
+
+    @ViewBuilder private func lastRunSection(_ s: RemoteState) -> some View {
+        if let l = s.last {
+            Section("上次运行") {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(lastHeadline(l)).font(.headline)
+                        Text(l.date, format: .dateTime.month().day().hour().minute())
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: lastIcon(l)).foregroundStyle(lastColor(l))
+                }
+                if let e = l.error, l.status == "failed" {
+                    Text(e).font(.callout).foregroundStyle(.red)
+                }
+                if let d = l.detail, !d.isEmpty {
+                    Text(d).font(.callout).foregroundStyle(.secondary)
+                }
+                if l.failed > 0 {
+                    LabeledContent("复制失败", value: "\(l.failed) 张")
+                }
+                LabeledContent("用时", value: Duration.seconds(l.elapsed), format: .units(allowed: [.minutes, .seconds], width: .narrow))
+            }
+        }
+    }
+
+    private func lastHeadline(_ l: LastRun) -> String {
+        switch l.status {
+        case "ok": "换上了 \(l.copied) 张新壁纸"
+        case "stopped": l.copied > 0 ? "中途停止，换上了 \(l.copied) 张" : "中途停止"
+        default: "没有换成"
+        }
+    }
+
+    private func lastIcon(_ l: LastRun) -> String {
+        switch l.status {
+        case "ok": "checkmark.circle.fill"
+        case "stopped": "stop.circle.fill"
+        default: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private func lastColor(_ l: LastRun) -> Color {
+        switch l.status {
+        case "ok": .green
+        case "stopped": .secondary
+        default: .red
+        }
+    }
+
+    private func overviewSection(_ s: RemoteState) -> some View {
+        Section {
+            LabeledContent("壁纸文件夹", value: s.dest)
+            LabeledContent("现在有", value: "\(s.wallpapers) 张")
+            LabeledContent("每次换", value: "\(s.sampleCount) 张")
+            LabeledContent("图库目录", value: "\(s.libraryDirs) 个")
+            if let next = s.nextAutoDate {
+                LabeledContent("下次自动换") {
+                    Text(next, format: .dateTime.month().day().hour().minute())
+                }
+            }
+        } header: {
+            Text("设置")
+        } footer: {
+            Text("要改设置请在电脑上改。电脑上拾景 \(s.version.isEmpty ? "开发版" : "v" + s.version)。")
+        }
+    }
+}
+
+/// 运行步骤：筛选 → 采样 → 复制 → 刷新，做完的打勾、正在做的高亮。
+struct StepsView: View {
+    let state: RemoteState
+
+    var body: some View {
+        let steps = state.steps.compactMap(Step.init(rawValue:))
+        let current = steps.firstIndex { $0.rawValue == state.stage } ?? 0
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) { items(steps, current, showLines: true) }
+            HStack(spacing: 10) { items(steps, current, showLines: false) }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("第 \(current + 1) 步，共 \(steps.count) 步：\(steps.indices.contains(current) ? steps[current].title : "")")
+    }
+
+    @ViewBuilder
+    private func items(_ steps: [Step], _ current: Int, showLines: Bool) -> some View {
+        ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
+            if i > 0 && showLines {
+                Capsule().fill(i <= current ? Color.accentColor : Color.secondary.opacity(0.3))
+                    .frame(minWidth: 12, maxWidth: .infinity).frame(height: 2)
+            }
+            HStack(spacing: 4) {
+                Image(systemName: i < current ? "checkmark.circle.fill" : (i == current ? "\(i + 1).circle.fill" : "\(i + 1).circle"))
+                    .foregroundStyle(i <= current ? Color.accentColor : Color.secondary)
+                Text(step.title)
+                    .font(.subheadline.weight(i == current ? .semibold : .regular))
+                    .foregroundStyle(i <= current ? .primary : .secondary)
+                    .fixedSize()
+            }
+        }
+    }
+}
+
+/// 工具栏上的连接状态小圆点。
+struct ConnectionBadge: View {
+    let connection: RemoteSession.Connection
+
+    var body: some View {
+        let (color, text): (Color, String) = switch connection {
+        case .live: (.green, "已连接")
+        case .connecting: (.orange, "正在连接")
+        case .offline: (.orange, "重连中")
+        case .unpaired: (.red, "未配对")
+        }
+        Label {
+            Text(text)
+        } icon: {
+            Circle().fill(color).frame(width: 8, height: 8)
+        }
+        .labelStyle(.titleAndIcon)
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel("连接状态：\(text)")
+    }
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -155,6 +156,11 @@ type app struct {
 	onRunState func(running bool, err error)
 	// setMenuKeys 把菜单栏命令（keyActions 里 menu 为 true 的）的快捷键交给菜单；测试里为 nil。
 	setMenuKeys func(map[string]string)
+	// showWindow 把隐藏的窗口重新显示出来（手机请求配对时）；测试里为 nil。
+	showWindow func()
+	remote     *remoteServer // 手机遥控服务，只在设置里打开时监听
+	pairOpen   bool          // 配对码弹层是否显示
+	pairCode   string        // 弹层显示的是哪一个配对码（新的请求来了重新弹出）
 
 	recording    string   // 正在录制快捷键的操作 id
 	recordIgnore []ui.Key // 开始录制时已经按着的键（比如按空格点的录制按钮），松开前不算
@@ -189,6 +195,7 @@ func newApp(cfgPath string, paths core.Paths) *app {
 	a.setConfig(cfg)
 	a.saved = a.buildConfig()
 	a.loadUIState()
+	a.remote = newRemoteServer(a, filepath.Join(filepath.Dir(cfgPath), "remote_devices.json"))
 	return a
 }
 
@@ -264,8 +271,7 @@ func (a *app) requestRun() {
 		a.startRun()
 		return
 	}
-	detail := fmt.Sprintf("会先检查「筛选 + 采样」里的 %d 个目录，把竖屏、正方形和低于 %d×%d 的图片从图库里直接删除，不可撤销。"+
-		"删除记录写在数据目录的删除日志里。", len(a.cfg.FilterAndSampleDirs), int(a.minW), int(a.minH))
+	detail := a.deleteNotice()
 	go func() {
 		ok, dontAsk := a.confirmDelete(detail)
 		if !ok {
@@ -281,6 +287,17 @@ func (a *app) requestRun() {
 	}()
 }
 
+// willDelete 是这次运行会不会真的删除原图（打开了删除、并且有「筛选 + 采样」目录）。
+func (a *app) willDelete() bool {
+	return a.cfg.DeleteDuringFilter && len(a.cfg.FilterAndSampleDirs) > 0
+}
+
+// deleteNotice 是运行前确认删除原图时的说明（桌面的确认框和手机上的确认都用它）。
+func (a *app) deleteNotice() string {
+	return fmt.Sprintf("会先检查「筛选 + 采样」里的 %d 个目录，把竖屏、正方形和低于 %d×%d 的图片从图库里直接删除，不可撤销。"+
+		"删除记录写在数据目录的删除日志里。", len(a.cfg.FilterAndSampleDirs), int(a.minW), int(a.minH))
+}
+
 // stopRun 请求停止：筛选在文件夹之间停，复制时不再开始新的图片。
 func (a *app) stopRun() {
 	if a.running && !a.stopReq.Load() {
@@ -293,17 +310,25 @@ func (a *app) startRun() {
 	if !a.canRun() {
 		return
 	}
-	a.startRunWith(false)
+	a.startRunWith(runOpts{})
 }
 
-// startRunWith 开始运行；auto 为 true 是定时自动运行：不删除原图（筛选只模拟），也不弹删除确认。
-func (a *app) startRunWith(auto bool) {
+// runOpts 是一次运行的来源和限制。
+type runOpts struct {
+	auto     bool   // 定时自动运行：不删除原图（筛选只模拟），也不弹删除确认
+	noDelete bool   // 这次不删除原图，筛选只模拟（手机上选了「只模拟」）
+	from     string // 从哪台手机遥控的，空是本机
+}
+
+// startRunWith 开始运行（调用方负责删除原图前的确认）。
+func (a *app) startRunWith(o runOpts) {
 	if !a.canRun() {
 		return
 	}
 	a.autosave()
 	cfg := a.buildConfig()
-	if auto {
+	auto := o.auto
+	if auto || o.noDelete {
 		cfg.DeleteDuringFilter = false
 	}
 	a.running = true
@@ -317,6 +342,13 @@ func (a *app) startRunWith(auto bool) {
 	a.appendLog("▶ " + time.Now().Format("2006-01-02 15:04:05") + " 开始运行")
 	if auto {
 		a.appendLog(fmt.Sprintf("⏰ 定时自动运行（%s），这次不删除原图，只模拟筛选", autoRunLabel(cfg.AutoRunHours)))
+	}
+	if o.from != "" {
+		note := ""
+		if o.noDelete && a.willDelete() {
+			note = "，这次只模拟筛选、不删除原图"
+		}
+		a.appendLog(fmt.Sprintf("📱 由「%s」遥控运行%s", o.from, note))
 	}
 	rep := core.Reporter{Log: a.logf, Progress: a.progressf, Stop: a.stopReq.Load}
 	if a.onRunState != nil {
@@ -456,19 +488,24 @@ func (a *app) checkMounts() {
 	for _, d := range a.allDirs() {
 		a.mounts[d] = mountUnknown
 		go func() {
-			result := make(chan bool, 1)
-			go func() { result <- a.statDir(d) }()
-			state := mountSlow
-			select {
-			case ok := <-result:
-				state = mountMissing
-				if ok {
-					state = mountOK
-				}
-			case <-time.After(3 * time.Second):
-			}
+			state := probeMount(a.statDir, d)
 			a.update(func() { a.mounts[d] = state })
 		}()
+	}
+}
+
+// probeMount 检查一个目录能不能访问（会阻塞，最多 3 秒）。
+func probeMount(stat func(string) bool, d string) mountState {
+	result := make(chan bool, 1)
+	go func() { result <- stat(d) }()
+	select {
+	case ok := <-result:
+		if ok {
+			return mountOK
+		}
+		return mountMissing
+	case <-time.After(3 * time.Second):
+		return mountSlow
 	}
 }
 

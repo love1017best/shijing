@@ -49,7 +49,7 @@ func (a *app) maybeAutoRun(now time.Time) {
 	if next.IsZero() || now.Before(next) || a.running || !a.canRun() {
 		return
 	}
-	a.startRunWith(true)
+	a.startRunWith(runOpts{auto: true})
 }
 
 // ── 删除记录 ──────────────────────────────────────────────────────────────

@@ -90,7 +90,9 @@ func (a *app) view(c *ui.Context) {
 			})
 		})
 	})
+	a.pairModal(c)
 	a.autosave()
+	a.publishRemote()
 }
 
 func sidebarBg(t *ui.Theme) ui.Color {
@@ -1112,6 +1114,8 @@ func (a *app) settingsPage(c *ui.Context) {
 					ui.Button(c, "导入配置…").OnClick(a.importConfig)
 				})
 			})
+
+		a.remoteGroup(c)
 	}).Disabled(a.running)
 }
 

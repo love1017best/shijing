@@ -34,7 +34,15 @@ func main() {
 
 	mygo.App.WhenReady(func() {
 		var win *mygo.Window
-		a.update = func(fn func()) { win.Update(fn) }
+		// 每次回主线程改完状态都把快照发布给手机遥控（窗口隐藏时 view 不一定会重画）
+		a.update = func(fn func()) {
+			win.Update(func() {
+				fn()
+				a.publishRemote()
+			})
+		}
+		a.remote.host = computerName()
+		a.remote.advertise = advertiseBonjour
 		// 定时自动换壁纸：每分钟回主线程检查一次（关窗只是隐藏，应用仍在运行）
 		go func() {
 			for now := range time.Tick(time.Minute) {
@@ -96,6 +104,7 @@ func main() {
 			BackgroundColor: "light-dark(#f6f6f8, #1e1e1e)",
 			Content:         ui.View(a.view),
 		})
+		a.showWindow = func() { win.Show() }
 		setupBackground(a, win)
 		setupMenu(a, win)
 	})

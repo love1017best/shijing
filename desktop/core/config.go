@@ -41,6 +41,8 @@ type Config struct {
 	// Shortcuts 是界面里改过的快捷键（操作 id → "Cmd+Shift+Backspace"，空字符串表示不用快捷键）；
 	// 没出现的用默认值。只有拾景界面用，命令行不管。
 	Shortcuts map[string]string `json:"shortcuts,omitempty"`
+	// RemoteEnabled：允许同一局域网里配对过的 iPhone 遥控（看进度、换一批、停止）。只有拾景界面用。
+	RemoteEnabled bool `json:"remote_enabled,omitempty"`
 }
 
 const (

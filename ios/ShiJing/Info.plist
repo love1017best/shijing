@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 其余键由 project.yml 里的 INFOPLIST_KEY_* 生成；这里只放那种方式写不了的数组/字典 -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_shijing._tcp</string>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- 桌面端在局域网里用明文 HTTP（配对令牌保护），只放行局域网地址 -->
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
