@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -137,20 +138,46 @@ func (a *app) openPreviewOf(wall string) {
 	}
 }
 
-// loadPreview 在后台把预览的那张解码成大图（缩略图只有 360 像素宽，还有很多张没有缩略图）。
-func (a *app) loadPreview(path string) {
-	if a.previewFor == path || a.update == nil {
+// pumpPreview 在后台解码预览要用的大图：先当前这张，再预取下一张、上一张、下下张，同一时间只解一张。
+// 按住空格连续翻时，翻过去的不会再解（以前每翻一张就开一个解码，十几张几千万像素的图同时解，内存一下冲上去）；
+// 顺着翻时下一张已经提前解好，翻过去直接是清楚的大图。离当前太远的大图丢掉，只留前后几张。
+func (a *app) pumpPreview() {
+	all := a.walls.all
+	if !a.preview || a.update == nil || len(all) == 0 {
 		return
 	}
-	a.previewFor, a.previewImg = path, nil
-	go func() {
-		img := loadScaled(path, previewWidth)
-		if img == nil {
-			return
+	keep := map[string]bool{}
+	var todo []string
+	for _, d := range []int{0, 1, -1, 2} {
+		p := all[(a.previewIdx+d+len(all))%len(all)]
+		keep[p] = true
+		if _, done := a.big[p]; !done && !slices.Contains(todo, p) {
+			todo = append(todo, p)
 		}
+	}
+	for p := range a.big {
+		if !keep[p] {
+			delete(a.big, p)
+		}
+	}
+	if a.bigBusy || len(todo) == 0 {
+		return
+	}
+	p := todo[0]
+	a.bigBusy = true
+	go func() {
+		img := loadScaled(p, previewWidth)
 		a.update(func() {
-			if a.previewFor == path {
-				a.previewImg = ui.NewBitmap(img)
+			a.bigBusy = false
+			if !a.preview {
+				return // 预览已经关了，不留
+			}
+			if a.big == nil {
+				a.big = map[string]*ui.Bitmap{}
+			}
+			a.big[p] = nil
+			if img != nil {
+				a.big[p] = ui.NewBitmap(img)
 			}
 		})
 	}()
@@ -158,8 +185,8 @@ func (a *app) loadPreview(path string) {
 
 // previewBitmap 是预览要显示的图：大图解码好了用大图，否则先用缩略图顶着，都没有返回 nil。
 func (a *app) previewBitmap(wall string) *ui.Bitmap {
-	if a.previewImg != nil && a.previewFor == wall {
-		return a.previewImg
+	if bmp := a.big[wall]; bmp != nil {
+		return bmp
 	}
 	if bmp := a.walls.thumbs[wall]; bmp != nil {
 		return bmp
@@ -187,6 +214,11 @@ func (a *app) wheelStep(ev ui.InputEvent, step func(int)) bool {
 			step(sign32(d))
 		}
 	default:
+		// 停顿一会儿再滑算新的一下：上一下没攒够的不留到这一下
+		if ev.Time.Sub(a.wheelAt) > 300*time.Millisecond {
+			a.wheelAcc = 0
+		}
+		a.wheelAt = ev.Time
 		a.wheelAcc += d
 		if abs32(a.wheelAcc) >= wheelPage {
 			step(sign32(a.wheelAcc))
@@ -233,9 +265,10 @@ func (a *app) previewModal(c *ui.Context) {
 		}
 	}
 	if a.preview {
-		a.loadPreview(w.all[a.previewIdx])
+		a.pumpPreview()
 	} else {
 		a.jumpBuf, a.wheelAcc = "", 0
+		a.big = nil // 关掉预览就把大图都放掉（每张几十 MB）
 	}
 	vw, vh := c.Size()
 	wasOpen := a.preview
@@ -259,8 +292,12 @@ func (a *app) previewModal(c *ui.Context) {
 			// 焦点放在图片上而不是第一个按钮上：按钮有焦点时空格 / 回车会按下它，翻页的空格就不灵了
 			box := ui.Box(c).Size(boxW, boxH).Radius(10).Clip().Label("预览图片").Focusable().FocusRing(false).AutoFocus()
 			if bmp == nil {
+				msg := "正在载入…"
+				if _, tried := a.big[wall]; tried {
+					msg = "读不了这张图"
+				}
 				box.Background(hairline(t)).Center().Children(func() {
-					ui.Text(c, "正在载入…").FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, msg).FontSize(12).TextColor(t.TextMuted)
 				})
 			} else {
 				box.Children(func() {

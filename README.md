@@ -162,6 +162,7 @@ SHOTS_DIR=$PWD/../docs/screenshots CGO_ENABLED=0 go test -run TestScreenshots . 
 | `app.go` / `view.go` | 界面状态和后台任务 / 窗口骨架和侧边栏 |
 | `overview.go` / `library.go` / `settings.go` | 概览 / 图库 / 设置（含归档）页面 |
 | `thumbs.go` / `preview.go` / `undo.go` | 壁纸缩略图 / 大图预览和编号跳转 / 移出的撤销 |
+| `thumbcache.go` / `decode_darwin.go` | 缩略图的磁盘缓存 / 用系统 ImageIO 解码图片 |
 | `theme.go` / `icons.go` / `logview.go` | 配色和通用组件 / Lucide 图标 / 运行日志的解析和排版 |
 | `thumbs.go` | 后台读取壁纸文件夹、生成横幅和缩略图 |
 | `main.go` / `background.go` / `menu.go` | 窗口和系统对话框 / 关窗后台运行、Dock 角标、通知 / 菜单栏快捷键 |

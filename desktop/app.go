@@ -90,12 +90,13 @@ type runStats struct {
 type previewState struct {
 	preview        bool
 	previewIdx     int
-	previewImg     *ui.Bitmap
-	previewFor     string // previewImg 是哪个文件的
+	big            map[string]*ui.Bitmap // 解码好的大图（当前这张和前后几张，pumpPreview）；值为 nil 表示读不了
+	bigBusy        bool                  // 正在后台解码一张大图：同一时间只解一张
 	confirmDelSrc  bool
-	pendingDelWall string  // 要删除原图的那张壁纸（壁纸文件夹里的路径）
-	jumpBuf        string  // 正在输入的跳转编号
-	wheelAcc       float32 // 触控板滚动攒下的距离，够一页翻一张（wheelStep）
+	pendingDelWall string    // 要删除原图的那张壁纸（壁纸文件夹里的路径）
+	jumpBuf        string    // 正在输入的跳转编号
+	wheelAcc       float32   // 触控板滚动攒下的距离，够一页翻一张（wheelStep）
+	wheelAt        time.Time // 上一次触控板滚动的时间：停顿一会儿就把 wheelAcc 清零
 	undo           []removedWall
 	undoSeq        int
 }

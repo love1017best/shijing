@@ -79,7 +79,7 @@ func scanWallpapers(dir string) scannedWallpapers {
 
 	// 横幅图要够宽；不够宽的那张拿来当缩略图，读不了的记下来
 	for _, f := range files {
-		img := loadScaled(f, heroWidth)
+		img := cachedScaled(f, heroWidth)
 		if img != nil && img.Bounds().Dx() >= thumbWidth*2 {
 			res.hero, res.heroPath = img, f
 			break
@@ -96,6 +96,7 @@ func scanWallpapers(dir string) scannedWallpapers {
 		}
 	}
 	maps.Copy(res.thumbs, decodeThumbs(todo))
+	pruneThumbCache(files)
 	return res
 }
 
@@ -129,7 +130,7 @@ func decodeThumbs(files []string) map[string]image.Image {
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			decoded[i] = loadScaled(f, thumbWidth)
+			decoded[i] = cachedScaled(f, thumbWidth)
 		}()
 	}
 	wg.Wait()
@@ -140,8 +141,11 @@ func decodeThumbs(files []string) map[string]image.Image {
 	return out
 }
 
-// loadScaled 解码一张图片并缩到 width 像素宽（不放大）。
+// loadScaled 解码一张图片并缩到 width 像素宽（不放大）。优先用系统的 ImageIO（systemDecode），不行再用纯 Go 解码。
 func loadScaled(path string, width int) image.Image {
+	if img := systemDecode(path, width); img != nil {
+		return img
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
