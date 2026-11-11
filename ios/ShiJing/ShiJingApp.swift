@@ -23,32 +23,55 @@ struct ShiJingApp: App {
     }
 }
 
-/// 顶层：没配对过任何 Mac 时整屏是「找 Mac / 配对」；配对过之后只有遥控面板，
-/// 切换、添加、移除 Mac 收在标题菜单里（点顶部的 Mac 名字）——这些只在第一次装的时候用，不值得常驻一个侧栏。
+/// 顶层：没配对过任何 Mac 时整屏是「找 Mac / 配对」；配对过之后是三个标签——概览、设置、记录，
+/// 对应电脑上侧边栏的概览 / 设置 / 删除记录（iPad、展开的内屏上系统把标签栏放在顶部，不占侧边）。
+/// 切换、添加、移除 Mac 收在概览的标题菜单里（点顶部的 Mac 名字）——这些只在第一次装的时候用，不值得常驻一个侧栏。
+enum RootTab: Hashable { case overview, settings, records }
+
 struct RootView: View {
     @State private var store = MacStore()
     @State private var discovery = Discovery()
     @State private var session: RemoteSession?
     @State private var pendingWall: String?
+    @State private var tab = RootTab.overview
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
             if let session {
-                NavigationStack {
-                    DashboardView(session: session, store: store)
-                        .macTitleMenu(store: store, discovery: discovery)
+                TabView(selection: $tab) {
+                    NavigationStack {
+                        DashboardView(session: session, store: store)
+                            .macTitleMenu(store: store, discovery: discovery)
+                    }
+                    .tabItem { Label("概览", systemImage: "photo.on.rectangle") }
+                    .tag(RootTab.overview)
+                    NavigationStack { SettingsPage(session: session) }
+                        .tabItem { Label("设置", systemImage: "gearshape") }
+                        .tag(RootTab.settings)
+                    NavigationStack { RecordsPage(session: session) }
+                        .tabItem { Label("记录", systemImage: "clock.arrow.circlepath") }
+                        .tag(RootTab.records)
                 }
                 .id(session.macID)
             } else {
                 SetupView(store: store, discovery: discovery)
             }
         }
-        .onAppear { syncSession() }
+        .onAppear {
+            syncSession()
+            #if DEBUG
+            // 截图用：-demoSettings / -demoRecords 直接打开那个标签
+            let args = ProcessInfo.processInfo.arguments
+            if args.contains("-demoSettings") { tab = .settings }
+            if args.contains("-demoRecords") { tab = .records }
+            #endif
+        }
         // 小组件点进来：shijing://wall/<壁纸文件名>，打开那张的大图
         .onOpenURL { url in
             guard url.scheme == "shijing", url.host() == "wall" else { return }
             pendingWall = url.lastPathComponent
+            tab = .overview // 大图预览挂在概览上
             deliverPendingWall()
         }
         .onChange(of: store.selectedID) { syncSession() }

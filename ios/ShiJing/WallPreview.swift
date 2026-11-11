@@ -32,6 +32,8 @@ struct WallPreview: View {
     @State private var screenMidX: CGFloat?
     /// 顶栏下沿、底栏上沿（全局坐标）：竖屏完整显示时图片放在两者之间，不被底栏挡住
     @State private var topBarBottom: CGFloat = 0
+    /// 顶部安全区：横屏时状态栏不占地方（几乎是 0），顶栏按钮要自己离上边缘远一点
+    @State private var topSafe: CGFloat = 0
     @State private var bottomBarTop: CGFloat?
     @State private var jumping = false
     @State private var jumpText = ""
@@ -79,6 +81,7 @@ struct WallPreview: View {
                     if let wall { bottomBar(wall) }
                 }
                 .opacity(axis == .dismiss ? 0 : 1)
+                .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { topSafe = $0 }
                 .ignoresSafeArea(.keyboard) // 输入编号时底栏别被键盘顶上去
                 .transition(.opacity)
             }
@@ -331,8 +334,9 @@ struct WallPreview: View {
                 .accessibilityHint("输入编号跳转")
             }
         }
-        .padding(.horizontal)
-        .padding(.top, 8)
+        .padding(.horizontal, 20)
+        // 竖屏有状态栏垫着，离安全区 8 就够；横屏安全区几乎为 0，按钮离屏幕上边缘至少留 20
+        .padding(.top, max(8, 20 - topSafe))
         .padding(.bottom, 8)
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { topBarBottom = $0 }
     }

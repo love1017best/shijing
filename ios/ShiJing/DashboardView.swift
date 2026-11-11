@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 一台 Mac 的遥控面板：当前状态、换一批 / 停止、上次运行、壁纸设置概要。
+/// 一台 Mac 的遥控面板（「概览」标签）：当前状态、换一批 / 停止、当前壁纸、上次运行、状态摘要。设置和记录在另外两个标签里。
 /// 窄的时候一栏从上往下排；宽的时候（横屏、展开的大屏、iPad）分成左右两栏：左边操作，右边结果。
 struct DashboardView: View {
     let session: RemoteSession
@@ -431,9 +431,8 @@ struct DashboardView: View {
         }
     }
 
-    @ViewBuilder private func overviewSection(_ s: RemoteState) -> some View {
-        SettingsSection(session: session, state: s)
-        RecordsSection(session: session, state: s)
+    private func overviewSection(_ s: RemoteState) -> some View {
+        StatusSection(state: s)
     }
 
     /// 免费签名快到期（剩不到 2 天）时顶部提醒重新安装。

@@ -1,88 +1,164 @@
 import SwiftUI
 
-/// 概览里的「设置」：电脑上常调的几项在手机上直接改（改完电脑上的设置页同步变，和在电脑上改一样自动保存）。
-/// 旧版桌面端不推 settings，就只读显示。
-struct SettingsSection: View {
-    let session: RemoteSession
+/// 概览里的「状态」：只读，和电脑概览顶部的摘要条对应（壁纸文件夹、张数、图库、下次自动换）。改设置去「设置」页。
+struct StatusSection: View {
     let state: RemoteState
-    /// 每次张数的草稿：步进器连点时先改这里，停手 0.8 秒再发给电脑
-    @State private var draftCount: Int?
-    @State private var countTask: Task<Void, Never>?
 
     var body: some View {
-        Section {
+        Section("状态") {
             LabeledContent("壁纸文件夹", value: state.dest)
             LabeledContent("现在有", value: "\(state.wallpapers) 张")
-            if let set = state.settings {
-                editable(set)
-            } else {
-                LabeledContent("每次换", value: "\(state.sampleCount) 张")
-            }
+            LabeledContent("每次换", value: "\(state.settings?.sampleCount ?? state.sampleCount) 张")
             LabeledContent("图库目录", value: "\(state.libraryDirs) 个")
             if let next = state.nextAutoDate {
                 LabeledContent("下次自动换") {
                     Text(next, format: .dateTime.month().day().hour().minute())
                 }
             }
-        } header: {
-            HStack {
-                Text("设置")
-                if session.savingSettings { ProgressView().controlSize(.mini) }
-            }
-        } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                if state.settings == nil {
-                    Text("电脑上的拾景版本较旧，要改设置请在电脑上改。")
-                }
-                Text(versionNote)
-            }
         }
     }
+}
 
-    /// 「电脑上拾景 v0.3.101，这台手机上 v0.3.101（11月18日 09:20 到期）。」两边版本不一样时提醒一下。
-    private var versionNote: String {
-        let mac = state.version.isEmpty ? "开发版" : "v" + state.version
-        var text = "电脑上拾景 \(mac)，这台手机上 \(AppVersion.text)"
-        if let exp = SigningExpiry.text { text += "（\(exp)）" }
-        text += "。"
-        if !state.version.isEmpty, state.version != AppVersion.short {
-            text += "两边版本不一样，有的功能可能用不了，建议都升到最新。"
+/// 设置页和记录页共用的外壳：还没拿到状态时显示连接中 / 连不上，拿到了再显示内容（列表收窄到适合阅读的宽度）。
+struct MacPage<Content: View>: View {
+    let session: RemoteSession
+    let title: String
+    @ViewBuilder let content: (RemoteState) -> Content
+    @State private var width: CGFloat = 0
+
+    var body: some View {
+        Group {
+            if let state = session.state {
+                List { content(state) }
+                    // 内屏、iPad 上别拉得太宽（和电脑上设置页的单栏最宽一样的思路）
+                    .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent)
+            } else if case .offline(let msg) = session.connection {
+                ContentUnavailableView {
+                    Label("连不上 \(session.mac.name)", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(msg)
+                } actions: {
+                    Button("重试") { session.start() }.buttonStyle(.bordered)
+                }
+            } else {
+                ProgressView("正在连接 \(session.mac.name)…")
+            }
         }
-        return text
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .navigationTitle(title)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
+        }
+    }
+}
+
+/// 「设置」页：电脑上常调的几项在手机上直接改（改完电脑上的设置页同步变，和在电脑上改一样自动保存）。
+/// 分组和电脑上的设置页一致：采样、筛选、自动换壁纸、系统，最后是关于。旧版桌面端不推 settings，就只读显示。
+struct SettingsPage: View {
+    let session: RemoteSession
+    /// 每次张数的草稿：步进器连点时先改这里，停手 0.8 秒再发给电脑
+    @State private var draftCount: Int?
+    @State private var countTask: Task<Void, Never>?
+
+    var body: some View {
+        MacPage(session: session, title: "设置") { state in
+            if let set = state.settings {
+                editable(set, state)
+            } else {
+                Section {
+                    LabeledContent("每次换", value: "\(state.sampleCount) 张")
+                } footer: {
+                    Text("电脑上的拾景版本较旧，要改设置请在电脑上改。")
+                }
+            }
+            aboutSection(state)
+        }
+        .toolbar {
+            if session.savingSettings {
+                ToolbarItem(placement: .automatic) { ProgressView() } // 正在把改动发给电脑
+            }
+        }
     }
 
     @ViewBuilder
-    private func editable(_ set: RemoteSettings) -> some View {
+    private func editable(_ set: RemoteSettings, _ state: RemoteState) -> some View {
         let disabled = state.running || session.connection != .live
-        Stepper(value: Binding(
-            get: { draftCount ?? set.sampleCount },
-            set: { setCount($0) }
-        ), in: 1...9999, step: (draftCount ?? set.sampleCount) < 50 ? 5 : 10) {
-            LabeledContent("每次换", value: "\(draftCount ?? set.sampleCount) 张")
-        }
-        .disabled(disabled)
-        Picker("自动换", selection: Binding(
-            get: { set.autoRunHours },
-            set: { h in Task { await session.updateSettings(["auto_run_hours": h]) } }
-        )) {
-            // 配置里是不在选项里的值（手动改过配置文件）时也显示出来，免得选中项为空
-            ForEach(set.autoOptions.contains(set.autoRunHours) ? set.autoOptions : set.autoOptions + [set.autoRunHours], id: \.self) {
-                Text(RemoteSettings.autoLabel($0)).tag($0)
+        Section {
+            Stepper(value: Binding(
+                get: { draftCount ?? set.sampleCount },
+                set: { setCount($0) }
+            ), in: 1...9999, step: (draftCount ?? set.sampleCount) < 50 ? 5 : 10) {
+                LabeledContent("每次张数", value: "\(draftCount ?? set.sampleCount) 张")
             }
+            .disabled(disabled)
+            toggle("优先选没换上过的", set.preferUnseen, key: "prefer_unseen", disabled: disabled)
+        } header: {
+            Text("采样")
+        } footer: {
+            Text("优先选没换上过的：这一轮里还没换上过的图片先选，都换上过一遍再从头开始。")
         }
-        .disabled(disabled)
-        toggle("优先选没换上过的", set.preferUnseen, key: "prefer_unseen")
-        toggle("换完刷新系统壁纸", set.refreshWallpaper, key: "refresh_wallpaper")
-        toggle("删除不合格的原图", set.deleteDuringFilter, key: "delete_during_filter", tint: .red)
+        Section {
+            toggle("删除不合格的原图", set.deleteDuringFilter, key: "delete_during_filter", tint: .red, disabled: disabled)
+        } header: {
+            Text("筛选")
+        } footer: {
+            Text("打开后，换一批时会删除图库里竖屏、分辨率不够的原图，不能撤销。从手机换一批时会先确认，也可以选这次只模拟。")
+        }
+        Section {
+            Picker("间隔", selection: Binding(
+                get: { set.autoRunHours },
+                set: { h in Task { await session.updateSettings(["auto_run_hours": h]) } }
+            )) {
+                // 配置里是不在选项里的值（手动改过配置文件）时也显示出来，免得选中项为空
+                ForEach(set.autoOptions.contains(set.autoRunHours) ? set.autoOptions : set.autoOptions + [set.autoRunHours], id: \.self) {
+                    Text(RemoteSettings.autoLabel($0)).tag($0)
+                }
+            }
+            .disabled(disabled)
+            if let next = state.nextAutoDate {
+                LabeledContent("下一次") {
+                    Text(next, format: .dateTime.month().day().hour().minute())
+                }
+            }
+        } header: {
+            Text("自动换壁纸")
+        } footer: {
+            Text("电脑上的拾景开着时按这个间隔自动换一批。自动运行不会删除原图。")
+        }
+        Section {
+            toggle("刷新系统壁纸", set.refreshWallpaper, key: "refresh_wallpaper", disabled: disabled)
+        } header: {
+            Text("系统")
+        } footer: {
+            Text("换完一批后重启 macOS 的壁纸服务，不然系统会继续轮换已经删掉的旧图。\n输出方式、画质要求、图库目录、归档等其他设置在电脑上改。")
+        }
     }
 
-    private func toggle(_ title: String, _ value: Bool, key: String, tint: Color? = nil) -> some View {
+    /// 关于：两边的版本，版本不一样时提醒一下。
+    private func aboutSection(_ state: RemoteState) -> some View {
+        Section {
+            LabeledContent("电脑上的拾景", value: state.version.isEmpty ? "开发版" : "v" + state.version)
+            LabeledContent("这台手机上", value: AppVersion.text)
+            if let exp = SigningExpiry.text {
+                LabeledContent("签名", value: exp)
+            }
+            LabeledContent("壁纸文件夹", value: state.dest)
+        } header: {
+            Text("关于")
+        } footer: {
+            if !state.version.isEmpty, state.version != AppVersion.short {
+                Text("两边版本不一样，有的功能可能用不了，建议都升到最新。")
+            }
+        }
+    }
+
+    private func toggle(_ title: String, _ value: Bool, key: String, tint: Color? = nil, disabled: Bool) -> some View {
         Toggle(title, isOn: Binding(
             get: { value },
             set: { v in Task { await session.updateSettings([key: v]) } }
         ))
         .tint(tint)
-        .disabled(state.running || session.connection != .live)
+        .disabled(disabled)
     }
 
     private func setCount(_ n: Int) {
@@ -97,26 +173,32 @@ struct SettingsSection: View {
     }
 }
 
-/// 「记录」分组：运行日志、删除记录、不再选名单。
-struct RecordsSection: View {
+/// 「记录」页：运行日志、删除记录、不再选名单（电脑上分别在日志区、「删除记录」页、图库页）。
+struct RecordsPage: View {
     let session: RemoteSession
-    let state: RemoteState
 
     var body: some View {
-        if state.settings != nil { // 第 3 期的接口，旧版桌面端没有
-            Section("记录") {
-                NavigationLink { LogView(session: session) } label: {
-                    Label("运行日志", systemImage: "text.alignleft")
-                }
-                NavigationLink { DeletionsView(session: session) } label: {
-                    Label("删除记录", systemImage: "trash")
-                }
-                NavigationLink { ExcludedView(session: session) } label: {
-                    LabeledContent {
-                        Text("\(state.excluded ?? 0) 张")
-                    } label: {
-                        Label("不再选的图片", systemImage: "nosign")
+        MacPage(session: session, title: "记录") { state in
+            if state.settings != nil { // 第 3 期的接口，旧版桌面端没有
+                Section {
+                    NavigationLink { LogView(session: session) } label: {
+                        Label("运行日志", systemImage: "text.alignleft")
                     }
+                    NavigationLink { DeletionsView(session: session) } label: {
+                        Label("删除记录", systemImage: "trash")
+                    }
+                    NavigationLink { ExcludedView(session: session) } label: {
+                        LabeledContent {
+                            Text("\(state.excluded ?? 0) 张")
+                        } label: {
+                            Label("不再选的图片", systemImage: "nosign")
+                        }
+                    }
+                }
+            } else {
+                Section {
+                    Text("电脑上的拾景版本较旧，没有记录可看。把电脑上的拾景升到最新就有了。")
+                        .foregroundStyle(.secondary)
                 }
             }
         }
