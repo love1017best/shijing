@@ -13,9 +13,10 @@ import (
 // Modal 外面的 Shortcut 被弹层挡住收不到；删除确认框弹出时预览在它后面，这里同样收不到，回车 / Esc 归确认框。
 // 回车不能当快捷键：弹层会把焦点放在按钮上，回车归那个按钮。
 func (a *app) previewKeys(c *ui.Context, wall string, hasSrc bool, step func(int)) {
+	// 默认是空格 / ⇧空格翻页、J K L 整理（按轻重从左到右），手不用离开主键区。
 	// 移出、删除这类操作不吃按住不放的自动重复（once），免得一下子移出一串
 	switch {
-	case a.pressed(c, "prev", false):
+	case a.pressed(c, "prev", false), c.Shortcut(ui.Shift, ui.KeySpace):
 		step(-1)
 	case a.pressed(c, "next", false), c.Shortcut(0, ui.KeySpace):
 		step(1)
@@ -202,7 +203,7 @@ func (a *app) previewModal(c *ui.Context) {
 					ui.Text(c, sub).FontSize(11.5).TextColor(t.TextMuted).SingleLine().Tooltip(src)
 				})
 				ui.Text(c, fmt.Sprintf("%d / %d", a.previewIdx+1, len(w.all))).FontSize(12).TextColor(t.TextMuted)
-				iconOnly(c, iconChevronLeft, "上一张", withKey("上一张", a.keyLabel("prev"))).OnClick(func() { step(-1) })
+				iconOnly(c, iconChevronLeft, "上一张", withKey("上一张", a.keyLabel("prev"))+"，⇧空格也行").OnClick(func() { step(-1) })
 				iconOnly(c, iconChevronRight, "下一张", withKey("下一张", a.keyLabel("next"))+"，空格也行").OnClick(func() { step(1) })
 			})
 
@@ -244,9 +245,9 @@ func (a *app) previewKeyHint() string {
 	nav := strings.TrimSpace(a.keyLabel("prev") + " " + a.keyLabel("next"))
 	hint := "按钮上标着快捷键（可以在「快捷键」页修改）；"
 	if nav != "" {
-		hint += nav + " 或空格切换图片，"
+		hint += nav + " 或 空格 / ⇧空格 切换图片，"
 	} else {
-		hint += "空格切换图片，"
+		hint += "空格 / ⇧空格 切换图片，"
 	}
 	if d := a.keyLabel("delete"); d != "" {
 		hint += d + " 后按回车确认删除，"

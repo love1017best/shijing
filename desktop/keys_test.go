@@ -131,7 +131,7 @@ func TestPreviewUsesCustomShortcut(t *testing.T) {
 	}
 	found := false
 	for _, s := range tt.Texts() {
-		found = found || strings.Contains(s, "← N 或空格切换图片")
+		found = found || strings.Contains(s, "← N 或 空格 / ⇧空格 切换图片")
 	}
 	if !found {
 		t.Errorf("预览说明应显示新的快捷键: %q", tt.Texts())

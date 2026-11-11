@@ -19,11 +19,11 @@ var keyActions = []keyAction{
 	{"run", "换一批壁纸", "从菜单栏「壁纸」里触发，任何页面都能用。", true, "Cmd+R"},
 	{"stop", "停止运行", "", true, "Cmd+."},
 	{"open_dest", "打开壁纸文件夹", "", true, "Cmd+O"},
-	{"prev", "上一张", "", false, "Left"},
+	{"prev", "上一张", "⇧空格也是上一张（固定）。", false, "Left"},
 	{"next", "下一张", "空格也是下一张（固定）。", false, "Right"},
-	{"remove", actRemove, "原图保留。", false, "Backspace"},
-	{"exclude", actExclude, "原图保留，以后采样跳过它。", false, "Shift+Backspace"},
-	{"delete", "删除图库里的原图", "会先弹确认，回车确认、Esc 取消。", false, "Cmd+Backspace"},
+	{"remove", actRemove, "原图保留。", false, "J"},
+	{"exclude", actExclude, "原图保留，以后采样跳过它。", false, "K"},
+	{"delete", "删除图库里的原图", "会先弹确认，回车确认、Esc 取消。", false, "L"},
 	{"open", "用默认应用打开", "", false, "O"},
 	{"reveal", "在 Finder 中显示原图", "", false, "F"},
 }
@@ -161,6 +161,7 @@ func (k keyCombo) Label() string {
 var fixedKeys = []struct{ combo, label string }{
 	{"Escape", "关闭预览 / 取消"},
 	{"Space", "下一张"},
+	{"Shift+Space", "上一张"},
 	{"Enter", "确认"},
 	{"Tab", "切换焦点"},
 	{"Cmd+1", "概览"}, {"Cmd+2", "图库"}, {"Cmd+3", "设置"}, {"Cmd+4", "归档"}, {"Cmd+5", "删除记录"}, {"Cmd+6", "快捷键"},

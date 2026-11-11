@@ -435,7 +435,11 @@ func TestPreviewKeyboard(t *testing.T) {
 	if f.previewIdx != 2 {
 		t.Fatalf("空格应切到下一张: idx=%d", f.previewIdx)
 	}
-	tt.Key(0, ui.KeyLeft)
+	tt.Key(ui.Shift, ui.KeySpace)
+	tt.Frame()
+	if f.previewIdx != 1 {
+		t.Fatalf("⇧空格应切到上一张: idx=%d", f.previewIdx)
+	}
 	tt.Key(0, ui.KeyLeft)
 	tt.Key(0, ui.KeyLeft)
 	tt.Frame()
@@ -450,25 +454,25 @@ func TestPreviewKeyboard(t *testing.T) {
 	if opened != filepath.Dir(srcs["s-d.jpg"]) {
 		t.Errorf("F 应在 Finder 中显示原图: %q", opened)
 	}
-	tt.Key(0, ui.KeyBackspace)
+	tt.Key(0, ui.KeyJ)
 	tt.Frame()
 	if _, err := os.Stat(walls[3]); !os.IsNotExist(err) || len(f.walls.all) != 3 || !f.preview {
-		t.Fatalf("⌫ 应移出当前这张、预览留着看下一张: all=%q", f.walls.all)
+		t.Fatalf("J 应移出当前这张、预览留着看下一张: all=%q", f.walls.all)
 	}
 	if _, err := os.Stat(srcs["s-d.jpg"]); err != nil {
-		t.Error("⌫ 不应动原图")
+		t.Error("J 不应动原图")
 	}
 	cur := f.walls.all[f.previewIdx]
-	tt.Key(ui.Shift, ui.KeyBackspace)
+	tt.Key(0, ui.KeyK)
 	tt.Frame()
 	if len(f.walls.all) != 2 || !slices.Contains(f.cfg.Excluded, srcs[filepath.Base(cur)]) {
-		t.Fatalf("⇧⌫ 应移出并加进不再选: excluded=%q", f.cfg.Excluded)
+		t.Fatalf("K 应移出并加进不再选: excluded=%q", f.cfg.Excluded)
 	}
 	cur = f.walls.all[f.previewIdx]
-	tt.Key(ui.Cmd, ui.KeyBackspace)
+	tt.Key(0, ui.KeyL)
 	tt.Frame()
 	if !f.confirmDelSrc {
-		t.Fatal("⌘⌫ 应先弹删除确认")
+		t.Fatal("L 应先弹删除确认")
 	}
 	tt.Key(0, ui.KeyRight) // 确认框开着时预览不应翻页
 	tt.Frame()
@@ -480,7 +484,7 @@ func TestPreviewKeyboard(t *testing.T) {
 	if _, err := os.Stat(srcs[filepath.Base(cur)]); !os.IsNotExist(err) {
 		t.Error("回车确认后应删除原图")
 	}
-	if !tt.HasText("⌘⌫") && len(f.walls.all) > 0 {
+	if !tt.HasText("L") && len(f.walls.all) > 0 {
 		t.Errorf("按钮上应标出快捷键: %q", tt.Texts())
 	}
 }

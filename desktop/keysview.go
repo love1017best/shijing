@@ -46,7 +46,7 @@ func (a *app) keysPage(c *ui.Context) {
 			ui.Column(c).Gap(8).Padding(13, 16).Children(func() {
 				for _, f := range [][2]string{
 					{"⌘1 – ⌘6", "切换页面"}, {"⌘,", "设置"}, {"⌘W", "关闭窗口（后台继续运行）"}, {"⌘Q", "退出"},
-					{"空格", "预览里下一张"}, {"↩", "确认（比如确认删除原图）"}, {"Esc", "关闭预览 / 取消"},
+					{"空格", "预览里下一张"}, {"⇧空格", "预览里上一张"}, {"↩", "确认（比如确认删除原图）"}, {"Esc", "关闭预览 / 取消"},
 				} {
 					ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, f[1]).FontSize(13).Grow(1)
