@@ -18,6 +18,9 @@ func (a *app) view(c *ui.Context) {
 		a.initialized = true
 		a.checkMounts()
 	}
+	if !a.preview {
+		a.undoKey(c) // 预览开着时由 previewKeys 接
+	}
 	if a.scanWallpapers != nil && !a.walls.loading &&
 		(a.walls.dir != core.ExpandUser(a.cfg.DestDir) || a.wallsGen != a.wallsLoadedGen) {
 		a.wallsLoadedGen = a.wallsGen

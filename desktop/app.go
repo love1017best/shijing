@@ -135,6 +135,10 @@ type app struct {
 	previewFor     string // previewImg 是哪个文件的
 	confirmDelSrc  bool
 	pendingDelWall string // 要删除原图的那张壁纸（壁纸文件夹里的路径）
+	jumpBuf        string // 预览里正在输入的跳转编号
+	// 移出壁纸的撤销记录（undo.go）
+	undo    []removedWall
+	undoSeq int
 	// 概览页缩略图网格：上一帧量到的可视高度、整页高度，和据此算出的行列数（stripLayout）
 	viewH, pageH         float32
 	viewW                float32 // 内容滚动区的宽度（上一帧），设置类页面据此决定单栏还是两栏
@@ -331,6 +335,7 @@ func (a *app) startRunWith(o runOpts) {
 	if auto || o.noDelete {
 		cfg.DeleteDuringFilter = false
 	}
+	a.clearUndo() // 换一批会清空壁纸文件夹，之前的移出没法再放回去
 	a.running = true
 	a.prog = progress{}
 	a.last = nil

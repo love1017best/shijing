@@ -31,6 +31,7 @@ func main() {
 		}
 	}
 	a := newApp(filepath.Join(dataDir, "config.json"), core.PathsIn(dataDir))
+	a.clearUndo() // 上次打开时暂存的移出不再撤销
 
 	mygo.App.WhenReady(func() {
 		var win *mygo.Window

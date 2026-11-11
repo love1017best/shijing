@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -13,6 +14,10 @@ import (
 // Modal 外面的 Shortcut 被弹层挡住收不到；删除确认框弹出时预览在它后面，这里同样收不到，回车 / Esc 归确认框。
 // 回车不能当快捷键：弹层会把焦点放在按钮上，回车归那个按钮。
 func (a *app) previewKeys(c *ui.Context, wall string, hasSrc bool, step func(int)) {
+	a.undoKey(c)
+	if a.jumpKeys(c) {
+		return
+	}
 	// 默认是空格 / ⇧空格翻页、J K L 整理（按轻重从左到右），手不用离开主键区。
 	// 移出、删除这类操作不吃按住不放的自动重复（once），免得一下子移出一串
 	switch {
@@ -31,6 +36,37 @@ func (a *app) previewKeys(c *ui.Context, wall string, hasSrc bool, step func(int
 	case hasSrc && a.pressed(c, "reveal", true):
 		a.openPath(filepath.Dir(a.wallSource(wall)))
 	}
+}
+
+// jumpKeys 处理输入编号跳转：数字键攒编号，回车跳过去，⌫ 删一位；Esc 放弃（不关预览）在 previewModal 里处理。
+// 正在输入时别的快捷键照常用，按了就放弃输入的编号。返回 true 表示这一帧的按键被它用掉了。
+func (a *app) jumpKeys(c *ui.Context) bool {
+	for d := range 10 {
+		if c.Shortcut(0, ui.Key0+ui.Key(d)) {
+			if len(a.jumpBuf) < 6 && !(a.jumpBuf == "" && d == 0) {
+				a.jumpBuf += strconv.Itoa(d)
+			}
+			return true
+		}
+	}
+	if a.jumpBuf == "" {
+		return false
+	}
+	switch {
+	case c.Shortcut(0, ui.KeyEnter):
+		n, _ := strconv.Atoi(a.jumpBuf)
+		a.jumpBuf = ""
+		if total := len(a.walls.all); n >= 1 && n <= total {
+			a.previewIdx = n - 1
+		} else {
+			a.toast = fmt.Sprintf("没有第 %d 张，一共 %d 张", n, total)
+		}
+		return true
+	case c.Shortcut(0, ui.KeyBackspace):
+		a.jumpBuf = a.jumpBuf[:len(a.jumpBuf)-1]
+		return true
+	}
+	return false
 }
 
 // keyButton 是带快捷键标注的按钮：文字后面跟一个小 keycap。icon 可以为 nil。
@@ -164,8 +200,11 @@ func (a *app) previewModal(c *ui.Context) {
 	}
 	if a.preview {
 		a.loadPreview(w.all[a.previewIdx])
+	} else {
+		a.jumpBuf = ""
 	}
 	vw, vh := c.Size()
+	wasOpen := a.preview
 	ui.Modal(c, &a.preview, func() {
 		if a.previewIdx >= len(w.all) {
 			return
@@ -202,7 +241,13 @@ func (a *app) previewModal(c *ui.Context) {
 					}
 					ui.Text(c, sub).FontSize(11.5).TextColor(t.TextMuted).SingleLine().Tooltip(src)
 				})
-				ui.Text(c, fmt.Sprintf("%d / %d", a.previewIdx+1, len(w.all))).FontSize(12).TextColor(t.TextMuted)
+				if a.jumpBuf != "" {
+					ui.Text(c, fmt.Sprintf("跳到第 %s 张 ↩", a.jumpBuf)).FontSize(12).Bold().TextColor(t.Accent).
+						Tooltip("回车跳过去，⌫ 删一位，Esc 放弃")
+				} else {
+					ui.Text(c, fmt.Sprintf("%d / %d", a.previewIdx+1, len(w.all))).FontSize(12).TextColor(t.TextMuted).
+						Tooltip("直接输入编号再按回车可以跳到那一张")
+				}
 				iconOnly(c, iconChevronLeft, "上一张", withKey("上一张", a.keyLabel("prev"))+"，⇧空格也行").OnClick(func() { step(-1) })
 				iconOnly(c, iconChevronRight, "下一张", withKey("下一张", a.keyLabel("next"))+"，空格也行").OnClick(func() { step(1) })
 			})
@@ -229,6 +274,10 @@ func (a *app) previewModal(c *ui.Context) {
 			muted(c, note+a.previewKeyHint()).AlignSelf(ui.Stretch)
 		})
 	}).Label("壁纸预览")
+	// 正在输入编号时按 Esc：弹层自己的 Esc 先于里面的快捷键生效，会把预览关掉；这里改成只放弃编号
+	if wasOpen && !a.preview && a.jumpBuf != "" {
+		a.preview, a.jumpBuf = true, ""
+	}
 
 	// 删除原图前确认
 	if a.confirmDelSrc {
@@ -252,5 +301,5 @@ func (a *app) previewKeyHint() string {
 	if d := a.keyLabel("delete"); d != "" {
 		hint += d + " 后按回车确认删除，"
 	}
-	return hint + "Esc 关闭。"
+	return hint + "输入编号按回车跳转，⌘Z 撤销移出，Esc 关闭。"
 }

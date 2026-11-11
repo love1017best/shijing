@@ -162,20 +162,32 @@ func (a *app) wallSource(wall string) string {
 
 // removeWallpaper 从壁纸文件夹里移除一张（不动原图），exclude 时还把原图加进排除名单。
 func (a *app) removeWallpaper(wall string, exclude bool) {
-	if exclude {
-		if src := a.wallSource(wall); src != "" && !slices.Contains(a.cfg.Excluded, src) {
-			a.cfg.Excluded = append(a.cfg.Excluded, src)
-		}
+	r := removedWall{wall: wall, idx: slices.Index(a.walls.all, wall), thumbIdx: slices.Index(a.walls.paths, wall)}
+	if r.thumbIdx >= 0 {
+		r.thumb = a.walls.thumbs[r.thumbIdx]
 	}
-	if err := os.Remove(wall); err != nil && !os.IsNotExist(err) {
+	stash, err := a.stashWall(wall)
+	if os.IsNotExist(err) {
+		stash = "" // 文件已经不在了：照样从列表里去掉，只是没法撤销
+	} else if err != nil {
 		a.showErr("移除失败", err.Error())
 		return
 	}
+	if exclude {
+		if src := a.wallSource(wall); src != "" && !slices.Contains(a.cfg.Excluded, src) {
+			a.cfg.Excluded = append(a.cfg.Excluded, src)
+			r.excluded = src
+		}
+	}
 	a.dropWall(wall)
 	if exclude {
-		a.toast = "已移出壁纸文件夹，原图还在图库里；以后采样会跳过它"
+		a.toast = "已移出壁纸文件夹，原图还在图库里；以后采样会跳过它（⌘Z 撤销）"
 	} else {
-		a.toast = "已移出壁纸文件夹，原图还在图库里"
+		a.toast = "已移出壁纸文件夹，原图还在图库里（⌘Z 撤销）"
+	}
+	if stash != "" {
+		r.stash = stash
+		a.pushUndo(r)
 	}
 }
 
