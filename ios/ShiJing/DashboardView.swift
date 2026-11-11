@@ -7,6 +7,8 @@ struct DashboardView: View {
     let store: MacStore
     @State private var width: CGFloat = 0
     @State private var confirmDelete = false
+    /// 宽屏两栏的列表要自己让开左右安全区
+    @State private var safe = EdgeInsets()
 
     /// 内容区宽于这个值时分两栏（按实际宽度判断，不按机型写死）
     private static let twoColumnWidth: CGFloat = 680
@@ -51,18 +53,7 @@ struct DashboardView: View {
             }
         } else if let state = session.state {
             if width >= Self.twoColumnWidth {
-                HStack(alignment: .top, spacing: 0) {
-                    List {
-                        connectionSection
-                        statusSection(state)
-                        controlSection(state)
-                    }
-                    List {
-                        wallsSection(rows: 3)
-                        lastRunSection(state)
-                        overviewSection(state)
-                    }
-                }
+                wideLayout(state)
             } else {
                 List {
                     connectionSection
@@ -84,6 +75,75 @@ struct DashboardView: View {
         } else {
             ProgressView("正在连接 \(session.mac.name)…")
         }
+    }
+
+    // MARK: 宽屏
+
+    /// 宽屏（横屏、展开的内屏、iPad）：顶部一张横跨整行的状态卡（左边状态、右边换一批 / 停止，不滚动），
+    /// 下面两栏：左边当前壁纸（占得宽、多放几张），右边上次运行和设置。两栏之间、左右两边的留白和顶部卡片对齐。
+    private func wideLayout(_ s: RemoteState) -> some View {
+        let gap = Self.wideGap
+        return VStack(spacing: 0) {
+            headerCard(s)
+                .padding(.horizontal, gap)
+                .padding(.top, 8)
+            HStack(alignment: .top, spacing: 0) {
+                List {
+                    connectionSection
+                    wallsSection(rows: 3)
+                }
+                // 列表的边距不算安全区（内屏横放时右边有传感器区），自己加上，和顶部卡片对齐
+                .contentMargins(.leading, gap + safe.leading, for: .scrollContent)
+                .contentMargins(.trailing, gap / 2, for: .scrollContent)
+                .frame(maxWidth: .infinity)
+                .layoutPriority(1)
+                List {
+                    lastRunSection(s)
+                    overviewSection(s)
+                }
+                .contentMargins(.leading, gap / 2, for: .scrollContent)
+                .contentMargins(.trailing, gap + safe.trailing, for: .scrollContent)
+                .frame(width: max(300, width * 0.36) + safe.trailing)
+            }
+            .scrollContentBackground(.hidden)
+            .ignoresSafeArea(.container, edges: .horizontal)
+        }
+        .background(Color.groupedBackground)
+        .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { safe = $0 }
+    }
+
+    private static let wideGap: CGFloat = 20
+
+    /// 宽屏顶部的状态卡。
+    private func headerCard(_ s: RemoteState) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 20) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(s.eyebrow).font(.subheadline).foregroundStyle(.secondary)
+                    Text(s.title).font(.title2.bold()).lineLimit(2)
+                    if !s.running, let note = runNote(s) {
+                        Text(note).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if s.running {
+                    stopButton(s)
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                } else {
+                    runButton(s).frame(width: 220)
+                }
+            }
+            if s.running {
+                StepsView(state: s)
+                progressBlock(s)
+                if s.steps.contains(Step.filter.rawValue) {
+                    deleteRow(s).font(.subheadline)
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.groupedCell, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     // MARK: 各个分组
@@ -118,31 +178,57 @@ struct DashboardView: View {
         if s.running {
             Section("进度") {
                 StepsView(state: s)
-                VStack(alignment: .leading, spacing: 8) {
-                    if s.fraction >= 0 {
-                        ProgressView(value: s.fraction) {
-                            progressLabel(s)
-                        }
-                    } else {
-                        ProgressView { progressLabel(s) }
-                    }
-                    if let line = s.lastLine, !line.isEmpty {
-                        Text(line).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                }
-                .padding(.vertical, 4)
+                progressBlock(s)
+                    .padding(.vertical, 4)
                 if s.steps.contains(Step.filter.rawValue) {
                     deleteRow(s)
                 }
-                Button(role: .destructive) {
-                    Task { await session.stop() }
-                } label: {
-                    Label(s.stopping ? "正在停止…" : "停止", systemImage: "stop.circle")
-                }
-                .disabled(s.stopping || session.busy)
+                stopButton(s)
             }
         } else {
             Section {
+                runButton(s)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+            } footer: {
+                if let note = runNote(s) { Text(note) }
+            }
+        }
+    }
+
+    private func progressBlock(_ s: RemoteState) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if s.fraction >= 0 {
+                ProgressView(value: s.fraction) {
+                    progressLabel(s)
+                }
+            } else {
+                ProgressView { progressLabel(s) }
+            }
+            if let line = s.lastLine, !line.isEmpty {
+                Text(line).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
+    }
+
+    private func stopButton(_ s: RemoteState) -> some View {
+        Button(role: .destructive) {
+            Task { await session.stop() }
+        } label: {
+            Label(s.stopping ? "正在停止…" : "停止", systemImage: "stop.circle")
+        }
+        .disabled(s.stopping || session.busy)
+    }
+
+    /// 「换一批」按钮下面的说明：点不了的原因、目录访问不了、会删原图。
+    private func runNote(_ s: RemoteState) -> String? {
+        if let b = s.blocked { return b }
+        if s.unmounted > 0 { return "上次检查时有 \(s.unmounted) 个图库目录访问不了，换一批前会重新检查。" }
+        if s.willDelete { return "会先删除图库里不合格的原图，点了之后可以选只模拟。" }
+        return nil
+    }
+
+    private func runButton(_ s: RemoteState) -> some View {
                 Button {
                     if s.willDelete {
                         confirmDelete = true
@@ -166,19 +252,7 @@ struct DashboardView: View {
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.roundedRectangle(radius: 12))
                 .controlSize(.large)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
                 .disabled(s.blocked != nil || session.busy || session.connection != .live)
-            } footer: {
-                if let b = s.blocked {
-                    Text(b)
-                } else if s.unmounted > 0 {
-                    Text("上次检查时有 \(s.unmounted) 个图库目录访问不了，换一批前会重新检查。")
-                } else if s.willDelete {
-                    Text("会先删除图库里不合格的原图，点了之后可以选只模拟。")
-                }
-            }
-        }
     }
 
     /// 当前壁纸：前几张缩略图，点开看大图、长按整理；「全部」进整个网格。
@@ -362,4 +436,15 @@ struct ConnectionBadge: View {
         .foregroundStyle(.secondary)
         .accessibilityLabel("连接状态：\(text)")
     }
+}
+
+extension Color {
+    /// 分组列表的页面底色和卡片底色（宽屏顶部卡片要和下面的列表一致）。
+    #if os(iOS)
+    static let groupedBackground = Color(uiColor: .systemGroupedBackground)
+    static let groupedCell = Color(uiColor: .secondarySystemGroupedBackground)
+    #else
+    static let groupedBackground = Color(nsColor: .windowBackgroundColor)
+    static let groupedCell = Color(nsColor: .controlBackgroundColor)
+    #endif
 }
