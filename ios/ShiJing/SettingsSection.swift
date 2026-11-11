@@ -34,13 +34,21 @@ struct SettingsSection: View {
                 if state.settings == nil {
                     Text("电脑上的拾景版本较旧，要改设置请在电脑上改。")
                 }
-                Text("电脑上拾景 \(state.version.isEmpty ? "开发版" : "v" + state.version)。" + signingNote)
+                Text(versionNote)
             }
         }
     }
 
-    private var signingNote: String {
-        SigningExpiry.text.map { "这台手机上的拾景 \($0)。" } ?? ""
+    /// 「电脑上拾景 v0.3.101，这台手机上 v0.3.101（11月18日 09:20 到期）。」两边版本不一样时提醒一下。
+    private var versionNote: String {
+        let mac = state.version.isEmpty ? "开发版" : "v" + state.version
+        var text = "电脑上拾景 \(mac)，这台手机上 \(AppVersion.text)"
+        if let exp = SigningExpiry.text { text += "（\(exp)）" }
+        text += "。"
+        if !state.version.isEmpty, state.version != AppVersion.short {
+            text += "两边版本不一样，有的功能可能用不了，建议都升到最新。"
+        }
+        return text
     }
 
     @ViewBuilder
@@ -324,4 +332,10 @@ struct ExcludedView: View {
             await load()
         }
     }
+}
+
+/// 这台手机上拾景的版本号（和电脑端同一套，见 project.yml 的 MARKETING_VERSION）。
+enum AppVersion {
+    static let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+    static var text: String { short.isEmpty ? "开发版" : "v" + short }
 }

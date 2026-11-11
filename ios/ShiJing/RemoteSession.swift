@@ -28,6 +28,9 @@ final class RemoteSession {
     /// 壁纸文件夹里的图（和桌面同样的顺序）；walls_rev 变了就重新拉
     private(set) var walls: [Wallpaper] = []
     private(set) var wallsRev: String?
+    /// 横幅图的文件名（桌面概览顶部那张）；旧版桌面端没给时用第一张
+    private(set) var heroName: String?
+    var hero: Wallpaper? { walls.first { $0.name == heroName } ?? walls.first }
     /// 正在移出 / 删除的那张
     private(set) var acting: String?
 
@@ -252,6 +255,7 @@ final class RemoteSession {
             let list = try await client().wallpapers()
             walls = list.items
             wallsRev = list.rev
+            heroName = list.hero
         } catch {
             // 列表拉不到不影响别的，下次状态推送再试
         }

@@ -10,7 +10,15 @@ struct ShiJingApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-demoWidgets") {
+                WidgetDemo()
+            } else {
+                RootView()
+            }
+            #else
             RootView()
+            #endif
         }
     }
 }
@@ -107,3 +115,52 @@ enum Notifications {
         }
     }
 }
+
+#if DEBUG
+import WidgetKit
+
+/// 演示页：四种尺寸的小组件摆在一起看排版（启动参数 -demoWidgets）。
+struct WidgetDemo: View {
+    var body: some View {
+        let now = Date().timeIntervalSince1970
+        let idle = RemoteState(
+            version: "0.3.102", eyebrow: "", title: "已换上 300 张新壁纸", running: false, stopping: false,
+            steps: [], stage: nil, done: 0, total: 0, fraction: -1, label: nil, lastLine: nil, runDelete: false,
+            rejected: 0, deleted: 0, deleteFailed: 0, blocked: nil, unmounted: 0, willDelete: false, deleteNote: nil,
+            last: LastRun(at: now - 3600, status: "ok", error: nil, selected: 300, copied: 300, failed: 0, elapsed: 73,
+                          brief: "重合 4% · 删 3 张", detail: nil),
+            nextAuto: now + 5 * 3600, wallpapers: 300, wallsRev: nil, dest: "", sampleCount: 300, libraryDirs: 3)
+        var running = idle
+        running.running = true
+        running.title = "正在拾一批新风景…"
+        running.fraction = 0.43
+        running.label = "复制 128 / 300 张"
+        let img = { (n: String) in ImageStore.demoImage(n, large: true) }
+        let e1 = Entry(mac: "演示 Mac", state: idle, image: img("风景-冰岛-0001.jpg"), wallName: "风景-冰岛-0001.jpg")
+        let e2 = Entry(mac: "演示 Mac", state: running, image: img("风景-京都-0002.jpg"), wallName: "风景-京都-0002.jpg")
+        return ScrollView([.horizontal, .vertical]) {
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(spacing: 20) {
+                        tile(e1, .systemSmall, 170, 170)
+                        tile(e2, .systemSmall, 170, 170)
+                    }
+                    tile(e1, .systemMedium, 364, 170)
+                    tile(e2, .systemMedium, 364, 170)
+                }
+                tile(e1, .systemLarge, 364, 382)
+                tile(e1, .systemExtraLarge, 715, 382)
+            }
+            .padding(30)
+        }
+        .background(Color.gray.opacity(0.3))
+    }
+
+    private func tile(_ e: Entry, _ f: WidgetFamily, _ w: CGFloat, _ h: CGFloat) -> some View {
+        StatusView(entry: e, familyOverride: f)
+            .background(Backdrop(image: e.image))
+            .frame(width: w, height: h)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+#endif

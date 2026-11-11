@@ -9,6 +9,8 @@ struct DashboardView: View {
     @State private var confirmDelete = false
     /// 宽屏两栏的列表要自己让开左右安全区
     @State private var safe = EdgeInsets()
+    /// 点横幅图打开的大图预览
+    @State private var previewHero: Wallpaper?
 
     /// 内容区宽于这个值时分两栏（按实际宽度判断，不按机型写死）
     private static let twoColumnWidth: CGFloat = 680
@@ -22,6 +24,9 @@ struct DashboardView: View {
                 ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
             }
             .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 8) }
+            .fullScreenCoverCompat(item: $previewHero) { w in
+                WallPreview(session: session, startName: w.name)
+            }
             .alert("操作没有完成", isPresented: Binding(
                 get: { session.actionError != nil },
                 set: { if !$0 { session.actionError = nil } })
@@ -58,9 +63,12 @@ struct DashboardView: View {
             } else {
                 List {
                     connectionSection
+                    Section {
+                        heroCard(state, wide: false)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                    }
                     signingSection
-                    statusSection(state)
-                    controlSection(state)
                     wallsSection(rows: 3)
                     lastRunSection(state)
                     overviewSection(state)
@@ -86,7 +94,7 @@ struct DashboardView: View {
     private func wideLayout(_ s: RemoteState) -> some View {
         let gap = Self.wideGap
         return VStack(spacing: 0) {
-            headerCard(s)
+            heroCard(s, wide: true)
                 .padding(.horizontal, gap)
                 .padding(.top, 8)
             HStack(alignment: .top, spacing: 0) {
@@ -117,25 +125,83 @@ struct DashboardView: View {
 
     private static let wideGap: CGFloat = 20
 
-    /// 宽屏顶部的状态卡。
-    private func headerCard(_ s: RemoteState) -> some View {
+    /// 顶部的横幅卡：背景是当前壁纸里的一张（和电脑上概览顶部同一张），点图片看大图。
+    /// 窄屏：上面露出图片，下面压一整块毛玻璃放状态和按钮。
+    /// 宽屏：图片铺满整张卡，左下角浮一块毛玻璃放状态，右下角是按钮；运行中毛玻璃撑满整行放步骤和进度。
+    @ViewBuilder
+    private func heroCard(_ s: RemoteState, wide: Bool) -> some View {
+        let hero = session.hero
+        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        if wide && !s.running {
+            HStack(alignment: .bottom, spacing: 16) {
+                heroPanel(s, wide: false, button: false)
+                    .padding(14)
+                    .frame(maxWidth: 520, alignment: .leading)
+                    .background(glass(hero), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                Spacer(minLength: 0)
+                runButton(s).frame(width: 220)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 230, alignment: .bottom)
+            .background { heroBackground(hero) }
+            .clipShape(shape)
+        } else {
+            VStack(spacing: 0) {
+                // 露出图片的部分：点开大图
+                Color.clear
+                    .frame(height: wide ? 60 : (s.running ? 100 : 150))
+                    .contentShape(Rectangle())
+                    .onTapGesture { if let hero { previewHero = hero } }
+                    .accessibilityAddTraits(hero == nil ? [] : .isButton)
+                    .accessibilityLabel(hero.map { "查看大图：\($0.name)" } ?? "")
+                heroPanel(s, wide: wide)
+                    .padding(wide ? 16 : 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(glass(hero))
+            }
+            .background { heroBackground(hero) }
+            .clipShape(shape)
+        }
+    }
+
+    /// 横幅背景图；点空白处看大图（宽屏空闲时整张卡都是图）。
+    @ViewBuilder
+    private func heroBackground(_ hero: Wallpaper?) -> some View {
+        if let hero {
+            WallImage(session: session, wall: hero, kind: session.heroName != nil ? .hero : .image)
+                .contentShape(Rectangle())
+                .onTapGesture { previewHero = hero }
+        } else {
+            Color.groupedCell
+        }
+    }
+
+    private func glass(_ hero: Wallpaper?) -> AnyShapeStyle {
+        hero == nil ? AnyShapeStyle(Color.groupedCell) : AnyShapeStyle(.regularMaterial)
+    }
+
+    @ViewBuilder
+    private func heroPanel(_ s: RemoteState, wide: Bool, button: Bool = true) -> some View {
+        let text = VStack(alignment: .leading, spacing: 4) {
+            Text(s.eyebrow).font(.subheadline).foregroundStyle(.secondary)
+            Text(s.title).font(.title2.bold()).lineLimit(2)
+            if !s.running, let note = runNote(s) {
+                Text(note).font(.footnote).foregroundStyle(.secondary).lineLimit(3)
+            }
+        }
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 20) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(s.eyebrow).font(.subheadline).foregroundStyle(.secondary)
-                    Text(s.title).font(.title2.bold()).lineLimit(2)
-                    if !s.running, let note = runNote(s) {
-                        Text(note).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+            if wide {
+                HStack(alignment: .center, spacing: 20) {
+                    text.frame(maxWidth: .infinity, alignment: .leading)
+                    if s.running {
+                        stopButton(s).buttonStyle(.bordered).controlSize(.large)
+                    } else {
+                        runButton(s).frame(width: 220)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if s.running {
-                    stopButton(s)
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                } else {
-                    runButton(s).frame(width: 220)
-                }
+            } else {
+                text
+                if !s.running && button { runButton(s) }
             }
             if s.running {
                 StepsView(state: s)
@@ -143,10 +209,11 @@ struct DashboardView: View {
                 if s.steps.contains(Step.filter.rawValue) {
                     deleteRow(s).font(.subheadline)
                 }
+                if !wide {
+                    stopButton(s).buttonStyle(.bordered).frame(maxWidth: .infinity)
+                }
             }
         }
-        .padding(16)
-        .background(Color.groupedCell, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     // MARK: 各个分组
@@ -163,38 +230,6 @@ struct DashboardView: View {
                 } icon: {
                     Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
                 }
-            }
-        }
-    }
-
-    private func statusSection(_ s: RemoteState) -> some View {
-        Section {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(s.eyebrow).font(.subheadline).foregroundStyle(.secondary)
-                Text(s.title).font(.title2.bold())
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
-    @ViewBuilder private func controlSection(_ s: RemoteState) -> some View {
-        if s.running {
-            Section("进度") {
-                StepsView(state: s)
-                progressBlock(s)
-                    .padding(.vertical, 4)
-                if s.steps.contains(Step.filter.rawValue) {
-                    deleteRow(s)
-                }
-                stopButton(s)
-            }
-        } else {
-            Section {
-                runButton(s)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-            } footer: {
-                if let note = runNote(s) { Text(note) }
             }
         }
     }
@@ -264,14 +299,23 @@ struct DashboardView: View {
             Section {
                 WallGrid(session: session, rows: rows)
                     .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))
-                NavigationLink {
-                    AllWallpapersView(session: session)
-                } label: {
-                    LabeledContent("全部壁纸", value: "\(session.walls.count) 张")
-                }
                 UndoRemoveButton(session: session)
             } header: {
-                Text("当前壁纸")
+                // 「全部」放在缩略图上面：先看到入口再看到图
+                HStack {
+                    Text("当前壁纸")
+                    Spacer()
+                    NavigationLink {
+                        AllWallpapersView(session: session)
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text("全部 \(session.walls.count) 张")
+                            Image(systemName: "chevron.right").imageScale(.small)
+                        }
+                        .font(.subheadline)
+                    }
+                }
+                .textCase(nil)
             } footer: {
                 Text("点一张看大图，长按可以移出或删除原图。")
             }

@@ -47,7 +47,7 @@ final class ImageStore {
                 data = try? await client.imageData(name, kind: kind)
             }
             return await Task.detached(priority: .userInitiated) {
-                if demo { return Self.demoImage(name, large: kind == .image) }
+                if demo { return Self.demoImage(name, large: kind.isLarge) }
                 return data.flatMap(Self.decode)
             }.value
         }
@@ -55,7 +55,7 @@ final class ImageStore {
         let img = await t.value
         inflight[k] = nil
         if let img {
-            cache.setObject(img, forKey: k as NSString, cost: kind == .image ? 8 << 20 : 300 << 10)
+            cache.setObject(img, forKey: k as NSString, cost: kind.isLarge ? 8 << 20 : 300 << 10)
         }
         return img
     }
@@ -70,7 +70,7 @@ final class ImageStore {
     }
 
     /// 演示用的风景色块：按文件名挑颜色，上深下浅，画一道山的轮廓。
-    private nonisolated static func demoImage(_ name: String, large: Bool) -> PlatformImage? {
+    nonisolated static func demoImage(_ name: String, large: Bool) -> PlatformImage? {
         #if os(iOS)
         var h: UInt32 = 2166136261
         for b in name.utf8 { h = (h ^ UInt32(b)) &* 16777619 }
@@ -140,6 +140,8 @@ struct WallImage: View {
 
     /// 大图还没到时先用缩略图垫着。
     private var fallback: PlatformImage? {
-        kind == .image ? ImageStore.shared.cached(session, wall.name, .thumb) : nil
+        guard kind.isLarge else { return nil }
+        return ImageStore.shared.cached(session, wall.name, kind == .image ? .hero : .image)
+            ?? ImageStore.shared.cached(session, wall.name, .thumb)
     }
 }

@@ -120,12 +120,16 @@ struct Wallpaper: Codable, Identifiable, Hashable {
 
 struct WallpaperList: Codable {
     var rev: String
+    /// 横幅图（和桌面概览顶部那张一样）；旧版桌面端没有
+    var hero: String?
     var items: [Wallpaper]
 }
 
-/// 要哪种尺寸的图：缩略图（360 宽）或大图（2048 宽）。
+/// 要哪种尺寸的图：缩略图（360 宽）、横幅（1600 宽）或大图（2048 宽）。
 enum ImageKind: String {
-    case thumb, image
+    case thumb, hero, image
+
+    var isLarge: Bool { self != .thumb }
 }
 
 struct ServerInfo: Codable {

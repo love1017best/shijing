@@ -114,7 +114,7 @@ struct APIClient: Sendable {
 
     /// 一张壁纸的 JPEG：缩略图或大图。
     func imageData(_ name: String, kind: ImageKind) async throws -> Data {
-        let req = request("GET", "api/wallpapers/\(name)/\(kind.rawValue)", timeout: kind == .image ? 40 : 20)
+        let req = request("GET", "api/wallpapers/\(name)/\(kind.rawValue)", timeout: kind.isLarge ? 40 : 20)
         let (data, resp) = try await Self.session.data(for: req)
         try Self.check(resp, data: data)
         return data

@@ -23,6 +23,8 @@ targets:
     platform: iOS
     sources:
       - path: ShiJing
+      # 小组件的界面也编进 App，Debug 下的 -demoWidgets 演示页用
+      - path: ShiJingWidget/WidgetViews.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.love1017best.shijing.ios
