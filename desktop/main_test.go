@@ -337,17 +337,25 @@ func TestThumbnailOpensItsImage(t *testing.T) {
 	f, tt := newFakeApp(t)
 	img := image.NewRGBA(image.Rect(0, 0, 16, 10))
 	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), total: 9,
-		thumbs: []*ui.Bitmap{ui.NewBitmap(img), ui.NewBitmap(img)}, paths: []string{"/w/a.jpg", "/w/b.jpg"}}
+		thumbs: []*ui.Bitmap{ui.NewBitmap(img), ui.NewBitmap(img)}, paths: []string{"/w/a.jpg", "/w/b.jpg"},
+		all: []string{"/w/hero.jpg", "/w/a.jpg", "/w/b.jpg", "/w/c.jpg"}}
 	f.wallsLoadedGen = f.wallsGen
 	tt.Frame()
 	click(t, tt, "壁纸 2")
 	tt.Frame()
-	if !f.preview || !tt.HasText("b.jpg") || !tt.HasText("2 / 2") {
-		t.Errorf("点缩略图应打开大图预览: %q", tt.Texts())
+	if !f.preview || !tt.HasText("b.jpg") || !tt.HasText("3 / 4") {
+		t.Errorf("点缩略图应打开大图预览，能翻看文件夹里的全部图片: %q", tt.Texts())
 	}
 	click(t, tt, "下一张")
-	if !tt.HasText("1 / 2") {
+	if !tt.HasText("c.jpg") || !tt.HasText("4 / 4") || !tt.HasText("正在载入…") {
+		t.Errorf("没有缩略图的图片也能预览: %q", tt.Texts())
+	}
+	click(t, tt, "下一张")
+	if !tt.HasText("1 / 4") {
 		t.Error("下一张应循环到第一张")
+	}
+	if !tt.HasText("移出壁纸文件夹") || tt.HasText("删除图库里的原图…") {
+		t.Errorf("没有原图记录时只能移出: %q", tt.Texts())
 	}
 	f.preview = false
 	tt.Frame()
@@ -554,12 +562,12 @@ func TestWallpaperActions(t *testing.T) {
 	img := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 4, 4)))
 	reset := func() {
 		os.WriteFile(wall, []byte("x"), 0o644)
-		f.walls = wallpapers{total: 1, thumbs: []*ui.Bitmap{img}, paths: []string{wall}, sources: map[string]string{"s-a.jpg": src}}
+		f.walls = wallpapers{total: 1, thumbs: []*ui.Bitmap{img}, paths: []string{wall}, all: []string{wall}, sources: map[string]string{"s-a.jpg": src}}
 	}
 
 	reset()
 	f.removeWallpaper(wall, true)
-	if _, err := os.Stat(wall); !os.IsNotExist(err) || len(f.walls.paths) != 0 {
+	if _, err := os.Stat(wall); !os.IsNotExist(err) || len(f.walls.paths) != 0 || len(f.walls.all) != 0 {
 		t.Error("应从壁纸文件夹移除")
 	}
 	if !slices.Equal(f.cfg.Excluded, []string{src}) || !slices.Equal(f.buildConfig().Excluded, []string{src}) {
@@ -570,6 +578,11 @@ func TestWallpaperActions(t *testing.T) {
 	f.deleteOriginal(wall)
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
 		t.Error("应删除原图")
+	}
+	reset()
+	f.removeWallpaper(wall, false)
+	if _, err := os.Stat(filepath.Dir(src)); err != nil {
+		t.Error("移出壁纸文件夹不应动原图所在目录")
 	}
 	if recs := core.ReadDeleteLog(f.paths.DeleteLog); len(recs) != 1 || recs[0].Path != src || recs[0].Reason != "手动删除" {
 		t.Errorf("应记进删除记录: %+v", recs)
@@ -608,5 +621,23 @@ func TestAutoRunSkipsDeletion(t *testing.T) {
 	f.settle(t, tt, func() bool { return !f.running })
 	if len(f.runCfgs) != 1 || f.runCfgs[0].DeleteDuringFilter || f.runCfgs[0].AutoRunHours != 6 {
 		t.Errorf("定时运行不应删除原图: %+v", f.runCfgs)
+	}
+}
+
+func TestFitBoxKeepsImageRatio(t *testing.T) {
+	for _, c := range []struct {
+		iw, ih     int
+		maxW, maxH float32
+		w, h       float32
+	}{
+		{1600, 900, 1000, 800, 1000, 562.5}, // 宽度先到上限
+		{1600, 900, 1000, 450, 800, 450},    // 高度先到上限
+		{900, 1600, 1000, 800, 450, 800},    // 竖图
+		{0, 0, 800, 800, 800, 500},          // 还没有图：按 16:10
+	} {
+		w, h := fitBox(c.iw, c.ih, c.maxW, c.maxH)
+		if w != c.w || h != c.h {
+			t.Errorf("fitBox(%d×%d, %v×%v) = %v×%v，想要 %v×%v", c.iw, c.ih, c.maxW, c.maxH, w, h, c.w, c.h)
+		}
 	}
 }

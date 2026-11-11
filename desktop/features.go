@@ -173,9 +173,9 @@ func (a *app) removeWallpaper(wall string, exclude bool) {
 	}
 	a.dropWall(wall)
 	if exclude {
-		a.toast = "已移除，以后不会再选这张"
+		a.toast = "已移出壁纸文件夹，原图还在图库里；以后采样会跳过它"
 	} else {
-		a.toast = "已从壁纸文件夹移除"
+		a.toast = "已移出壁纸文件夹，原图还在图库里"
 	}
 }
 
@@ -193,7 +193,7 @@ func (a *app) deleteOriginal(wall string) {
 	a.appendLog(fmt.Sprintf("🔥 手动删除原图: %s", src))
 	_ = os.Remove(wall)
 	a.dropWall(wall)
-	a.toast = "已删除原图"
+	a.toast = "已删除图库里的原图，记进了删除记录"
 }
 
 // dropWall 把一张从缩略图里去掉（不重新扫描，其余缩略图不变）。
@@ -203,12 +203,15 @@ func (a *app) dropWall(wall string) {
 		w.paths = slices.Delete(w.paths, i, i+1)
 		w.thumbs = slices.Delete(w.thumbs, i, i+1)
 	}
+	w.all = slices.DeleteFunc(w.all, func(p string) bool { return p == wall })
+	w.rest = slices.DeleteFunc(w.rest, func(p string) bool { return p == wall })
 	w.total = max(0, w.total-1)
 	if a.preview {
-		if len(w.paths) == 0 {
+		// 停在原位置，看到的就是下一张
+		if len(w.all) == 0 {
 			a.preview = false
 		} else {
-			a.previewIdx = min(a.previewIdx, len(w.paths)-1)
+			a.previewIdx = min(a.previewIdx, len(w.all)-1)
 		}
 	}
 }

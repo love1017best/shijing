@@ -5,6 +5,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"desktop/core"
@@ -32,6 +33,7 @@ type wallpapers struct {
 	thumbs  []*ui.Bitmap      // 缩略图
 	paths   []string          // 每张缩略图对应的文件，点击时打开
 	rest    []string          // 还没解码的文件（已打乱），需要更多缩略图时从这里取
+	all     []string          // 文件夹里全部图片（已打乱，横幅图也在内），大图预览按这个顺序翻
 	sources map[string]string // 壁纸文件名 → 原图路径（core.WallpaperSources）；旧版本换上的为 nil
 	loading bool
 	more    bool // 正在后台解码更多缩略图
@@ -45,6 +47,7 @@ type scannedWallpapers struct {
 	thumbs []image.Image
 	paths  []string
 	rest   []string
+	all    []string
 }
 
 // scanWallpapers 列出文件夹里的图片，打乱后解码横幅图和前几张缩略图。读不了的图片直接跳过。
@@ -63,6 +66,7 @@ func scanWallpapers(dir string) scannedWallpapers {
 	}
 	res.total = len(files)
 	rand.Shuffle(len(files), func(i, j int) { files[i], files[j] = files[j], files[i] })
+	res.all = slices.Clone(files)
 
 	// 横幅图要够宽；第一张不够宽（或读不了）就往后找，最多试几张
 	for len(files) > 0 && res.hero == nil {
@@ -153,7 +157,7 @@ func (a *app) loadWallpapers() {
 		s := a.scanWallpapers(dir)
 		sources := core.WallpaperSources(a.paths.Selection, dir)
 		a.update(func() {
-			w := wallpapers{dir: s.dir, total: s.total, paths: s.paths, rest: s.rest, sources: sources}
+			w := wallpapers{dir: s.dir, total: s.total, paths: s.paths, rest: s.rest, all: s.all, sources: sources}
 			if s.hero != nil {
 				w.hero = ui.NewBitmap(s.hero)
 			}
