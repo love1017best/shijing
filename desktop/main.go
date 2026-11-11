@@ -92,6 +92,7 @@ func main() {
 		a.openPath = func(p string) {
 			go func() { _ = mygo.Shell.OpenPath(core.ExpandUser(p)) }()
 		}
+		a.revealPath = func(p string) { mygo.Shell.ShowItemInFolder(core.ExpandUser(p)) }
 		win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     appName,
 			Width:     1040,

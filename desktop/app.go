@@ -168,6 +168,7 @@ type app struct {
 	// 为 nil 时不确认（测试）。
 	confirmDelete func(detail string) (ok, dontAsk bool)
 	openPath      func(path string)      // 在 Finder 中打开
+	revealPath    func(path string)      // 在 Finder 中显示并选中这个文件
 	statDir       func(path string) bool // 目录是否存在（可能阻塞）
 	run           func(core.Config, core.Reporter) (core.Summary, error)
 	// scanWallpapers 读取壁纸文件夹、生成缩略图（后台调用）；为 nil 时不显示缩略图（测试）。

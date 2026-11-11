@@ -25,7 +25,8 @@ var keyActions = []keyAction{
 	{"exclude", actExclude, "原图保留，以后采样跳过它。", false, "K"},
 	{"delete", "删除图库里的原图", "会先弹确认，回车确认、Esc 取消。", false, "L"},
 	{"open", "用默认应用打开", "", false, "O"},
-	{"reveal", "在 Finder 中显示原图", "", false, "F"},
+	{"reveal_wall", "在 Finder 中显示这张壁纸", "在壁纸文件夹里选中它。", false, "D"},
+	{"reveal", "在 Finder 中显示原图", "在图库里选中原图。", false, "F"},
 }
 
 func findKeyAction(id string) (keyAction, bool) {

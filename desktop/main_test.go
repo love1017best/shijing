@@ -50,6 +50,7 @@ func newFakeApp(t *testing.T) (*fakeApp, *ui.Tester) {
 	f.pickFile = func(string) string { return "" }
 	f.showErr = func(title, msg string) { t.Errorf("意外的错误弹窗 %s: %s", title, msg) }
 	f.openPath = func(p string) { f.opened = append(f.opened, p) }
+	f.revealPath = func(p string) { f.opened = append(f.opened, "reveal:"+p) }
 	f.statDir = func(p string) bool { return !strings.Contains(p, "Offline") }
 	f.scanWallpapers = nil // 不读真实的壁纸文件夹
 	f.run = func(cfg core.Config, rep core.Reporter) (core.Summary, error) {
@@ -433,6 +434,7 @@ func TestPreviewKeyboard(t *testing.T) {
 	}
 	opened := ""
 	f.openPath = func(p string) { opened = p }
+	f.revealPath = func(p string) { opened = "reveal:" + p }
 	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), all: slices.Clone(walls), sources: srcs}
 	f.wallsLoadedGen = f.wallsGen
 	f.preview, f.previewIdx = true, 0
@@ -463,9 +465,13 @@ func TestPreviewKeyboard(t *testing.T) {
 	if opened != walls[3] {
 		t.Errorf("O 应打开当前这张: %q", opened)
 	}
+	tt.Key(0, ui.KeyD)
+	if opened != "reveal:"+walls[3] {
+		t.Errorf("D 应在 Finder 里选中这张壁纸: %q", opened)
+	}
 	tt.Key(0, ui.KeyF)
-	if opened != filepath.Dir(srcs["s-d.jpg"]) {
-		t.Errorf("F 应在 Finder 中显示原图: %q", opened)
+	if opened != "reveal:"+srcs["s-d.jpg"] {
+		t.Errorf("F 应在 Finder 里选中原图: %q", opened)
 	}
 	tt.Key(0, ui.KeyJ)
 	tt.Frame()
