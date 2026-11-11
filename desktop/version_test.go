@@ -43,3 +43,17 @@ func TestVersionsInSync(t *testing.T) {
 		}
 	}
 }
+
+// TestNoTeamIDInProject 防止开发团队 ID 进公开仓库：在 Xcode 里选 Team 会把它写进工程文件，
+// 应该挪到 gitignore 的 ios/ShiJing/Local.xcconfig 再重新 xcodegen（见 ios/README.md）。
+func TestNoTeamIDInProject(t *testing.T) {
+	for _, p := range []string{"../ios/ShiJing.xcodeproj/project.pbxproj", "../ios/project.yml", "../ios/ShiJing/Signing.xcconfig"} {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m := regexp.MustCompile(`DEVELOPMENT_TEAM\s*[=:]\s*"?[A-Z0-9]{10}`).Find(raw); m != nil {
+			t.Errorf("%s 里有开发团队 ID，要挪到 ios/ShiJing/Local.xcconfig 后重新 xcodegen", p)
+		}
+	}
+}

@@ -20,7 +20,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		00B81837B22F5D8DBD7084AF /* 拾景.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "拾景.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		00B81837B22F5D8DBD7084AF /* ShiJing.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ShiJing.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		04551D48684EF104173433F5 /* ShiJingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiJingApp.swift; sourceTree = "<group>"; };
 		15FB9144ACC689795E105A27 /* MacListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacListView.swift; sourceTree = "<group>"; };
 		1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
@@ -48,7 +48,7 @@
 		DAD7F89B526DB1E019E9E94D /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				00B81837B22F5D8DBD7084AF /* 拾景.app */,
+				00B81837B22F5D8DBD7084AF /* ShiJing.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -91,7 +91,7 @@
 			packageProductDependencies = (
 			);
 			productName = ShiJing;
-			productReference = 00B81837B22F5D8DBD7084AF /* 拾景.app */;
+			productReference = 00B81837B22F5D8DBD7084AF /* ShiJing.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -196,7 +196,6 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 6;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 36G3KFV8R3;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -281,7 +280,6 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 6;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 36G3KFV8R3;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
