@@ -158,7 +158,7 @@ macOS 端和 iOS 端分别由不同的会话负责，**两个会话共用同一�
 - 接口两边对应（`desktop/remote.go` ↔ `ios/ShiJing/Models.swift` / `APIClient.swift`）：改了一边要同步另一边。另一边归对方会话管时，在提交说明里写清楚，或者告诉用户请对方会话跟进。
 - **构建、安装、发布只用这几个脚本**，它们共用一把锁（`desktop/scripts/lock.zsh`，锁文件在 `.git/shijing-build.lock`），两个会话同时跑时后来的会排队等，不会抢 `build/` 目录、同时替换 `/Applications/拾景.app` 或撞版本号：
   - `desktop/scripts/install-local.sh`：构建 macOS 并装到 `/Applications`、启动；连着 iPhone / iPad 时再构建 iOS 装到设备上并启动。**哪一端改了都跑它**，两端都会重新安装运行（iOS 会话也一样，不要只装手机）。
-  - `desktop/scripts/install-ios-device.sh`：只装手机，`install-local.sh` 会自动调，一般不单独用。环境变量 `SHIJING_IOS_DIR` 换一个 `ios/` 目录来构建、`SHIJING_DEVICE` 只装名字含这段文字的设备（都给 `install-ios.sh` 用）。
+  - `desktop/scripts/install-ios-device.sh`：只装手机，`install-local.sh` 会自动调，一般不单独用。环境变量 `SHIJING_IOS_DIR` 换一个 `ios/` 目录来构建、`SHIJING_DEVICE` 只装名字含这段文字的设备（都给 `install-ios.sh` 用），`SHIJING_DERIVED_DIR` / `SHIJING_LOG_DIR` 改派生数据和日志的位置（在临时 worktree 里构建时用：派生数据复用工作区的、日志留在 worktree 外，否则 worktree 一删日志就没了）。判断「哪台连着」不能看 `devicectl list devices` 的 `tunnelState`——平时一直是 `disconnected`（要用时才建隧道），按它过滤会一台都找不到（v0.3.107 没装上就是这原因）；要看 `reality == physical` + `pairingState == paired` + `transportType` 是 `wired` / `localNetwork`。
   - `desktop/scripts/install-ios.sh`：给用户自己手动装手机 / 平板用（比如免费签名 7 天到期要续）。默认装 GitHub 上最新发布的 tag（在临时 worktree 里检出再构建，工作区没提交的改动不会混进去，装完删掉），`--current` 装工作区当前代码，`--device 片段` 只装匹配的设备；不动 `/Applications` 里的 Mac 版。
   - `desktop/scripts/release.sh`：发布，见下面「发布规则」（`--version X.Y.Z` 发成指定版本，只在用户要求时用）。
 - 不要手动走发布步骤、不要手动 `bump-version.sh`、不要手动打 tag。

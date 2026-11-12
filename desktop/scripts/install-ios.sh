@@ -8,6 +8,7 @@
 #   两个选项可以一起用。
 #
 # 默认装最新发布版：在临时 worktree 里检出那个 tag 再构建，工作区里没提交的改动不会混进去；装完删掉 worktree。
+# 构建复用工作区的 ios/build（以后装得快），日志在 ${TMPDIR:-/tmp}/install-device.log。
 # 只装手机、不动 /Applications 里的 Mac 版。和 install-local.sh / release.sh 共用一把锁，同时跑会排队。
 # 需要：Xcode（默认 /Applications/Xcode-27.2.0.app）、签名团队 ID（ios/ShiJing/Local.xcconfig，见 ios/README.md）、
 # 设备解锁并信任这台电脑、开了开发者模式。
@@ -50,4 +51,7 @@ git worktree add -q --detach "$WT" "$TAG" || exit 1
 [[ -f ios/ShiJing/Local.xcconfig ]] && command cp -f ios/ShiJing/Local.xcconfig "$WT/ios/ShiJing/"
 
 echo "装最新发布版 $TAG（第一次构建要一两分钟）…"
+# 派生数据复用工作区的 ios/build（增量构建，以后装得快）；日志放到 worktree 外面，这个 worktree 装完就删了
+export SHIJING_DERIVED_DIR="$ROOT/ios/build"
+export SHIJING_LOG_DIR="${TMPDIR:-/tmp}"
 SHIJING_IOS_DIR="$WT/ios" "$SCRIPTS/install-ios-device.sh"
