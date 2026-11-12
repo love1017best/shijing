@@ -90,7 +90,7 @@ struct WallActionButtons: View {
         Button(WallAction.save, systemImage: "square.and.arrow.down") {
             Task { await session.saveOriginal(wall) }
         }
-        .disabled(session.saving != nil)
+        .disabled(session.saving != nil || session.offline) // 要从电脑下载原文件，离线时做不了
         Divider()
         Button(WallAction.remove, systemImage: "minus.circle") {
             Task { await session.removeWallpaper(wall, exclude: false) }
@@ -214,7 +214,7 @@ struct ShareOriginalButton: View {
             }
             .font(.body.weight(.semibold)).frame(width: 36, height: 36)
         }
-        .disabled(loading)
+        .disabled(loading || session.offline) // 离线时下载不了原文件
         .accessibilityLabel("分享原图")
         .sheet(item: $file) { f in
             ActivitySheet(items: [f.url]).ignoresSafeArea()

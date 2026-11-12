@@ -296,6 +296,10 @@ final class RemoteSession {
 
     /// 从电脑下载原文件，原样存进相册（不重新编码，保留原分辨率和 EXIF）。
     func saveOriginal(_ w: Wallpaper) async {
+        guard connection == .live else {
+            actionError = "连不上电脑时不能存原图：原文件在电脑那边，等连上再试。"
+            return
+        }
         saving = w.name
         defer { saving = nil }
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)

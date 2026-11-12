@@ -449,7 +449,7 @@ struct WallPreview: View {
         } label: {
             Label(session.saving == w.name ? "正在下载…" : "存到相册", systemImage: "square.and.arrow.down").actionLabel(toolbar)
         }
-        .disabled(session.saving != nil)
+        .disabled(session.saving != nil || session.offline) // 要从电脑下载原文件，离线时做不了
         .accessibilityHint(WallAction.saveHint)
         Button {
             Task { await session.removeWallpaper(w, exclude: false) }
