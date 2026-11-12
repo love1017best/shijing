@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// 大图预览：左右滑翻看壁纸文件夹里的全部图片（首尾相接，和桌面一样），往下拖关闭，双指缩放，
-/// 底部缩略图条可以拖着快速找图，点顶部编号可以输入编号跳转。底栏三种操作，操作完停在原位置，看到的就是下一张。
+/// 大图预览：左右滑翻看壁纸文件夹里的全部图片（首尾相接，和桌面一样），双指缩放，
+/// 底部缩略图条可以拖着快速找图，点顶部编号可以输入编号跳转。
+/// 上下滑和系统相册一样（用户要求）：上滑拉出操作列表；列表开着时下滑收起列表并进入全屏（顶栏底栏都藏起来）；
+/// 列表没开时下滑（图跟着手指）关闭预览。操作完停在原位置，看到的就是下一张。
 ///
 /// 翻页是自己写的（只摆上一张、当前、下一张三页，跟着手指移动），不用 TabView(.page) / 分页 ScrollView：
 /// 首尾循环、缩放后单指平移、往下拖关闭都要和翻页抢同一个拖动手势，放在一起判断方向最省事。
@@ -11,9 +13,11 @@ struct WallPreview: View {
     @State private var current: String
     @State private var confirmDelete: Wallpaper?
     @State private var chrome = true
+    /// 底部的操作列表（文件名、原图路径、存到相册 / 移出 / 不再选 / 删除）：上滑拉出，下滑收起
+    @State private var panel = false
 
     // 拖动：一次拖动开头判断方向，之后不变
-    private enum Axis { case page, dismiss, pan, ignore }
+    private enum Axis { case page, dismiss, panel, pan, ignore }
     @State private var axis: Axis?
     @State private var dragX: CGFloat = 0
     @State private var dragY: CGFloat = 0
@@ -44,10 +48,16 @@ struct WallPreview: View {
     /// 翻页至少要拖的距离上限（见 finishPage）
     private static let pageDistance: CGFloat = 80
     private static let maxScale: CGFloat = 5
+    /// 上滑拉出 / 下滑收起操作列表要拖的距离
+    private static let panelDistance: CGFloat = 40
 
     init(session: RemoteSession, startName: String) {
         self.session = session
         _current = State(initialValue: startName)
+        #if DEBUG
+        // 截图用：-demoPanel 打开时直接拉出操作列表
+        _panel = State(initialValue: ProcessInfo.processInfo.arguments.contains("-demoPanel"))
+        #endif
     }
 
     private var walls: [Wallpaper] { session.walls }
@@ -70,7 +80,12 @@ struct WallPreview: View {
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).midX } action: { screenMidX = $0 }
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { doubleTap() }
-            .onTapGesture { withAnimation(.easeOut(duration: 0.2)) { chrome.toggle() } }
+            .onTapGesture {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    chrome.toggle()
+                    if !chrome { panel = false }
+                }
+            }
             .simultaneousGesture(dragGesture(size))
             .simultaneousGesture(magnifyGesture(size))
         }
@@ -180,8 +195,10 @@ struct WallPreview: View {
                         axis = .pan
                     } else if abs(t.width) > abs(t.height) {
                         axis = .page
+                    } else if t.height < 0 {
+                        axis = panel ? .ignore : .panel // 上滑：拉出操作列表
                     } else {
-                        axis = t.height > 0 ? .dismiss : .ignore
+                        axis = panel ? .panel : .dismiss // 下滑：先收起列表，列表没开才关闭预览
                     }
                 }
                 switch axis {
@@ -215,6 +232,17 @@ struct WallPreview: View {
                         dismiss()
                     } else {
                         withAnimation(.spring(duration: 0.3)) { dragY = 0 }
+                    }
+                case .panel:
+                    let h = v.translation.height, p = v.predictedEndTranslation.height
+                    withAnimation(.spring(duration: 0.35)) {
+                        if !panel, h < -Self.panelDistance || p < -Self.panelDistance * 3 {
+                            panel = true
+                            chrome = true
+                        } else if panel, h > Self.panelDistance || p > Self.panelDistance * 3 {
+                            panel = false
+                            chrome = false // 收起列表直接全屏，再下滑才关闭
+                        }
                     }
                 case .pan:
                     guard !pinching else { return }
@@ -358,23 +386,41 @@ struct WallPreview: View {
 
     private func bottomBar(_ w: Wallpaper) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            // 把手：提示可以上滑，点它也能开关（VoiceOver 用户没法靠滑动）
+            Button {
+                withAnimation(.spring(duration: 0.35)) { panel.toggle() }
+            } label: {
+                Capsule().fill(.secondary).frame(width: 36, height: 5)
+                    .frame(maxWidth: .infinity).padding(.vertical, 2)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, -6)
+            .accessibilityLabel(panel ? "收起操作" : "显示操作")
             FilmStrip(session: session, current: current, screenMidX: screenMidX) { go(to: $0) }
                 .padding(.horizontal, -16) // 缩略图条撑满整行
-            VStack(alignment: .leading, spacing: 2) {
-                Text(w.name).font(.subheadline.bold()).lineLimit(1).truncationMode(.middle)
-                Text(w.hasSource ? "原图：\(w.source ?? "")" : "原图：没有记录（之前的版本换上的），只能移出")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
+            if panel {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(w.name).font(.subheadline.bold()).lineLimit(1).truncationMode(.middle)
+                        Text(w.hasSource ? "原图：\(w.source ?? "")" : "原图：没有记录（之前的版本换上的），只能移出")
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
+                    }
+                    if session.state?.running == true {
+                        Label("正在换壁纸，等换完再整理", systemImage: "hourglass").font(.footnote).foregroundStyle(.secondary)
+                    }
+                    // 按宽度挑：一排普通按钮 → 一排小号按钮 → 工具栏式（图标在上、小字在下，四列平分，和相册底栏一样）。
+                    // 不再竖着排成四行（竖屏时太占高度，用户嫌）：底栏越矮，完整显示的图越大
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { actionButtons(w) }.buttonStyle(.bordered)
+                        HStack(spacing: 6) { actionButtons(w) }.buttonStyle(.bordered).controlSize(.small)
+                        HStack(spacing: 0) { actionButtons(w, toolbar: true) }
+                            .buttonStyle(.borderless)
+                            .labelStyle(ToolbarLabelStyle())
+                    }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            if session.state?.running == true {
-                Label("正在换壁纸，等换完再整理", systemImage: "hourglass").font(.footnote).foregroundStyle(.secondary)
-            }
-            // 先试一排放下（外屏窄，换小号按钮），实在放不下才竖着排：底栏越矮，完整显示的图越大
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { actionButtons(w) }
-                HStack(spacing: 6) { actionButtons(w) }.controlSize(.small)
-                VStack(alignment: .leading, spacing: 8) { actionButtons(w) }
-            }
-            .buttonStyle(.bordered)
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -382,19 +428,20 @@ struct WallPreview: View {
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { bottomBarTop = $0 }
     }
 
+    /// toolbar：工具栏式，每个按钮平分宽度、文字可以缩小
     @ViewBuilder
-    private func actionButtons(_ w: Wallpaper) -> some View {
+    private func actionButtons(_ w: Wallpaper, toolbar: Bool = false) -> some View {
         Button {
             Task { await session.saveOriginal(w) }
         } label: {
-            Label(session.saving == w.name ? "正在下载…" : "存到相册", systemImage: "square.and.arrow.down").fixedSize()
+            Label(session.saving == w.name ? "正在下载…" : "存到相册", systemImage: "square.and.arrow.down").actionLabel(toolbar)
         }
         .disabled(session.saving != nil)
         .accessibilityHint(WallAction.saveHint)
         Button {
             Task { await session.removeWallpaper(w, exclude: false) }
         } label: {
-            Label("移出", systemImage: "minus.circle").fixedSize()
+            Label("移出", systemImage: "minus.circle").actionLabel(toolbar)
         }
         .disabled(organizeDisabled)
         .accessibilityHint(WallAction.removeHint)
@@ -402,14 +449,14 @@ struct WallPreview: View {
             Button {
                 Task { await session.removeWallpaper(w, exclude: true) }
             } label: {
-                Label("不再选它", systemImage: "nosign").fixedSize()
+                Label("不再选它", systemImage: "nosign").actionLabel(toolbar)
             }
             .disabled(organizeDisabled)
             .accessibilityHint(WallAction.excludeHint)
             Button(role: .destructive) {
                 confirmDelete = w
             } label: {
-                Label("删除原图…", systemImage: "trash").fixedSize()
+                Label("删除原图…", systemImage: "trash").actionLabel(toolbar)
             }
             .disabled(organizeDisabled)
         }
@@ -546,5 +593,28 @@ private struct FilmStrip: View {
         .contentMargins(.trailing, width - mid - Self.thumb.width / 2, for: .scrollContent)
         .scrollTargetBehavior(.viewAligned)
         .scrollPosition(id: $pos, anchor: UnitPoint(x: width > 0 ? mid / width : 0.5, y: 0.5))
+    }
+}
+
+/// 工具栏式按钮的标签：图标在上、小字在下。
+struct ToolbarLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(spacing: 4) {
+            configuration.icon.font(.title3)
+            configuration.title.font(.caption2).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private extension View {
+    /// 一排按钮时标签保持原宽（不换行）；工具栏式时撑满平分的那一列
+    @ViewBuilder
+    func actionLabel(_ toolbar: Bool) -> some View {
+        if toolbar {
+            frame(maxWidth: .infinity).contentShape(Rectangle())
+        } else {
+            fixedSize()
+        }
     }
 }
