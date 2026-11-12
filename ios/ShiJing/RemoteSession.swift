@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import Photos
+import Network
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -38,6 +39,11 @@ final class RemoteSession {
 
     private let store: MacStore
     private var task: Task<Void, Never>?
+    /// 用户切到后台时 pause，回前台再 start：这期间网络变了也别自己重连
+    private var paused = false
+    /// 手机自己的网络断了（飞行模式、关了 Wi‑Fi）：不用等事件流报错，立刻显示离线
+    private let pathMonitor = NWPathMonitor()
+    private var networkDown = false
     /// 上次把快照写到磁盘的时间（运行中状态更新很密，最多 5 秒写一次）
     private var lastSnapshotSave = Date.distantPast
     /// 离线时点的「移出 / 不再选」，连上电脑后自动补上（存在 UserDefaults 里，按 Mac 分开）
@@ -57,6 +63,42 @@ final class RemoteSession {
             snapshotAt = snap.at
         }
         queued = Self.loadQueue(macID.uuidString)
+        #if DEBUG
+        if Self.demoMode != nil { return }
+        #endif
+        // 系统网络状态变了立刻反映到连接状态：飞行模式、关掉 Wi‑Fi 时事件流可能要等很久才报错
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let ok = path.status == .satisfied
+            Task { @MainActor [weak self] in self?.networkChanged(ok) }
+        }
+        pathMonitor.start(queue: .global(qos: .utility))
+    }
+
+    deinit {
+        pathMonitor.cancel()
+    }
+
+    /// 手机的网络状态变了：断了就立刻显示离线并停掉卡住的事件流；恢复后重新连。
+    private func networkChanged(_ ok: Bool) {
+        if ok {
+            guard networkDown else { return }
+            networkDown = false
+            if paused { return } // 后台时不主动连，回前台再 start
+            guard !isUnpaired else { return }
+            connection = .connecting
+            start()
+            return
+        }
+        networkDown = true
+        guard !isUnpaired else { return }
+        connection = .offline("手机没有连上网络。")
+        task?.cancel()
+        task = nil
+    }
+
+    private var isUnpaired: Bool {
+        if case .unpaired = connection { return true }
+        return false
     }
 
     func client() throws -> APIClient {
@@ -65,12 +107,14 @@ final class RemoteSession {
 
     /// 开始（或重新开始）保持连接。App 回到前台时调用。
     func start() {
+        paused = false
         task?.cancel()
         task = Task { await loop() }
     }
 
     /// App 进入后台时断开，回前台再连。
     func pause() {
+        paused = true
         task?.cancel()
         task = nil
     }
