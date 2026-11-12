@@ -46,6 +46,18 @@ final class ImageStore {
     private init() {
         cache.countLimit = 400
         cache.totalCostLimit = 160 << 20
+        Self.prepareDiskDir()
+    }
+
+    /// 缓存目录建好并排除出 iCloud / 电脑备份：这里可能有十几 GB 的图，不该进备份。
+    private nonisolated static func prepareDiskDir() {
+        guard let dir = diskDir else { return }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        var u = dir
+        var v = URLResourceValues()
+        v.isExcludedFromBackup = true
+        try? u.setResourceValues(v)
     }
 
     private func key(_ base: URL, _ name: String, _ kind: ImageKind) -> String {

@@ -623,6 +623,7 @@ struct ExcludedView: View {
         do {
             withAnimation { items = nil == paths ? [] : items?.filter { !paths!.contains($0.path) } }
             items = try await session.client().restoreExcluded(paths)
+            Task { await session.refreshRecordsCache() } // 名单变了，离线时看的那份也跟着更新
         } catch {
             session.actionError = RemoteSession.describe(error)
             await load()

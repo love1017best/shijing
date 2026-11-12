@@ -52,13 +52,19 @@ struct WallPreview: View {
     private static let maxScale: CGFloat = 5
     /// 上滑拉出 / 下滑收起操作列表要拖的距离
     private static let panelDistance: CGFloat = 40
+    /// 操作列表开着还是收着：关预览时记住，下次打开还是上次的样子（用户要求，别每次都要再上滑一次）
+    private static let panelOpenKey = "previewPanelOpen"
 
     init(session: RemoteSession, startName: String) {
         self.session = session
         _current = State(initialValue: startName)
+        let remembered = UserDefaults.standard.bool(forKey: Self.panelOpenKey)
+        _panel = State(initialValue: remembered)
         #if DEBUG
         // 截图用：-demoPanel 打开时直接拉出操作列表，-demoFullscreen 直接进全屏
-        _panel = State(initialValue: ProcessInfo.processInfo.arguments.contains("-demoPanel"))
+        if ProcessInfo.processInfo.arguments.contains("-demoPanel") {
+            _panel = State(initialValue: true)
+        }
         if ProcessInfo.processInfo.arguments.contains("-demoFullscreen") {
             _chrome = State(initialValue: false)
         }
@@ -86,10 +92,8 @@ struct WallPreview: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { doubleTap() }
             .onTapGesture {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    chrome.toggle()
-                    if !chrome { panel = false }
-                }
+                // 点一下藏起 / 显示顶栏和底栏。底部的操作列表开着的话，再点回来还是开着（别顺手收掉）
+                withAnimation(.easeOut(duration: 0.2)) { chrome.toggle() }
             }
             .simultaneousGesture(dragGesture(size))
             .simultaneousGesture(magnifyGesture(size))
@@ -131,6 +135,8 @@ struct WallPreview: View {
             go(to: new[min(oldIdx, new.count - 1)].name)
         }
         .sensoryFeedback(.success, trigger: session.walls.count) { old, new in new < old }
+        // 关掉预览：记住操作列表是开着还是收着，下次打开还是这个样子
+        .onDisappear { UserDefaults.standard.set(panel, forKey: Self.panelOpenKey) }
     }
 
     // MARK: 翻页

@@ -63,7 +63,8 @@ final class MacStore {
     func remove(_ id: SavedMac.ID) {
         macs.removeAll { $0.id == id }
         Keychain.delete(id)
-        OfflineStore.shared.clear(id.uuidString) // 离线快照也一起清掉
+        OfflineStore.shared.clear(id.uuidString) // 离线快照和记录缓存也一起清掉
+        RemoteSession.clearQueue(id) // 还没补上的离线操作也不用留了
         if selectedID == id { selectedID = macs.first?.id }
         save()
     }
