@@ -167,6 +167,11 @@ struct APIClient: Sendable {
         return try await send(request("POST", "api/excluded/restore", body: body), as: ExcludedR.self).items
     }
 
+    /// 加进「不再选」名单：手机离线时点的「不再选它」连上以后补上，不需要那张壁纸还在这一批里。
+    func addExcluded(_ paths: [String]) async throws -> [ExcludedItem] {
+        try await send(request("POST", "api/excluded/add", body: ["paths": paths]), as: ExcludedR.self).items
+    }
+
     func deletions() async throws -> DeletionList {
         try await send(request("GET", "api/deletions"), as: DeletionList.self)
     }

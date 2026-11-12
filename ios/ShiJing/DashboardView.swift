@@ -251,6 +251,10 @@ struct DashboardView: View {
                             Text("离线，显示的是上次同步的壁纸").font(.subheadline.bold())
                             Text("数据是 \(Self.ago(at))同步的，正在重连。图片只有缓存过的能看。")
                                 .font(.footnote).foregroundStyle(.secondary)
+                            if !session.queued.isEmpty {
+                                Text("离线时记下的 \(session.queued.count) 项操作，连上电脑后自动补上（删除原图要等连上再做）。")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
                         } else {
                             Text("连接已断开，正在重连").font(.subheadline.bold())
                             Text(msg).font(.footnote).foregroundStyle(.secondary)

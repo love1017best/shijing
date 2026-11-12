@@ -458,7 +458,7 @@ struct WallPreview: View {
             } label: {
                 Label("删除原图…", systemImage: "trash").actionLabel(toolbar)
             }
-            .disabled(organizeDisabled)
+            .disabled(organizeDisabled || session.offline) // 离线时不排队删原图，等连上再做
         }
         if session.acting == w.name {
             ProgressView()

@@ -144,12 +144,11 @@ final class ImageStore {
     func seedDiskCache(rev: String, names: [String], hero: String?) {
         demo = false
         #if os(iOS) // NSImage 没有 jpegData，macOS 上的类型检查不用这段
+        // 只种网格里看得见的那几张：这一步是同步的，种太多启动会卡好几秒
         for n in names {
-            for kind in [ImageKind.thumb, .hero] {
-                guard let img = Self.demoImage(n, large: kind.isLarge),
-                      let data = img.jpegData(compressionQuality: 0.7) else { continue }
-                Self.writeDisk(rev, n, kind, data)
-            }
+            guard let img = Self.demoImage(n, large: false),
+                  let data = img.jpegData(compressionQuality: 0.7) else { continue }
+            Self.writeDisk(rev, n, .thumb, data)
         }
         if let hero, let img = Self.demoImage(hero, large: true),
            let data = img.jpegData(compressionQuality: 0.7) {

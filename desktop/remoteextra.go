@@ -59,6 +59,7 @@ func (rs *remoteServer) extraRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/undo", rs.authed(rs.handleUndo))
 	mux.HandleFunc("GET /api/excluded", rs.authed(rs.handleExcluded))
 	mux.HandleFunc("POST /api/excluded/restore", rs.authed(rs.handleExcludedRestore))
+	mux.HandleFunc("POST /api/excluded/add", rs.authed(rs.handleExcludedAdd))
 	mux.HandleFunc("GET /api/deletions", rs.authed(rs.handleDeletions))
 	mux.HandleFunc("GET /api/wallpapers/{name}/original", rs.authed(rs.handleWallOriginal))
 }
@@ -204,6 +205,44 @@ func (rs *remoteServer) handleExcluded(w http.ResponseWriter, r *http.Request, _
 			list = append(list, remoteExcluded{Path: p, Display: tildify(p)})
 		}
 	}) {
+		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
+		return
+	}
+	if list == nil {
+		list = []remoteExcluded{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+// handleExcludedAdd 把原图加进「不再选」名单：手机离线时点了「不再选它」，
+// 连上以后一次性补上——不需要那张壁纸还在这一批里（路径对以后的采样一直有效）。
+func (rs *remoteServer) handleExcludedAdd(w http.ResponseWriter, r *http.Request, dev string) {
+	var body struct {
+		Paths []string `json:"paths"`
+	}
+	if err := readBody(r, &body); err != nil || len(body.Paths) == 0 {
+		writeErr(w, http.StatusBadRequest, "请求格式不对")
+		return
+	}
+	var list []remoteExcluded
+	ok := rs.onMain(func() {
+		a := rs.a
+		added := 0
+		for _, p := range body.Paths {
+			if p == "" || slices.Contains(a.cfg.Excluded, p) {
+				continue
+			}
+			a.cfg.Excluded = append(a.cfg.Excluded, p)
+			added++
+		}
+		if added > 0 {
+			a.appendLog("📱 「" + dev + "」离线时记下的 " + strconv.Itoa(added) + " 张「不再选」已补上")
+		}
+		for _, p := range a.cfg.Excluded {
+			list = append(list, remoteExcluded{Path: p, Display: tildify(p)})
+		}
+	})
+	if !ok {
 		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
 		return
 	}

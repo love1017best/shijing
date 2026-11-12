@@ -40,6 +40,9 @@ final class RemoteSession {
     private var task: Task<Void, Never>?
     /// 上次把快照写到磁盘的时间（运行中状态更新很密，最多 5 秒写一次）
     private var lastSnapshotSave = Date.distantPast
+    /// 离线时点的「移出 / 不再选」，连上电脑后自动补上（存在 UserDefaults 里，按 Mac 分开）
+    private(set) var queued: [OfflineAction] = []
+    private var flushing = false
 
     init(mac: SavedMac, store: MacStore) {
         self.mac = mac
@@ -53,6 +56,7 @@ final class RemoteSession {
             heroName = snap.hero
             snapshotAt = snap.at
         }
+        queued = Self.loadQueue(macID.uuidString)
     }
 
     func client() throws -> APIClient {
@@ -108,6 +112,7 @@ final class RemoteSession {
             if state == nil { connection = .connecting }
             do {
                 for try await s in try client().events() {
+                    let wasLive = connection == .live
                     RunNotifier.observe(old: state, new: s, mac: mac.name)
                     if state?.running == true, !s.running { WidgetReload.all() }
                     state = s
@@ -118,6 +123,7 @@ final class RemoteSession {
                     if !s.running, bgTask != .invalid { endBackground(disconnect: true); return }
                     #endif
                     connection = .live
+                    if !wasLive, !queued.isEmpty { Task { await flushOfflineActions() } }
                     if s.wallsRev != wallsRev { Task { await refreshWalls() } }
                     delay = 1
                     failures = 0
@@ -298,16 +304,21 @@ final class RemoteSession {
     /// 移出壁纸文件夹；exclude 时以后的采样也跳过这张原图。成功返回 true。
     @discardableResult
     func removeWallpaper(_ w: Wallpaper, exclude: Bool) async -> Bool {
-        await wallAct(w) { try await $0.removeWallpaper(w.name, exclude: exclude) }
+        await wallAct(w, kind: exclude ? .exclude : .remove) { try await $0.removeWallpaper(w.name, exclude: exclude) }
     }
 
-    /// 删除图库里的原图（界面上已经二次确认过）。
+    /// 删除图库里的原图（界面上已经二次确认过）。离线时不能排队（不可撤销，等连上再做），
+    /// 手机误触一下、电脑半夜连上网就把 NAS 上的原图删了，后果太重。
     @discardableResult
     func deleteOriginal(_ w: Wallpaper) async -> Bool {
-        await wallAct(w) { try await $0.deleteOriginal(w.name) }
+        guard connection == .live else {
+            actionError = "连不上电脑时不能删除原图（不可撤销）。可以先移出或者「不再选它」，连上电脑后自动补上。"
+            return false
+        }
+        return await wallAct(w, kind: .remove) { try await $0.deleteOriginal(w.name) }
     }
 
-    private func wallAct(_ w: Wallpaper, _ op: (APIClient) async throws -> RemoteState) async -> Bool {
+    private func wallAct(_ w: Wallpaper, kind: OfflineAction.Kind, _ op: (APIClient) async throws -> RemoteState) async -> Bool {
         acting = w.name
         defer { acting = nil }
         #if DEBUG
@@ -316,6 +327,10 @@ final class RemoteSession {
             return true
         }
         #endif
+        if connection != .live {
+            enqueue(kind, w)
+            return true
+        }
         do {
             state = try await op(client())
             // 先在本地去掉，不用等重新拉列表
@@ -329,6 +344,96 @@ final class RemoteSession {
             actionError = Self.describe(error)
         }
         return false
+    }
+
+    // MARK: 离线时记下的整理（连上后补上）
+
+    /// 离线时点的一张整理操作：只记「移出」「不再选」，删除原图离线时不让做。
+    struct OfflineAction: Codable, Identifiable, Equatable {
+        enum Kind: String, Codable { case remove, exclude }
+        var id = UUID()
+        var kind: Kind
+        var name: String
+        var source: String?
+        var at = Date()
+    }
+
+    var offline: Bool { connection != .live }
+
+    #if DEBUG
+    /// 截图用（-demo -demoOffline）：塞两条离线操作，看提示是什么样
+    func seedQueuedForDemo() {
+        queued = [
+            OfflineAction(kind: .remove, name: "风景-京都-0003.jpg", source: nil),
+            OfflineAction(kind: .exclude, name: "风景-冰岛-0004.jpg", source: "/Volumes/Media0/风景/冰岛/0004.jpg"),
+        ]
+    }
+    #endif
+
+    private static func queueKey(_ id: String) -> String { "offlineActions." + id }
+
+    private static func loadQueue(_ id: String) -> [OfflineAction] {
+        guard let data = UserDefaults.standard.data(forKey: queueKey(id)) else { return [] }
+        return (try? JSONDecoder().decode([OfflineAction].self, from: data)) ?? []
+    }
+
+    private func saveQueue() {
+        if queued.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.queueKey(macID.uuidString))
+        } else if let data = try? JSONEncoder().encode(queued) {
+            UserDefaults.standard.set(data, forKey: Self.queueKey(macID.uuidString))
+        }
+    }
+
+    private func enqueue(_ kind: OfflineAction.Kind, _ w: Wallpaper) {
+        guard !queued.contains(where: { $0.name == w.name && $0.kind == kind }) else { return }
+        queued.append(OfflineAction(kind: kind, name: w.name, source: w.source))
+        saveQueue()
+        // 本地先去掉，界面跟着变；连上电脑后再真的移出
+        walls.removeAll { $0.name == w.name }
+        remember(wallsChanged: true)
+        notice = kind == .exclude ? "已记下：连上电脑后移出并不再选它" : "已记下：连上电脑后移出"
+    }
+
+    /// 连上以后把离线时记下的操作补上：「不再选」直接加进名单（和那张壁纸还在不在这一批无关），
+    /// 「移出」的那张如果这一批已经换掉了就算过期。网络又断了的话剩下的留着下次。
+    private func flushOfflineActions() async {
+        guard !flushing, !queued.isEmpty, connection == .live else { return }
+        flushing = true
+        defer { flushing = false }
+        var rest: [OfflineAction] = []
+        var applied = 0
+        var expired = 0
+        let list = queued
+        for (i, act) in list.enumerated() {
+            do {
+                switch act.kind {
+                case .exclude:
+                    guard let src = act.source, !src.isEmpty else { expired += 1; continue }
+                    _ = try await client().addExcluded([src])
+                    applied += 1
+                case .remove:
+                    guard walls.contains(where: { $0.name == act.name }) else { expired += 1; continue }
+                    _ = try await client().removeWallpaper(act.name, exclude: false)
+                    applied += 1
+                }
+            } catch APIError.server(let status, _) where status == 404 || status == 409 {
+                expired += 1
+            } catch APIError.unauthorized(let msg) {
+                connection = .unpaired(msg)
+                rest.append(contentsOf: list[i...])
+                break
+            } catch {
+                rest.append(contentsOf: list[i...]) // 又断了：留着下次
+                break
+            }
+        }
+        queued = rest
+        saveQueue()
+        if applied > 0 {
+            await refreshWalls()
+            notice = expired > 0 ? "已补上 \(applied) 项离线操作，\(expired) 项已经过期" : "已补上 \(applied) 项离线操作"
+        }
     }
 
     private func act(_ op: (APIClient) async throws -> RemoteState) async {
@@ -391,7 +496,8 @@ extension RemoteSession {
             s.connection = .offline("连不上这台 Mac：确认它没有睡眠、拾景开着并打开了「允许手机遥控」，手机和电脑在同一个网络里。")
             s.snapshotAt = Date().addingTimeInterval(-3 * 3600 - 2400)
             // 顺便把演示图写进磁盘缓存，让「离线也能看图」这条路径真的走一遍（读的是磁盘，不是内存里的演示图）
-            ImageStore.shared.seedDiskCache(rev: "demo", names: s.walls.prefix(48).map(\.name), hero: s.heroName)
+            ImageStore.shared.seedDiskCache(rev: "demo", names: s.walls.prefix(24).map(\.name), hero: s.heroName)
+            s.seedQueuedForDemo()
         } else {
             ImageStore.shared.demo = true
         }

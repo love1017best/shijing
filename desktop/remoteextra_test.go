@@ -91,6 +91,16 @@ func TestRemoteUndoAndExcluded(t *testing.T) {
 	if code, _ := h.do(t, "POST", "/api/excluded/restore", tok, map[string]any{}); code != 400 {
 		t.Fatalf("空请求 = %d", code)
 	}
+
+	// 手机离线时记下的「不再选」：连上以后补上，不需要那张壁纸还在这一批里
+	off := filepath.Join(lib, "离线时点的.jpg")
+	code2, data2 := h.do(t, "POST", "/api/excluded/add", tok, map[string]any{"paths": []string{off, off}})
+	if code2 != 200 || !slices.Contains(h.cfg.Excluded, off) || len(data2["items"].([]any)) != 1 {
+		t.Fatalf("补不再选 = %d %v / %v", code2, data2, h.cfg.Excluded)
+	}
+	if code3, _ := h.do(t, "POST", "/api/excluded/add", tok, map[string]any{}); code3 != 400 {
+		t.Fatalf("补不再选的空请求 = %d", code3)
+	}
 }
 
 func TestRemoteLogDeletionsOriginal(t *testing.T) {

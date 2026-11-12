@@ -104,7 +104,7 @@ struct WallActionButtons: View {
             Button(WallAction.delete, systemImage: "trash", role: .destructive) {
                 confirmDelete = wall
             }
-            .disabled(busy)
+            .disabled(busy || session.offline) // 离线时删除原图不排队，等连上再做
         }
     }
 }
