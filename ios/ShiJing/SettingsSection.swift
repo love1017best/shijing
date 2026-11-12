@@ -62,23 +62,38 @@ struct SettingsPage: View {
 
     var body: some View {
         MacPage(session: session, title: "设置") { state in
-            if let set = state.settings {
-                editable(set, state)
+            #if DEBUG
+            // 截图用：-demoOfflineCache 只摆离线这一组（设置页太长，模拟器里不好滚到最下面）
+            if ProcessInfo.processInfo.arguments.contains("-demoOfflineCache") {
+                offlineSection
+                aboutSection(state)
             } else {
-                Section {
-                    LabeledContent("每次换", value: "\(state.sampleCount) 张")
-                } footer: {
-                    Text("电脑上的拾景版本较旧，要改设置请在电脑上改。")
-                }
+                settingsContent(state)
             }
-            offlineSection
-            aboutSection(state)
+            #else
+            settingsContent(state)
+            #endif
         }
         .toolbar {
             if session.savingSettings {
                 ToolbarItem(placement: .automatic) { ProgressView() } // 正在把改动发给电脑
             }
         }
+    }
+
+    @ViewBuilder
+    private func settingsContent(_ state: RemoteState) -> some View {
+        if let set = state.settings {
+            editable(set, state)
+        } else {
+            Section {
+                LabeledContent("每次换", value: "\(state.sampleCount) 张")
+            } footer: {
+                Text("电脑上的拾景版本较旧，要改设置请在电脑上改。")
+            }
+        }
+        offlineSection
+        aboutSection(state)
     }
 
     @ViewBuilder
@@ -135,14 +150,14 @@ struct SettingsPage: View {
         }
     }
 
-    /// 离线：图片缓存占了多少，可以清。和电脑上的设置无关，旧版桌面端也有。
+    /// 离线：图片缓存占了多少、上限多少，可以暂停 / 继续 / 清空。和电脑上的设置无关，旧版桌面端也有。
     private var offlineSection: some View {
         Section {
-            OfflineCacheRow()
+            OfflineCacheRow(session: session)
         } header: {
             Text("离线")
         } footer: {
-            Text("连不上电脑时，概览和壁纸显示的是上次同步的内容：缩略图整批存在手机上，大图看过哪张存哪张。换一批后上一批的缓存会自动删掉。")
+            Text("连不上电脑时，概览和壁纸显示的是上次同步的内容：缩略图和整批 2048 宽的预览图都缓存在手机上，受上面的上限限制；换一批后上一批的缓存会自动删掉。")
         }
     }
 
@@ -443,8 +458,15 @@ enum AppVersion {
 }
 
 /// 离线图片缓存占了多少，可以一键清掉。大小在后台算，界面先显示进度圈。
+/// 离线缓存的几行：占了多少、上限多少、整批缓存进度，可以暂停 / 继续 / 清除。
+/// 这些都是手机本地的设置（UserDefaults），不用连电脑也能改。
 private struct OfflineCacheRow: View {
+    let session: RemoteSession
     @State private var size: Int64?
+    @State private var cached = 0
+    @AppStorage(ImageStore.cacheLimitKey) private var limitGB = ImageStore.defaultCacheLimitGB
+
+    private var store: ImageStore { .shared }
 
     var body: some View {
         LabeledContent("图片缓存") {
@@ -456,17 +478,70 @@ private struct OfflineCacheRow: View {
                     ProgressView().controlSize(.small)
                 }
                 Button("清除") {
-                    ImageStore.shared.clearDiskCache()
+                    store.clearDiskCache()
                     size = 0
+                    cached = 0
                 }
                 .disabled(size == nil || size == 0)
             }
         }
-        .task { await load() }
+        .task { refresh() }
+        .onChange(of: store.prefetching) { _, running in
+            if !running { refresh() }
+        }
+        .onChange(of: store.prefetchDone) { _, _ in
+            // 存的过程中不用每张都数一遍文件，隔一阵更新一次
+            if store.prefetchDone % 20 == 0 { refresh() }
+        }
+        Stepper(value: $limitGB, in: 1...50) {
+            Text("缓存上限 \(limitGB) GB")
+        }
+        .onChange(of: limitGB) { _, _ in
+            guard !session.offline, !session.walls.isEmpty else { return }
+            store.prefetchAll(session)
+            refresh()
+        }
+        HStack {
+            status
+            Spacer()
+            Button(store.prefetching ? "暂停" : "补齐缓存") {
+                if store.prefetching {
+                    store.pausePrefetch()
+                } else {
+                    store.prefetchAll(session)
+                }
+                refresh()
+            }
+            .disabled(session.offline || session.walls.isEmpty)
+        }
     }
 
-    private func load() async {
-        let n = await Task.detached(priority: .utility) { ImageStore.diskUsage() }.value
-        size = n
+    @ViewBuilder
+    private var status: some View {
+        if store.prefetching {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("正在缓存 \(store.prefetchDone) / \(store.prefetchTotal)")
+            }
+            .foregroundStyle(.secondary)
+        } else if store.prefetchHitLimit {
+            Text("已到上限，\(max(0, store.prefetchTotal - store.prefetchDone)) 张没缓存")
+                .foregroundStyle(.secondary)
+        } else if store.prefetchPaused {
+            Text("已暂停").foregroundStyle(.secondary)
+        } else {
+            Text("已缓存 \(cached) / \(session.walls.count) 张").foregroundStyle(.secondary)
+        }
+    }
+
+    private func refresh() {
+        let rev = session.wallsRev ?? ""
+        Task {
+            let (n, c) = await Task.detached(priority: .utility) {
+                (ImageStore.diskUsage(), rev.isEmpty ? 0 : ImageStore.cachedCount(rev: rev, kind: .image))
+            }.value
+            size = n
+            cached = c
+        }
     }
 }

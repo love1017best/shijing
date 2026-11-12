@@ -490,6 +490,8 @@ private struct PreviewPage: View {
     var scale: CGFloat = 1
     var offset: CGSize = .zero
     @State private var image: PlatformImage?
+    /// 加载过了（成功或失败）：失败时给一句明确的话，不再一直转圈
+    @State private var tried = false
 
     var body: some View {
         ZStack {
@@ -501,6 +503,16 @@ private struct PreviewPage: View {
                     .resizable()
                     .frame(width: s.width * scale, height: s.height * scale)
                     .offset(x: offset.width, y: offset.height + shift)
+            } else if tried {
+                VStack(spacing: 8) {
+                    Image(systemName: session.offline ? "icloud.slash" : "photo.badge.exclamationmark")
+                        .font(.largeTitle)
+                    Text(session.offline ? "这张还没缓存" : "读不了这张图").font(.headline)
+                    if session.offline {
+                        Text("连上电脑后整批图片会自动存到手机上").font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                .foregroundStyle(.secondary)
             } else {
                 ProgressView()
             }
@@ -508,9 +520,11 @@ private struct PreviewPage: View {
         .frame(width: size.width, height: size.height)
         .clipped()
         .task(id: wall.name) {
+            tried = false
             if ImageStore.shared.cached(session, wall.name, .image) == nil {
                 image = await ImageStore.shared.load(session, wall.name, .image)
             }
+            tried = true
         }
     }
 

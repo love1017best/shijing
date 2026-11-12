@@ -123,7 +123,11 @@ final class RemoteSession {
                     if !s.running, bgTask != .invalid { endBackground(disconnect: true); return }
                     #endif
                     connection = .live
-                    if !wasLive, !queued.isEmpty { Task { await flushOfflineActions() } }
+                    if !wasLive {
+                        if !queued.isEmpty { Task { await flushOfflineActions() } }
+                        // 又连上了：上一次没缓存完的接着补（已经存下的会跳过）；换了一批时 refreshWalls 会另起一轮
+                        ImageStore.shared.prefetchAll(self)
+                    }
                     if s.wallsRev != wallsRev { Task { await refreshWalls() } }
                     delay = 1
                     failures = 0
@@ -282,7 +286,7 @@ final class RemoteSession {
             heroName = list.hero
             remember(wallsChanged: true)
             ImageStore.groom(keepRev: list.rev) // 上一批的图片缓存整个删掉
-            ImageStore.shared.prefetchThumbs(self) // 这一批的缩略图存到磁盘，离线也能看
+            ImageStore.shared.prefetchAll(self) // 这一批的缩略图和预览图存到磁盘，离线也能看
         } catch {
             // 列表拉不到不影响别的，下次状态推送再试
         }

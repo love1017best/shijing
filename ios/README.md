@@ -69,7 +69,7 @@ cd ios && xcodegen
 | `WallpapersView.swift` / `WallPreview.swift` | 缩略图网格、撤销移出、分享原图 / 大图预览 |
 | `RemoteSession.swift` | 和一台 Mac 的连接：事件流（SSE）、断线重连、Mac 换 IP 后按 Bonjour 名重新找；运行中切到后台时多连一会儿；每次状态更新写一份离线快照 |
 | `OfflineStore.swift` | 离线快照：最后一次连上时的状态和壁纸列表（Application Support/拾景/offline），连不上时用它显示 |
-| `ImageStore.swift` | 图片的内存缓存 + 按批次（`walls_rev`）的磁盘缓存：缩略图整批预取、大图按需存，离线时从磁盘读；设置页的「离线」分组用它算占用和清除 |
+| `ImageStore.swift` | 图片的内存缓存 + 按批次（`walls_rev`）的磁盘缓存：缩略图和整批 2048 宽的预览图在连上时后台预取（受缓存上限限制，默认 10 GB），离线时从磁盘读；设置页的「离线」分组用它显示占用、进度和清除 |
 | `SigningExpiry.swift` | 免费签名到期时间 |
 | `AppShortcuts.swift` | Siri / 聚焦 / 操作按钮里直接能用的快捷指令 |
 | `Shared/APIClient.swift` / `Shared/Models.swift` | 接口客户端 / 数据结构（App 和小组件共用） |

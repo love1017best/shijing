@@ -11,9 +11,10 @@ typealias PlatformImage = NSImage
 /// 壁纸图片的内存缓存和加载：同一张同时只请求一次，缩略图和大图分开存。
 ///
 /// 下载下来的图还会按批次（`walls_rev`）写到磁盘，连不上 Mac 时图片也还看得见：
-/// 缩略图（360 宽）同步完一轮就整批预取，大图（2048 宽）看过哪张存哪张。
+/// 缩略图（360 宽）和整批大图（2048 宽）同步完一轮就在后台预取，受「缓存上限」限制（默认 10 GB）。
 /// 换了一批（rev 变了）就把上一批的缓存目录整个删掉，不会越积越多。
 @MainActor
+@Observable
 final class ImageStore {
     static let shared = ImageStore()
 
@@ -22,6 +23,25 @@ final class ImageStore {
     private var prefetchTask: Task<Void, Never>?
     /// 演示模式（Debug）：不请求网络，按文件名画一张渐变图
     var demo = false
+
+    // 整批缓存（设置页显示）
+    private(set) var prefetching = false
+    private(set) var prefetchDone = 0
+    private(set) var prefetchTotal = 0
+    /// 这一轮因为到了上限提前停了
+    private(set) var prefetchHitLimit = false
+    /// 用户手动暂停了整批缓存
+    private(set) var prefetchPaused = false
+
+    /// 缓存上限（GB），存在手机上，和电脑上的设置无关
+    static let cacheLimitKey = "offlineCacheLimitGB"
+    static let defaultCacheLimitGB = 10
+
+    /// 上限换成字节；没设过就是默认的 10 GB。
+    nonisolated static var cacheLimitBytes: Int64 {
+        let gb = UserDefaults.standard.integer(forKey: cacheLimitKey)
+        return Int64(gb > 0 ? gb : defaultCacheLimitGB) * 1_000_000_000
+    }
 
     private init() {
         cache.countLimit = 400
@@ -74,39 +94,73 @@ final class ImageStore {
 
     // MARK: 磁盘缓存
 
-    /// 把当前这批的缩略图（和横幅图）在后台整批存到磁盘：离线打开时网格里每张都能看。
-    /// 换一批时调用（上一次的预取会被取消）。
-    func prefetchThumbs(_ session: RemoteSession) {
+    /// 把当前这批的缩略图、横幅图和整批 2048 宽的预览图在后台存到磁盘：
+    /// 离线打开时网格和大图都能看。上限按「缓存上限」算，到了就不再往后存。
+    /// 换一批时调用（上一次的预取会被取消）；用户暂停过也照样重新开始（新一批了）。
+    func prefetchAll(_ session: RemoteSession) {
         #if DEBUG
         if demo { return }
         #endif
         guard let client = try? session.client(), let rev = session.wallsRev, !rev.isEmpty else { return }
         prefetchTask?.cancel()
-        // 缩略图整批都要（十几 MB）；横幅图单独一张大一点，也只取这一张
+        prefetchPaused = false
+        prefetchHitLimit = false
+        // 缩略图和横幅图排前面（十几 MB），网格里每张立刻有得看；再按上限存整批预览图
         var queue: [(String, ImageKind)] = session.walls.map { ($0.name, .thumb) }
         if let hero = session.heroName ?? session.walls.first?.name { queue.append((hero, .hero)) }
+        queue.append(contentsOf: session.walls.map { ($0.name, .image) })
+        prefetchTotal = session.walls.count // 进度按壁纸张数算（缩略图不算，它很快）
+        prefetchDone = 0
+        prefetching = true
         prefetchTask = Task {
-            await withTaskGroup(of: Void.self) { group in
+            var used = Self.diskUsage()
+            let limit = Self.cacheLimitBytes
+            var pending = queue
+            var hitLimit = false
+            await withTaskGroup(of: (ImageKind, Int64).self) { group in
                 // 同时最多 3 张，别把手机的网络和解码占满
-                for _ in 0..<3 {
-                    guard !queue.isEmpty else { break }
-                    let (n, kind) = queue.removeFirst()
-                    group.addTask { await Self.prefetchOne(client, rev, n, kind) }
+                let workers = 3
+                func addNext() -> Bool {
+                    guard !pending.isEmpty, !hitLimit else { return false }
+                    let (n, kind) = pending.removeFirst()
+                    group.addTask { (kind, await Self.prefetchOne(client, rev, n, kind)) }
+                    return true
                 }
-                while await group.next() != nil {
-                    if Task.isCancelled { group.cancelAll(); return }
-                    guard !queue.isEmpty else { continue }
-                    let (n, kind) = queue.removeFirst()
-                    group.addTask { await Self.prefetchOne(client, rev, n, kind) }
+                for _ in 0..<workers where addNext() {}
+                while let (kind, bytes) = await group.next() {
+                    if Task.isCancelled {
+                        group.cancelAll()
+                        prefetching = false
+                        return
+                    }
+                    if kind == .image { prefetchDone += 1 }
+                    used += bytes
+                    if used >= limit, !pending.isEmpty {
+                        // 到了上限：手上这几张存完就停，后面的不存了
+                        hitLimit = true
+                        pending.removeAll()
+                        prefetchHitLimit = true
+                    }
+                    _ = addNext()
                 }
             }
+            prefetching = false
         }
     }
 
-    private nonisolated static func prefetchOne(_ client: APIClient, _ rev: String, _ name: String, _ kind: ImageKind) async {
-        if readDisk(rev, name, kind) != nil { return }
-        guard let data = try? await client.imageData(name, kind: kind) else { return }
+    /// 暂停整批缓存（设置页）。再点「继续」会重新排队，已经存下的会跳过。
+    func pausePrefetch() {
+        prefetchTask?.cancel()
+        prefetchTask = nil
+        prefetching = false
+        prefetchPaused = true
+    }
+
+    private nonisolated static func prefetchOne(_ client: APIClient, _ rev: String, _ name: String, _ kind: ImageKind) async -> Int64 {
+        if readDisk(rev, name, kind) != nil { return 0 }
+        guard let data = try? await client.imageData(name, kind: kind) else { return 0 }
         writeDisk(rev, name, kind, data)
+        return Int64(data.count)
     }
 
     /// 换了一批：把不属于这一批的缓存目录删掉。启动读到快照时不要调（那一批可能正是离线要看的）。
@@ -131,8 +185,24 @@ final class ImageStore {
         return total
     }
 
+    /// 磁盘上这一批已经存了多少张某种图（设置页显示进度用）。
+    nonisolated static func cachedCount(rev: String, kind: ImageKind) -> Int {
+        guard let dir = diskDir, let folder = revFolder(rev) else { return 0 }
+        let path = dir.appending(path: folder, directoryHint: .isDirectory).path
+        let prefix = kind.rawValue + "-"
+        let items = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
+        return items.filter { $0.hasPrefix(prefix) }.count
+    }
+
     /// 清掉磁盘上的图片缓存（内存里的一起），下次连上电脑再慢慢补回来。
     func clearDiskCache() {
+        prefetchTask?.cancel()
+        prefetchTask = nil
+        prefetching = false
+        prefetchPaused = false
+        prefetchHitLimit = false
+        prefetchDone = 0
+        prefetchTotal = 0
         cache.removeAllObjects()
         guard let dir = Self.diskDir else { return }
         try? FileManager.default.removeItem(at: dir)
