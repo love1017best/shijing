@@ -2,8 +2,9 @@ import SwiftUI
 
 /// 大图预览：左右滑翻看壁纸文件夹里的全部图片（首尾相接，和桌面一样），双指缩放，
 /// 底部缩略图条可以拖着快速找图，点顶部编号可以输入编号跳转。
-/// 上下滑和系统相册一样（用户要求）：上滑拉出操作列表；列表开着时下滑收起列表并进入全屏（顶栏底栏都藏起来）；
-/// 列表没开时下滑（图跟着手指）关闭预览。操作完停在原位置，看到的就是下一张。
+/// 上下滑分两级（用户要求）：上滑一次拉出操作列表（顶栏和缩略图条都在），再上滑进入全屏（全部藏起来只剩图）；
+/// 全屏下滑回到常态（顶栏和缩略图条回来），列表开着时下滑也是回到常态，常态下滑（图跟着手指）才关闭预览。
+/// 缩略图条不会在收列表的时候莫名其妙消失。操作完停在原位置，看到的就是下一张。
 ///
 /// 翻页是自己写的（只摆上一张、当前、下一张三页，跟着手指移动），不用 TabView(.page) / 分页 ScrollView：
 /// 首尾循环、缩放后单指平移、往下拖关闭都要和翻页抢同一个拖动手势，放在一起判断方向最省事。
@@ -17,7 +18,8 @@ struct WallPreview: View {
     @State private var panel = false
 
     // 拖动：一次拖动开头判断方向，之后不变
-    private enum Axis { case page, dismiss, panel, pan, ignore }
+    /// levels：上下滑在三级之间移动——常态（顶栏 + 缩略图条）⇄ 操作列表 ⇄ 全屏，一次滑动走一级
+    private enum Axis { case page, dismiss, levels, pan, ignore }
     @State private var axis: Axis?
     @State private var dragX: CGFloat = 0
     @State private var dragY: CGFloat = 0
@@ -55,8 +57,11 @@ struct WallPreview: View {
         self.session = session
         _current = State(initialValue: startName)
         #if DEBUG
-        // 截图用：-demoPanel 打开时直接拉出操作列表
+        // 截图用：-demoPanel 打开时直接拉出操作列表，-demoFullscreen 直接进全屏
         _panel = State(initialValue: ProcessInfo.processInfo.arguments.contains("-demoPanel"))
+        if ProcessInfo.processInfo.arguments.contains("-demoFullscreen") {
+            _chrome = State(initialValue: false)
+        }
         #endif
     }
 
@@ -196,9 +201,11 @@ struct WallPreview: View {
                     } else if abs(t.width) > abs(t.height) {
                         axis = .page
                     } else if t.height < 0 {
-                        axis = panel ? .ignore : .panel // 上滑：拉出操作列表
+                        axis = chrome ? .levels : .ignore // 上滑：常态化拉出列表，列表再上滑进全屏；已经全屏就没得上了
+                    } else if chrome && !panel {
+                        axis = .dismiss // 常态下滑：关闭预览（图跟着手指）
                     } else {
-                        axis = panel ? .panel : .dismiss // 下滑：先收起列表，列表没开才关闭预览
+                        axis = .levels // 列表 / 全屏下滑：退回上一级
                     }
                 }
                 switch axis {
@@ -233,15 +240,21 @@ struct WallPreview: View {
                     } else {
                         withAnimation(.spring(duration: 0.3)) { dragY = 0 }
                     }
-                case .panel:
+                case .levels:
                     let h = v.translation.height, p = v.predictedEndTranslation.height
+                    let up = h < -Self.panelDistance || p < -Self.panelDistance * 3
+                    let down = h > Self.panelDistance || p > Self.panelDistance * 3
                     withAnimation(.spring(duration: 0.35)) {
-                        if !panel, h < -Self.panelDistance || p < -Self.panelDistance * 3 {
-                            panel = true
-                            chrome = true
-                        } else if panel, h > Self.panelDistance || p > Self.panelDistance * 3 {
+                        if up, chrome {
+                            if panel {
+                                panel = false
+                                chrome = false // 列表再上滑：进全屏，全都藏起来
+                            } else {
+                                panel = true // 常态化上滑：拉出操作列表
+                            }
+                        } else if down, !chrome || panel {
+                            chrome = true // 全屏 / 列表下滑：回常态，顶栏和缩略图条都在
                             panel = false
-                            chrome = false // 收起列表直接全屏，再下滑才关闭
                         }
                     }
                 case .pan:
