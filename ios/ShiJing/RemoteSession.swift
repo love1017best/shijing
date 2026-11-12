@@ -212,6 +212,13 @@ final class RemoteSession {
     /// 撤销最近一次移出：放回壁纸文件夹原来的位置。成功时返回放回去的那张的文件名。
     @discardableResult
     func undoRemove() async -> String? {
+        // 离线时撤销的是手机上还没补上的「移出」：直接从队列里拿掉、放回列表，不用连电脑
+        if offline {
+            guard let last = queued.last(where: { $0.kind == .remove }) else { return nil }
+            cancelQueued(last, announce: false)
+            notice = "已撤销移出：\(last.name)"
+            return last.name
+        }
         guard let name = state?.undoName else { return nil }
         acting = name
         defer { acting = nil }
@@ -353,6 +360,7 @@ final class RemoteSession {
     // MARK: 离线时记下的整理（连上后补上）
 
     /// 离线时点的一张整理操作：只记「移出」「不再选」，删除原图离线时不让做。
+    /// `wall` / `index` 用来在取消「移出」时把那张放回列表原来的位置（旧版本记下的没有，只能取消、放不回去）。
     struct OfflineAction: Codable, Identifiable, Equatable {
         enum Kind: String, Codable { case remove, exclude }
         var id = UUID()
@@ -360,16 +368,28 @@ final class RemoteSession {
         var name: String
         var source: String?
         var at = Date()
+        var wall: Wallpaper?
+        var index: Int?
     }
 
     var offline: Bool { connection != .live }
 
+    /// 撤销按钮显示的名字：在线时是电脑上最近一次移出；离线时是手机上最近一条还没补上的「移出」。
+    var undoName: String? {
+        if offline { return queued.last { $0.kind == .remove }?.name }
+        return state?.undoName
+    }
+
     #if DEBUG
-    /// 截图用（-demo -demoOffline）：塞两条离线操作，看提示是什么样
+    /// 截图用（-demo -demoOffline）：塞两条离线操作，看提示和「待补操作」是什么样
     func seedQueuedForDemo() {
+        guard walls.count > 5 else { return }
+        let r = walls[2]
+        walls.remove(at: 2)
+        let e = walls[3]
         queued = [
-            OfflineAction(kind: .remove, name: "风景-京都-0003.jpg", source: nil),
-            OfflineAction(kind: .exclude, name: "风景-冰岛-0004.jpg", source: "/Volumes/Media0/风景/冰岛/0004.jpg"),
+            OfflineAction(kind: .remove, name: r.name, source: r.source, wall: r, index: 2),
+            OfflineAction(kind: .exclude, name: e.name, source: e.source, wall: e, index: 3),
         ]
     }
     #endif
@@ -391,12 +411,46 @@ final class RemoteSession {
 
     private func enqueue(_ kind: OfflineAction.Kind, _ w: Wallpaper) {
         guard !queued.contains(where: { $0.name == w.name && $0.kind == kind }) else { return }
-        queued.append(OfflineAction(kind: kind, name: w.name, source: w.source))
+        let index = walls.firstIndex { $0.name == w.name }
+        queued.append(OfflineAction(kind: kind, name: w.name, source: w.source, wall: w, index: index))
         saveQueue()
         // 本地先去掉，界面跟着变；连上电脑后再真的移出
         walls.removeAll { $0.name == w.name }
         remember(wallsChanged: true)
         notice = kind == .exclude ? "已记下：连上电脑后移出并不再选它" : "已记下：连上电脑后移出"
+    }
+
+    /// 取消一条还没补上的离线操作。「移出」的那张放回列表原来的位置。
+    func cancelQueued(_ a: OfflineAction, announce: Bool = true) {
+        guard queued.contains(where: { $0.id == a.id }) else { return }
+        queued.removeAll { $0.id == a.id }
+        saveQueue()
+        if a.kind == .remove {
+            restore(a)
+            remember(wallsChanged: true)
+        }
+        if announce {
+            notice = a.kind == .remove ? "已取消，放回列表：\(a.name)" : "已取消：\(a.name)"
+        }
+    }
+
+    /// 全部取消：记下的「移出」都放回列表。
+    func cancelAllQueued() {
+        guard !queued.isEmpty else { return }
+        let list = queued
+        queued = []
+        saveQueue()
+        // 按原来的位置从小到大放回去，后面的下标才对得上
+        for a in list.filter({ $0.kind == .remove }).sorted(by: { ($0.index ?? 0) < ($1.index ?? 0) }) {
+            restore(a)
+        }
+        remember(wallsChanged: true)
+        notice = "已取消 \(list.count) 项离线操作"
+    }
+
+    private func restore(_ a: OfflineAction) {
+        guard let w = a.wall, !walls.contains(where: { $0.name == w.name }) else { return }
+        walls.insert(w, at: min(max(a.index ?? walls.count, 0), walls.count))
     }
 
     /// 连上以后把离线时记下的操作补上：「不再选」直接加进名单（和那张壁纸还在不在这一批无关），

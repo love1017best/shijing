@@ -66,6 +66,7 @@ struct SettingsPage: View {
             // 截图用：-demoOfflineCache 只摆离线这一组（设置页太长，模拟器里不好滚到最下面）
             if ProcessInfo.processInfo.arguments.contains("-demoOfflineCache") {
                 offlineSection
+                if !session.queued.isEmpty { offlineQueueSection }
                 aboutSection(state)
             } else {
                 settingsContent(state)
@@ -93,6 +94,7 @@ struct SettingsPage: View {
             }
         }
         offlineSection
+        if !session.queued.isEmpty { offlineQueueSection }
         aboutSection(state)
     }
 
@@ -147,6 +149,35 @@ struct SettingsPage: View {
             Text("系统")
         } footer: {
             Text("换完一批后重启 macOS 的壁纸服务，不然系统会继续轮换已经删掉的旧图。\n输出方式、画质要求、图库目录、归档等其他设置在电脑上改。")
+        }
+    }
+
+    /// 离线时记下的整理：逐条看得到、可以取消，连上电脑后自动补上。
+    private var offlineQueueSection: some View {
+        Section {
+            ForEach(session.queued) { a in
+                HStack(spacing: 12) {
+                    Image(systemName: a.kind == .remove ? "minus.circle" : "nosign")
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(a.kind == .remove ? "移出" : "不再选它").font(.subheadline)
+                        Text(a.name).font(.footnote).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                        Text(a.at, format: .dateTime.month().day().hour().minute())
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    Spacer()
+                    Button("取消") { session.cancelQueued(a) }
+                        .buttonStyle(.borderless)
+                }
+            }
+            if session.queued.count > 1 {
+                Button("全部取消", role: .destructive) { session.cancelAllQueued() }
+            }
+        } header: {
+            Text("待补操作（\(session.queued.count)）")
+        } footer: {
+            Text("离线时记下的整理，连上电脑后自动补上。「移出」取消后会把那张放回列表原来的位置。")
         }
     }
 

@@ -339,7 +339,7 @@ struct DashboardView: View {
 
     /// 当前壁纸：前几张缩略图，点开看大图、长按整理；「全部」进整个网格。
     @ViewBuilder private func wallsSection(rows: Int) -> some View {
-        if !session.walls.isEmpty || session.state?.undoName != nil {
+        if !session.walls.isEmpty || session.undoName != nil {
             Section {
                 WallGrid(session: session, rows: rows, onOpen: { previewing = $0 })
                     .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))

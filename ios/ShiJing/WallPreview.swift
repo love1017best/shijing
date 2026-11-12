@@ -349,7 +349,7 @@ struct WallPreview: View {
     private var topBar: some View {
         HStack(spacing: 10) {
             circleButton("xmark", label: "关闭") { dismiss() }
-            if let undo = session.state?.undoName {
+            if let undo = session.undoName {
                 circleButton("arrow.uturn.backward", label: "撤销移出 \(undo)") {
                     Task {
                         if let n = await session.undoRemove(), walls.contains(where: { $0.name == n }) { go(to: n) }
@@ -519,13 +519,32 @@ private struct PreviewPage: View {
         }
         .frame(width: size.width, height: size.height)
         .clipped()
-        .task(id: wall.name) {
+        .overlay(alignment: .bottom) {
+            // 离线、大图还没缓存，但缩略图在：先拿缩略图垫着，顺便说明一下（不然看着像糊了）
+            if tried, session.offline, bigImage == nil, thumbImage != nil {
+                Text("离线 · 大图还没缓存，显示的是缩略图")
+                    .font(.caption2)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.bottom, 12)
+            }
+        }
+        .task(id: wall.name + (session.offline ? "|offline" : "|online")) {
             tried = false
-            if ImageStore.shared.cached(session, wall.name, .image) == nil {
+            if bigImage == nil {
                 image = await ImageStore.shared.load(session, wall.name, .image)
             }
             tried = true
         }
+    }
+
+    /// 内存里或磁盘上的大图（离线时可能是上次看过的）。
+    private var bigImage: PlatformImage? {
+        image ?? ImageStore.shared.cached(session, wall.name, .image)
+    }
+
+    private var thumbImage: PlatformImage? {
+        ImageStore.shared.cached(session, wall.name, .thumb)
     }
 
     /// 内存里已有的图：大图优先，没有就先用缩略图垫着。

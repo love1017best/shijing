@@ -177,7 +177,7 @@ struct UndoRemoveButton: View {
     var onUndone: ((String) -> Void)? = nil
 
     var body: some View {
-        if let name = session.state?.undoName {
+        if let name = session.undoName {
             Button {
                 Task {
                     if let n = await session.undoRemove() { onUndone?(n) }

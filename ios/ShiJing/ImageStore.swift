@@ -64,6 +64,7 @@ final class ImageStore {
         if let img = cache.object(forKey: k as NSString) { return img }
         if let t = inflight[k] { return await t.value }
         let demo = demo
+        let offline = session.offline
         let rev = session.wallsRev ?? ""
         let t = Task<PlatformImage?, Never> {
             let data: Data?
@@ -71,6 +72,8 @@ final class ImageStore {
                 data = nil
             } else if let d = await Task.detached(priority: .userInitiated, operation: { Self.readDisk(rev, name, kind) }).value {
                 data = d
+            } else if offline {
+                data = nil // 连不上电脑：只认磁盘上缓存过的，别干等网络超时
             } else {
                 data = try? await client.imageData(name, kind: kind)
                 if let data {
@@ -329,10 +332,10 @@ struct WallImage: View {
                     .aspectRatio(contentMode: contentMode)
             } else {
                 Rectangle().fill(.quaternary)
-                ProgressView()
+                if !session.offline { ProgressView() } // 离线时没有就是没有，别一直转圈
             }
         }
-        .task(id: wall.name) {
+        .task(id: wall.name + (session.offline ? "|offline" : "|online")) {
             image = ImageStore.shared.cached(session, wall.name, kind)
             if image == nil {
                 image = await ImageStore.shared.load(session, wall.name, kind)
