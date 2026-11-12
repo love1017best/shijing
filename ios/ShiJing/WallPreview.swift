@@ -428,10 +428,16 @@ struct WallPreview: View {
                     if session.state?.running == true {
                         Label("正在换壁纸，等换完再整理", systemImage: "hourglass").font(.footnote).foregroundStyle(.secondary)
                     }
-                    // 按宽度挑：一排普通按钮 → 一排小号按钮 → 工具栏式（图标在上、小字在下，四列平分，和相册底栏一样）。
+                    // 按宽度挑：够宽时分成左右两组（左边动这张图，右边动图库里的原图）；
+                    // 窄一点是一排小号按钮，最窄是工具栏式（图标在上、小字在下，四列平分，和相册底栏一样）。
                     // 不再竖着排成四行（竖屏时太占高度，用户嫌）：底栏越矮，完整显示的图越大
                     ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) { actionButtons(w) }.buttonStyle(.bordered)
+                        HStack(spacing: 8) {
+                            tweakActions(w)
+                            Spacer(minLength: 24)
+                            sourceActions(w)
+                        }
+                        .buttonStyle(.bordered)
                         HStack(spacing: 6) { actionButtons(w) }.buttonStyle(.bordered).controlSize(.small)
                         HStack(spacing: 0) { actionButtons(w, toolbar: true) }
                             .buttonStyle(.borderless)
@@ -447,9 +453,9 @@ struct WallPreview: View {
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { bottomBarTop = $0 }
     }
 
-    /// toolbar：工具栏式，每个按钮平分宽度、文字可以缩小
+    /// 左下的一组：存到相册、移出（只动壁纸文件夹里这张）。
     @ViewBuilder
-    private func actionButtons(_ w: Wallpaper, toolbar: Bool = false) -> some View {
+    private func tweakActions(_ w: Wallpaper, toolbar: Bool = false) -> some View {
         Button {
             Task { await session.saveOriginal(w) }
         } label: {
@@ -464,6 +470,14 @@ struct WallPreview: View {
         }
         .disabled(organizeDisabled)
         .accessibilityHint(WallAction.removeHint)
+        if session.acting == w.name {
+            ProgressView()
+        }
+    }
+
+    /// 右下的一组：不再选它、删除原图（动的是图库里的原图）。
+    @ViewBuilder
+    private func sourceActions(_ w: Wallpaper, toolbar: Bool = false) -> some View {
         if w.hasSource {
             Button {
                 Task { await session.removeWallpaper(w, exclude: true) }
@@ -479,9 +493,13 @@ struct WallPreview: View {
             }
             .disabled(organizeDisabled || session.offline) // 离线时不排队删原图，等连上再做
         }
-        if session.acting == w.name {
-            ProgressView()
-        }
+    }
+
+    /// 一排到底时（窄屏）四个按钮连在一起。toolbar：工具栏式，每个按钮平分宽度、文字可以缩小
+    @ViewBuilder
+    private func actionButtons(_ w: Wallpaper, toolbar: Bool = false) -> some View {
+        tweakActions(w, toolbar: toolbar)
+        sourceActions(w, toolbar: toolbar)
     }
 }
 

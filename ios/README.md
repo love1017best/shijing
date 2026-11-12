@@ -64,7 +64,7 @@ cd ios && xcodegen
 |---|---|
 | `ShiJingApp.swift` | 入口：没配对时整屏 `SetupView`，否则遥控面板；前后台切换时断开 / 重连；本地通知 |
 | `MacListView.swift` / `PairView.swift` | 首次配对页、标题菜单（切换 / 添加 / 管理 Mac）、手动输入地址 / 配对 |
-| `DashboardView.swift` | 遥控面板：状态、步骤、进度、换一批 / 停止、上次运行、签名到期提醒 |
+| `DashboardView.swift` | 遥控面板：状态、步骤、进度、换一批 / 停止、上一轮对比、签名到期提醒 |
 | `SettingsSection.swift` | 「设置」标签（分组同电脑上的设置页）、「记录」标签和三页（运行日志、删除记录、不再选）、概览的「状态」分组 |
 | `WallpapersView.swift` / `WallPreview.swift` | 缩略图网格、撤销移出、分享原图 / 大图预览 |
 | `RemoteSession.swift` | 和一台 Mac 的连接：事件流（SSE）、断线重连、Mac 换 IP 后按 Bonjour 名重新找；运行中切到后台时多连一会儿；每次状态更新写一份离线快照；连上时和每换完一批把日志 / 删除记录 / 不再选各存一份 |

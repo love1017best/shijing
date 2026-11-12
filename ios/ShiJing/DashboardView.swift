@@ -24,7 +24,10 @@ struct DashboardView: View {
             .navigationTitle(session.mac.name)
             .iOSInlineTitle()
             .toolbar {
-                ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
+                // 正常连接时不占位置：断开、重连、配对失效才需要提醒
+                if session.connection != .live {
+                    ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
+                }
             }
             .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 8) }
             .fullScreenCoverCompat(item: $previewing) { w in
@@ -36,10 +39,11 @@ struct DashboardView: View {
             .onChange(of: session.walls) { openRequested() }
             #if DEBUG
             .onAppear {
-                // 演示模式截图用：启动参数带 -demoPreview 时直接打开第 3 张的大图预览
+                // 演示模式截图用：-demoPreview 直接打开第 3 张的大图，-demoAll 直接打开「全部壁纸」
                 if ProcessInfo.processInfo.arguments.contains("-demoPreview"), session.walls.count > 2 {
                     previewing = session.walls[2]
                 }
+                if ProcessInfo.processInfo.arguments.contains("-demoAll") { showAll = true }
             }
             #endif
             .alert("操作没有完成", isPresented: Binding(
@@ -161,7 +165,9 @@ struct DashboardView: View {
                     .frame(maxWidth: 520, alignment: .leading)
                     .background(glass(hero), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 Spacer(minLength: 0)
-                runButton(s).frame(width: 220)
+                if session.connection == .live {
+                    runButton(s).frame(width: 220)
+                }
             }
             .padding(14)
             .frame(maxWidth: .infinity, minHeight: 230, alignment: .bottom)
@@ -171,7 +177,7 @@ struct DashboardView: View {
             VStack(spacing: 0) {
                 // 露出图片的部分：点开大图
                 Color.clear
-                    .frame(height: wide ? 60 : (s.running ? 100 : 150))
+                    .frame(height: wide ? 60 : (s.running ? 90 : 110))
                     .contentShape(Rectangle())
                     .onTapGesture { if let hero { previewing = hero } }
                     .accessibilityAddTraits(hero == nil ? [] : .isButton)
@@ -208,7 +214,7 @@ struct DashboardView: View {
             Text(s.eyebrow).font(.subheadline).foregroundStyle(.secondary)
             Text(s.title).font(.title2.bold()).lineLimit(2)
             if !s.running, let note = runNote(s) {
-                Text(note).font(.footnote).foregroundStyle(.secondary).lineLimit(3)
+                Text(note).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
             }
         }
         VStack(alignment: .leading, spacing: 12) {
@@ -217,13 +223,13 @@ struct DashboardView: View {
                     text.frame(maxWidth: .infinity, alignment: .leading)
                     if s.running {
                         stopButton(s).buttonStyle(.bordered).controlSize(.large)
-                    } else {
+                    } else if session.connection == .live {
                         runButton(s).frame(width: 220)
                     }
                 }
             } else {
                 text
-                if !s.running && button { runButton(s) }
+                if !s.running && button && session.connection == .live { runButton(s) }
             }
             if s.running {
                 StepsView(state: s)
@@ -303,8 +309,9 @@ struct DashboardView: View {
     }
 
     /// 「换一批」按钮下面的说明：点不了的原因、目录访问不了、会删原图。
+    /// 连不上时不画那块点不动的按钮，这里换成一行「连上电脑后才能换一批」——在毛玻璃上显示，叠在图上会看不清。
     private func runNote(_ s: RemoteState) -> String? {
-        if session.connection != .live { return "现在连不上电脑，换一批要等连上后再做。" }
+        if session.connection != .live { return "连上电脑后才能换一批。" }
         if let b = s.blocked { return b }
         if s.unmounted > 0 { return "上次检查时有 \(s.unmounted) 个图库目录访问不了，换一批前会重新检查。" }
         if s.willDelete { return "会先删除图库里不合格的原图，点了之后可以选只模拟。" }
@@ -361,8 +368,6 @@ struct DashboardView: View {
                     }
                 }
                 .textCase(nil)
-            } footer: {
-                Text("点一张看大图，长按可以移出或删除原图。")
             }
         }
     }
@@ -396,15 +401,16 @@ struct DashboardView: View {
 
     @ViewBuilder private func lastRunSection(_ s: RemoteState) -> some View {
         if let l = s.last {
-            Section("上次运行") {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(lastHeadline(l)).font(.headline)
-                        Text(l.date, format: .dateTime.month().day().hour().minute())
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                } icon: {
+            Section("上一轮对比") {
+                // 换上了几张、什么时候换的，横幅卡上已经写了；这里只列时间和对比出来的指标
+                HStack(spacing: 8) {
                     Image(systemName: lastIcon(l)).foregroundStyle(lastColor(l))
+                    Text(l.date, format: .dateTime.month().day().hour().minute())
+                        .font(.subheadline)
+                    Spacer()
+                    if l.status != "ok" {
+                        Text(lastStatusText(l)).font(.footnote).foregroundStyle(lastColor(l))
+                    }
                 }
                 if let e = l.error, l.status == "failed" {
                     Text(e).font(.callout).foregroundStyle(.red)
@@ -430,9 +436,8 @@ struct DashboardView: View {
         }
     }
 
-    private func lastHeadline(_ l: LastRun) -> String {
+    private func lastStatusText(_ l: LastRun) -> String {
         switch l.status {
-        case "ok": "换上了 \(l.copied) 张新壁纸"
         case "stopped": l.copied > 0 ? "中途停止，换上了 \(l.copied) 张" : "中途停止"
         default: "没有换成"
         }

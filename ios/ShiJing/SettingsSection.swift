@@ -47,7 +47,9 @@ struct MacPage<Content: View>: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .navigationTitle(title)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
+            if session.connection != .live {
+                ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
+            }
         }
     }
 }

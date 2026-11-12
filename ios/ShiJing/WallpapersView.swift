@@ -152,7 +152,6 @@ struct AllWallpapersView: View {
             } else {
                 WallGrid(session: session, minThumb: 120)
                     .padding(.horizontal)
-                Text("长按一张可以移出或删除原图。").font(.footnote).foregroundStyle(.secondary).padding()
             }
         }
         .navigationTitle("全部壁纸（\(session.walls.count)）")
