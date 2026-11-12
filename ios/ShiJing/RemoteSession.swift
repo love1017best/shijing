@@ -33,14 +33,26 @@ final class RemoteSession {
     var hero: Wallpaper? { walls.first { $0.name == heroName } ?? walls.first }
     /// 正在移出 / 删除的那张
     private(set) var acting: String?
+    /// 现在显示的状态是从磁盘快照来的（还没连上过）：界面上标「离线 · X 前同步」
+    private(set) var snapshotAt: Date?
 
     private let store: MacStore
     private var task: Task<Void, Never>?
+    /// 上次把快照写到磁盘的时间（运行中状态更新很密，最多 5 秒写一次）
+    private var lastSnapshotSave = Date.distantPast
 
     init(mac: SavedMac, store: MacStore) {
         self.mac = mac
         macID = mac.id
         self.store = store
+        // 上次连上时留下的快照：还没连上之前先用它，离线也能看上回那批壁纸
+        if let snap = OfflineStore.shared.load(macID.uuidString) {
+            state = snap.state
+            walls = snap.walls
+            wallsRev = snap.state.wallsRev
+            heroName = snap.hero
+            snapshotAt = snap.at
+        }
     }
 
     func client() throws -> APIClient {
@@ -99,6 +111,8 @@ final class RemoteSession {
                     RunNotifier.observe(old: state, new: s, mac: mac.name)
                     if state?.running == true, !s.running { WidgetReload.all() }
                     state = s
+                    snapshotAt = nil
+                    remember()
                     #if os(iOS)
                     // 在后台等的这次换完了：通知已经发了，断开
                     if !s.running, bgTask != .invalid { endBackground(disconnect: true); return }
@@ -177,6 +191,7 @@ final class RemoteSession {
         defer { savingSettings = false }
         do {
             state = try await client().updateSettings(changes)
+            remember()
         } catch APIError.unauthorized(let msg) {
             connection = .unpaired(msg)
         } catch {
@@ -192,6 +207,7 @@ final class RemoteSession {
         defer { acting = nil }
         do {
             state = try await client().undo()
+            remember(wallsChanged: true)
             await refreshWalls()
             return name
         } catch APIError.unauthorized(let msg) {
@@ -258,9 +274,25 @@ final class RemoteSession {
             walls = list.items
             wallsRev = list.rev
             heroName = list.hero
+            remember(wallsChanged: true)
+            ImageStore.groom(keepRev: list.rev) // 上一批的图片缓存整个删掉
+            ImageStore.shared.prefetchThumbs(self) // 这一批的缩略图存到磁盘，离线也能看
         } catch {
             // 列表拉不到不影响别的，下次状态推送再试
         }
+    }
+
+    /// 把当前状态和壁纸列表写到磁盘（离线时显示的上次样子）。运行中状态推得很密，最多 5 秒写一次；
+    /// 壁纸列表变了（wallsChanged）时立刻写。
+    private func remember(wallsChanged: Bool = false) {
+        #if DEBUG
+        if Self.demoMode != nil { return }
+        #endif
+        guard let state else { return }
+        let now = Date()
+        if !wallsChanged, now.timeIntervalSince(lastSnapshotSave) < 5 { return }
+        lastSnapshotSave = now
+        OfflineStore.shared.save(macID.uuidString, .init(state: state, walls: walls, hero: heroName, at: now))
     }
 
     /// 移出壁纸文件夹；exclude 时以后的采样也跳过这张原图。成功返回 true。
@@ -288,6 +320,7 @@ final class RemoteSession {
             state = try await op(client())
             // 先在本地去掉，不用等重新拉列表
             walls.removeAll { $0.name == w.name }
+            remember(wallsChanged: true)
             await refreshWalls()
             return true
         } catch APIError.unauthorized(let msg) {
@@ -303,6 +336,7 @@ final class RemoteSession {
         defer { busy = false }
         do {
             state = try await op(client())
+            remember(wallsChanged: true)
         } catch APIError.unauthorized(let msg) {
             connection = .unpaired(msg)
         } catch {
@@ -351,7 +385,16 @@ extension RemoteSession {
                       source: i % 7 == 6 ? nil : "/Volumes/Media0/风景/\(places[i % places.count])/\(String(format: "%04d", i)).jpg")
         }
         s.wallsRev = "demo"
-        ImageStore.shared.demo = true
+        s.heroName = s.walls.first?.name // 和真的桌面一样给一张横幅图
+        // 截图用：-demo -demoOffline 显示「离线，显示的是上次同步的壁纸」的样子
+        if ProcessInfo.processInfo.arguments.contains("-demoOffline") {
+            s.connection = .offline("连不上这台 Mac：确认它没有睡眠、拾景开着并打开了「允许手机遥控」，手机和电脑在同一个网络里。")
+            s.snapshotAt = Date().addingTimeInterval(-3 * 3600 - 2400)
+            // 顺便把演示图写进磁盘缓存，让「离线也能看图」这条路径真的走一遍（读的是磁盘，不是内存里的演示图）
+            ImageStore.shared.seedDiskCache(rev: "demo", names: s.walls.prefix(48).map(\.name), hero: s.heroName)
+        } else {
+            ImageStore.shared.demo = true
+        }
         return s
     }
 }

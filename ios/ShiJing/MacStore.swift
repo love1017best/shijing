@@ -63,6 +63,7 @@ final class MacStore {
     func remove(_ id: SavedMac.ID) {
         macs.removeAll { $0.id == id }
         Keychain.delete(id)
+        OfflineStore.shared.clear(id.uuidString) // 离线快照也一起清掉
         if selectedID == id { selectedID = macs.first?.id }
         save()
     }

@@ -71,6 +71,7 @@ struct SettingsPage: View {
                     Text("电脑上的拾景版本较旧，要改设置请在电脑上改。")
                 }
             }
+            offlineSection
             aboutSection(state)
         }
         .toolbar {
@@ -131,6 +132,17 @@ struct SettingsPage: View {
             Text("系统")
         } footer: {
             Text("换完一批后重启 macOS 的壁纸服务，不然系统会继续轮换已经删掉的旧图。\n输出方式、画质要求、图库目录、归档等其他设置在电脑上改。")
+        }
+    }
+
+    /// 离线：图片缓存占了多少，可以清。和电脑上的设置无关，旧版桌面端也有。
+    private var offlineSection: some View {
+        Section {
+            OfflineCacheRow()
+        } header: {
+            Text("离线")
+        } footer: {
+            Text("连不上电脑时，概览和壁纸显示的是上次同步的内容：缩略图整批存在手机上，大图看过哪张存哪张。换一批后上一批的缓存会自动删掉。")
         }
     }
 
@@ -428,4 +440,33 @@ struct ExcludedView: View {
 enum AppVersion {
     static let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
     static var text: String { short.isEmpty ? "开发版" : "v" + short }
+}
+
+/// 离线图片缓存占了多少，可以一键清掉。大小在后台算，界面先显示进度圈。
+private struct OfflineCacheRow: View {
+    @State private var size: Int64?
+
+    var body: some View {
+        LabeledContent("图片缓存") {
+            HStack(spacing: 12) {
+                if let size {
+                    Text(size == 0 ? "没有" : ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+                Button("清除") {
+                    ImageStore.shared.clearDiskCache()
+                    size = 0
+                }
+                .disabled(size == nil || size == 0)
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        let n = await Task.detached(priority: .utility) { ImageStore.diskUsage() }.value
+        size = n
+    }
 }

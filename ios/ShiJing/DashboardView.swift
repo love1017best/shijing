@@ -241,18 +241,36 @@ struct DashboardView: View {
     // MARK: 各个分组
 
     /// 已经拿到过状态、之后断开了：顶部提示一下，下面显示的是断开前的样子。
+    /// 显示的是磁盘上的快照（这次打开还没连上过）时说明数据是什么时候的。
     @ViewBuilder private var connectionSection: some View {
         if case .offline(let msg) = session.connection {
             Section {
                 Label {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("连接已断开，正在重连").font(.subheadline.bold())
-                        Text(msg).font(.footnote).foregroundStyle(.secondary)
+                        if let at = session.snapshotAt {
+                            Text("离线，显示的是上次同步的壁纸").font(.subheadline.bold())
+                            Text("数据是 \(Self.ago(at))同步的，正在重连。图片只有缓存过的能看。")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        } else {
+                            Text("连接已断开，正在重连").font(.subheadline.bold())
+                            Text(msg).font(.footnote).foregroundStyle(.secondary)
+                        }
                     }
                 } icon: {
                     Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
                 }
             }
+        }
+    }
+
+    /// 「3 小时前」「刚刚」：快照有多旧。
+    static func ago(_ at: Date) -> String {
+        let s = Date().timeIntervalSince(at)
+        switch s {
+        case ..<90: return "刚刚"
+        case ..<3600: return "\(max(1, Int(s / 60))) 分钟前"
+        case ..<86400: return "\(Int(s / 3600)) 小时前"
+        default: return "\(Int(s / 86400)) 天前"
         }
     }
 
