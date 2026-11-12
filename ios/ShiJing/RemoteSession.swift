@@ -19,23 +19,23 @@ final class RemoteSession {
     }
 
     let macID: SavedMac.ID
-    private(set) var mac: SavedMac
-    private(set) var connection: Connection = .connecting
-    private(set) var state: RemoteState?
+    internal(set) var mac: SavedMac
+    internal(set) var connection: Connection = .connecting
+    internal(set) var state: RemoteState?
     /// 正在等「换一批」「停止」的响应
-    private(set) var busy = false
+    internal(set) var busy = false
     /// 上一次操作失败的原因（界面上弹提示）
     var actionError: String?
     /// 壁纸文件夹里的图（和桌面同样的顺序）；walls_rev 变了就重新拉
-    private(set) var walls: [Wallpaper] = []
-    private(set) var wallsRev: String?
+    internal(set) var walls: [Wallpaper] = []
+    internal(set) var wallsRev: String?
     /// 横幅图的文件名（桌面概览顶部那张）；旧版桌面端没给时用第一张
-    private(set) var heroName: String?
+    internal(set) var heroName: String?
     var hero: Wallpaper? { walls.first { $0.name == heroName } ?? walls.first }
     /// 正在移出 / 删除的那张
-    private(set) var acting: String?
+    internal(set) var acting: String?
     /// 现在显示的状态是从磁盘快照来的（还没连上过）：界面上标「离线 · X 前同步」
-    private(set) var snapshotAt: Date?
+    internal(set) var snapshotAt: Date?
 
     private let store: MacStore
     private var task: Task<Void, Never>?
@@ -47,8 +47,8 @@ final class RemoteSession {
     /// 上次把快照写到磁盘的时间（运行中状态更新很密，最多 5 秒写一次）
     private var lastSnapshotSave = Date.distantPast
     /// 离线时点的「移出 / 不再选」，连上电脑后自动补上（存在 UserDefaults 里，按 Mac 分开）
-    private(set) var queued: [OfflineAction] = []
-    private var flushing = false
+    internal(set) var queued: [OfflineAction] = []
+    var flushing = false
 
     init(mac: SavedMac, store: MacStore) {
         self.mac = mac
@@ -58,7 +58,7 @@ final class RemoteSession {
         if let snap = OfflineStore.shared.load(macID.uuidString) {
             state = snap.state
             walls = snap.walls
-            wallsRev = snap.state.wallsRev
+            wallsRev = snap.wallsRev ?? snap.state.wallsRev
             heroName = snap.hero
             snapshotAt = snap.at
         }
@@ -157,7 +157,7 @@ final class RemoteSession {
             do {
                 for try await s in try client().events() {
                     let wasLive = connection == .live
-                    RunNotifier.observe(old: state, new: s, mac: mac.name)
+                    RunNotifier.observe(new: s, mac: mac.name)
                     if state?.running == true, !s.running {
                         WidgetReload.all()
                         // 换完一批：日志、删除记录都变了，更新手机上存的记录
@@ -234,7 +234,7 @@ final class RemoteSession {
     // MARK: 设置、撤销（第 3 期）
 
     /// 正在保存的设置项（界面上对应那一行转圈）
-    private(set) var savingSettings = false
+    internal(set) var savingSettings = false
 
     /// 改常用设置：只传要改的字段。失败时弹提示，界面回到电脑上的值。
     func updateSettings(_ changes: [String: Any]) async {
@@ -290,7 +290,7 @@ final class RemoteSession {
     // MARK: 存原图到相册
 
     /// 正在下载 / 存到相册的那张
-    private(set) var saving: String?
+    internal(set) var saving: String?
     /// 要打开大图的那张（从小组件点进来），概览页看到就打开
     var openRequest: String?
     /// 一闪而过的提示（「已存到相册」），界面上显示两秒
@@ -352,7 +352,8 @@ final class RemoteSession {
             heroName = list.hero
             remember(wallsChanged: true)
             if changed {
-                ImageStore.groom(keepRev: list.rev) // 上一批的图片缓存整个删掉
+                let rev = list.rev
+                Task.detached(priority: .utility) { ImageStore.groom(keepRev: rev) } // 上一批的图片缓存整个删掉（别在主线程删目录）
                 ImageStore.shared.prefetchAll(self) // 这一批的缩略图和预览图存到磁盘，离线也能看
             }
         } catch {
@@ -375,7 +376,7 @@ final class RemoteSession {
 
     /// 把当前状态和壁纸列表写到磁盘（离线时显示的上次样子）。运行中状态推得很密，最多 5 秒写一次；
     /// 壁纸列表变了（wallsChanged）时立刻写。
-    private func remember(wallsChanged: Bool = false) {
+    func remember(wallsChanged: Bool = false) {
         #if DEBUG
         if Self.demoMode != nil { return }
         #endif
@@ -383,7 +384,7 @@ final class RemoteSession {
         let now = Date()
         if !wallsChanged, now.timeIntervalSince(lastSnapshotSave) < 5 { return }
         lastSnapshotSave = now
-        OfflineStore.shared.save(macID.uuidString, .init(state: state, walls: walls, hero: heroName, at: now))
+        OfflineStore.shared.save(macID.uuidString, .init(state: state, walls: walls, hero: heroName, wallsRev: wallsRev, at: now))
     }
 
     /// 移出壁纸文件夹；exclude 时以后的采样也跳过这张原图。成功返回 true。
@@ -433,184 +434,6 @@ final class RemoteSession {
         return false
     }
 
-    // MARK: 离线时记下的整理（连上后补上）
-
-    /// 离线时点的一张整理操作：只记「移出」「不再选」，删除原图离线时不让做。
-    /// `wall` / `index` 用来在取消「移出」时把那张放回列表原来的位置（旧版本记下的没有，只能取消、放不回去）。
-    struct OfflineAction: Codable, Identifiable, Equatable {
-        enum Kind: String, Codable { case remove, exclude }
-        var id = UUID()
-        var kind: Kind
-        var name: String
-        var source: String?
-        var at = Date()
-        var wall: Wallpaper?
-        var index: Int?
-    }
-
-    var offline: Bool { connection != .live }
-
-    /// 撤销按钮显示的名字：在线时是电脑上最近一次移出；离线时是手机上最近一条还没补上的「移出」。
-    var undoName: String? {
-        if offline { return queued.last { $0.kind == .remove }?.name }
-        return state?.undoName
-    }
-
-    #if DEBUG
-    /// 截图用（-demo -demoOffline）：塞两条离线操作，看提示和「待补操作」是什么样
-    func seedQueuedForDemo() {
-        guard walls.count > 5 else { return }
-        let r = walls[2]
-        let e = walls[4]
-        walls.remove(at: 4) // 和真的离线操作一样：两种都会从列表里去掉
-        walls.remove(at: 2)
-        queued = [
-            OfflineAction(kind: .remove, name: r.name, source: r.source, wall: r, index: 2),
-            OfflineAction(kind: .exclude, name: e.name, source: e.source, wall: e, index: 4),
-        ]
-    }
-    #endif
-
-    private nonisolated static func queueKey(_ id: String) -> String { "offlineActions." + id }
-
-    /// 删掉这台 Mac 还没补上的离线操作（在 MacStore 里移除它时调用）。
-    nonisolated static func clearQueue(_ id: SavedMac.ID) {
-        UserDefaults.standard.removeObject(forKey: queueKey(id.uuidString))
-    }
-
-    private static func loadQueue(_ id: String) -> [OfflineAction] {
-        guard let data = UserDefaults.standard.data(forKey: queueKey(id)) else { return [] }
-        return (try? JSONDecoder().decode([OfflineAction].self, from: data)) ?? []
-    }
-
-    private func saveQueue() {
-        if queued.isEmpty {
-            UserDefaults.standard.removeObject(forKey: Self.queueKey(macID.uuidString))
-        } else if let data = try? JSONEncoder().encode(queued) {
-            UserDefaults.standard.set(data, forKey: Self.queueKey(macID.uuidString))
-        }
-    }
-
-    private func enqueue(_ kind: OfflineAction.Kind, _ w: Wallpaper) {
-        guard !queued.contains(where: { $0.name == w.name && $0.kind == kind }) else { return }
-        let index = walls.firstIndex { $0.name == w.name }
-        queued.append(OfflineAction(kind: kind, name: w.name, source: w.source, wall: w, index: index))
-        saveQueue()
-        // 本地先去掉，界面跟着变；连上电脑后再真的移出
-        walls.removeAll { $0.name == w.name }
-        remember(wallsChanged: true)
-        notice = kind == .exclude ? "已记下：连上电脑后移出并不再选它" : "已记下：连上电脑后移出"
-    }
-
-    /// 取消一条还没补上的离线操作，那张放回列表原来的位置。
-    /// 「不再选」在电脑上也会把那张从壁纸文件夹移出，所以离线时两种都先从列表里去掉了，取消后都要放回去。
-    func cancelQueued(_ a: OfflineAction, announce: Bool = true) {
-        guard queued.contains(where: { $0.id == a.id }) else { return }
-        queued.removeAll { $0.id == a.id }
-        saveQueue()
-        let back = restore(a)
-        remember(wallsChanged: true)
-        if announce {
-            notice = back ? "已取消，放回列表：\(a.name)" : "已取消：\(a.name)"
-        }
-    }
-
-    /// 全部取消：记下的操作都撤回，「移出 / 不再选」的那张放回列表。
-    func cancelAllQueued() {
-        guard !queued.isEmpty else { return }
-        let list = queued
-        queued = []
-        saveQueue()
-        // 按原来的位置从小到大放回去，后面的下标才对得上
-        for a in list.sorted(by: { ($0.index ?? 0) < ($1.index ?? 0) }) {
-            restore(a)
-        }
-        remember(wallsChanged: true)
-        notice = "已取消 \(list.count) 项离线操作"
-    }
-
-    @discardableResult
-    private func restore(_ a: OfflineAction) -> Bool {
-        guard let w = a.wall, !walls.contains(where: { $0.name == w.name }) else { return false }
-        walls.insert(w, at: min(max(a.index ?? walls.count, 0), walls.count))
-        return true
-    }
-
-    /// 连上以后把离线时记下的操作补上。
-    ///
-    /// 注意不能拿手机上的列表判断「那张还在不在这一批」：离线记下时已经把它从本地列表去掉了，
-    /// 所以先强制拉一份电脑上现在的列表——还在这一批的「不再选」照在线的做法走移出 + 加名单，
-    /// 已经换掉的就只按原图路径加进名单。「移出」直接调接口，电脑返回 409（已经不在这批）才算过期。
-    private func flushOfflineActions() async {
-        guard !flushing, !queued.isEmpty, connection == .live else { return }
-        flushing = true
-        defer { flushing = false }
-        await refreshWalls(force: true)
-        var rest: [OfflineAction] = []
-        var applied = 0
-        var expired = 0
-        let list = queued
-        for (i, act) in list.enumerated() {
-            do {
-                switch act.kind {
-                case .exclude:
-                    var moved = false
-                    var excluded = false
-                    if walls.contains(where: { $0.name == act.name }) {
-                        do {
-                            // 和在线时一样：从壁纸文件夹移出，并加进不再选
-                            state = try await client().removeWallpaper(act.name, exclude: true)
-                            moved = true
-                            excluded = true
-                        } catch APIError.server(_, let msg) where msg.contains("找不到原图") {
-                            // 旧版本换上的没有原图记录：只能移出，名单按手机记下的原图路径补
-                            state = try await client().removeWallpaper(act.name, exclude: false)
-                            moved = true
-                        }
-                        walls.removeAll { $0.name == act.name }
-                    }
-                    if !excluded, let src = act.source, !src.isEmpty {
-                        // 这一批已经换掉了（或者刚才是只能移出）：至少把原图记进名单，和批次无关
-                        _ = try await client().addExcluded([src])
-                        excluded = true
-                    }
-                    if moved || excluded {
-                        applied += 1
-                    } else {
-                        expired += 1
-                    }
-                case .remove:
-                    state = try await client().removeWallpaper(act.name, exclude: false)
-                    walls.removeAll { $0.name == act.name }
-                    applied += 1
-                }
-            } catch APIError.server(_, let msg) where msg.contains("正在换壁纸") {
-                rest.append(contentsOf: list[i...]) // 电脑在忙，不是过期：留着下次
-                break
-            } catch APIError.server(let status, _) where status == 404 || status == 409 {
-                expired += 1
-            } catch APIError.unauthorized(let msg) {
-                connection = .unpaired(msg)
-                rest.append(contentsOf: list[i...])
-                break
-            } catch {
-                rest.append(contentsOf: list[i...]) // 又断了：留着下次
-                break
-            }
-        }
-        queued = rest
-        saveQueue()
-        if applied > 0 {
-            remember(wallsChanged: true)
-            Task { await refreshRecordsCache() } // 「不再选」的名单变了
-        }
-        if applied == 0, expired > 0 {
-            notice = "\(expired) 项离线操作已经过期（那一批壁纸换掉了）"
-        } else if applied > 0 {
-            notice = expired > 0 ? "已补上 \(applied) 项离线操作，\(expired) 项已经过期" : "已补上 \(applied) 项离线操作"
-        }
-    }
-
     private func act(_ op: (APIClient) async throws -> RemoteState) async {
         busy = true
         defer { busy = false }
@@ -624,77 +447,3 @@ final class RemoteSession {
         }
     }
 }
-
-#if DEBUG
-// MARK: - 演示模式（只在 Debug 构建里）：启动参数带 -demo / -demoRunning 时不连真的 Mac，
-// 直接显示一份假状态，用来在模拟器里截图检查布局。
-extension RemoteSession {
-    static var demoMode: String? {
-        let args = ProcessInfo.processInfo.arguments
-        if args.contains("-demoRunning") { return "running" }
-        return args.contains("-demo") || args.contains("-demoPreview") ? "idle" : nil
-    }
-
-    static func demo(_ mode: String, store: MacStore) -> RemoteSession {
-        let mac = SavedMac(name: "演示 Mac", serviceName: nil, host: "192.168.1.20", port: 52819)
-        let s = RemoteSession(mac: mac, store: store)
-        let running = mode == "running"
-        let now = Date().timeIntervalSince1970
-        s.state = RemoteState(
-            version: "0.3.7", eyebrow: running ? "正在换壁纸" : "当前壁纸 · 11月11日 15:04 换上",
-            title: running ? "正在拾一批新风景…" : "已换上 300 张新壁纸",
-            running: running, stopping: false, steps: ["filter", "scan", "copy", "refresh"],
-            stage: running ? "copy" : nil, done: running ? 128 : 0, total: running ? 300 : 0,
-            fraction: running ? 128.0 / 300 : -1, label: running ? "复制 128 / 300 张 · 还剩约 1 分钟" : nil,
-            lastLine: running ? "[风景/冰岛] ✅ 已复制: 风景-冰岛-0423.jpg" : nil,
-            runDelete: true, rejected: 3, deleted: 3, deleteFailed: 0,
-            blocked: nil, unmounted: 0, willDelete: true,
-            deleteNote: "会先检查「筛选 + 采样」里的 2 个目录，把竖屏、正方形和低于 3840×2160 的图片从图库里直接删除，不可撤销。",
-            last: running ? nil : LastRun(at: now - 3600, status: "ok", error: nil, selected: 300, copied: 300, failed: 0,
-                                         elapsed: 73, brief: "重合 4% · 删 3 张",
-                                         detail: "和上一轮相比：新换上 288 张，重复 12 张（重合率 4%）\n筛选删除 3 张\n覆盖 300 / 415 个文件夹"),
-            nextAuto: now + 6 * 3600, wallpapers: 300, wallsRev: "demo", dest: "~/Pictures/Wallpapers0", sampleCount: 300, libraryDirs: 3)
-        s.state?.settings = RemoteSettings(sampleCount: 300, autoRunHours: 6, autoOptions: [0, 6, 12, 24, 168],
-                                           deleteDuringFilter: true, preferUnseen: true, refreshWallpaper: true)
-        s.state?.undoName = running ? nil : "风景-京都-0012.jpg"
-        s.state?.excluded = 12
-        s.connection = .live
-        let places = ["冰岛", "阿尔卑斯", "京都", "黄石", "新西兰", "巴塔哥尼亚", "挪威", "托斯卡纳", "大理", "落基山"]
-        s.walls = (0..<300).map { i in
-            Wallpaper(name: "风景-\(places[i % places.count])-\(String(format: "%04d", i)).jpg",
-                      source: i % 7 == 6 ? nil : "/Volumes/Media0/风景/\(places[i % places.count])/\(String(format: "%04d", i)).jpg")
-        }
-        s.wallsRev = "demo"
-        s.heroName = s.walls.first?.name // 和真的桌面一样给一张横幅图
-        // 截图用：-demo -demoOffline 显示「离线，显示的是上次同步的壁纸」的样子
-        if ProcessInfo.processInfo.arguments.contains("-demoOffline") {
-            s.connection = .offline("连不上这台 Mac：确认它没有睡眠、拾景开着并打开了「允许手机遥控」，手机和电脑在同一个网络里。")
-            s.snapshotAt = Date().addingTimeInterval(-3 * 3600 - 2400)
-            // 顺便把演示图写进磁盘缓存，让「离线也能看图」这条路径真的走一遍（读的是磁盘，不是内存里的演示图）
-            ImageStore.shared.seedDiskCache(rev: "demo", names: s.walls.prefix(24).map(\.name), hero: s.heroName)
-            s.seedQueuedForDemo()
-            // 记录页：存一份演示数据，断线时记录页显示的就是它
-            let at = Date().addingTimeInterval(-3 * 3600 - 2400)
-            OfflineStore.shared.saveRecord(mac.id.uuidString, .log, [
-                "[风景/冰岛] ✅ 已复制: 风景-冰岛-0423.jpg",
-                "[风景/京都] ✅ 已复制: 风景-京都-0011.jpg",
-                "[筛选] 风景/落基山 没有变化，跳过 12 个文件夹",
-            ], at: at)
-            OfflineStore.shared.saveRecord(mac.id.uuidString, .deletions, DeletionList(
-                total: 3, filter: 2, manual: 1,
-                items: [
-                    Deletion(at: now - 3600, name: "0163.jpg", dir: "/Volumes/Media0/风景/京都", reason: "竖屏"),
-                    Deletion(at: now - 4000, name: "0288.jpg", dir: "/Volumes/Media0/风景/冰岛", reason: "分辨率不足"),
-                    Deletion(at: now - 86400, name: "0512.jpg", dir: "/Volumes/Media0/风景/阿尔卑斯", reason: "手动删除"),
-                ]), at: at)
-            OfflineStore.shared.saveRecord(mac.id.uuidString, .excluded, [
-                ExcludedItem(path: "/Volumes/Media0/风景/京都/0163.jpg", display: "~/Media0/风景/京都/0163.jpg"),
-                ExcludedItem(path: "/Volumes/Media0/风景/大理/0077.jpg", display: "~/Media0/风景/大理/0077.jpg"),
-            ], at: at)
-        } else {
-            ImageStore.shared.demo = true
-        }
-        return s
-    }
-}
-#endif

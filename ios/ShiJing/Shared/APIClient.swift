@@ -180,7 +180,16 @@ struct APIClient: Sendable {
     func downloadOriginal(_ name: String) async throws -> URL {
         let req = request("GET", "api/wallpapers/\(name)/original", timeout: 120)
         let (tmp, resp) = try await Self.session.download(for: req)
-        try Self.check(resp, data: (try? Data(contentsOf: tmp)).flatMap { $0.count < 4096 ? $0 : nil })
+        // 只有文件很小（多半是错误响应的文字）时才读进内存——原图有几十 MB，不能整份读
+        let attrs = try? FileManager.default.attributesOfItem(atPath: tmp.path)
+        let size = (attrs?[.size] as? NSNumber)?.intValue ?? Int.max
+        let body = size < 4096 ? (try? Data(contentsOf: tmp)) : nil
+        do {
+            try Self.check(resp, data: body)
+        } catch {
+            try? FileManager.default.removeItem(at: tmp) // 失败了别把临时文件留在磁盘上
+            throw error
+        }
         let dir = FileManager.default.temporaryDirectory.appending(path: "originals", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dst = dir.appending(path: name)

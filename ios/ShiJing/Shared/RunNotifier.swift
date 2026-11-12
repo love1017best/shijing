@@ -18,7 +18,7 @@ enum RunNotifier {
         set { if let v = newValue { Keychain.setData(Data(String(v).utf8), account: account) } }
     }
 
-    static func observe(old: RemoteState?, new: RemoteState, mac: String) {
+    static func observe(new: RemoteState, mac: String) {
         guard !new.running, let last = new.last else { return }
         guard let seen = mark else {
             mark = last.at // 第一次：只记下，不通知以前的

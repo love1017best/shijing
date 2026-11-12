@@ -23,12 +23,7 @@ struct DashboardView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .navigationTitle(session.mac.name)
             .iOSInlineTitle()
-            .toolbar {
-                // 正常连接时不占位置：断开、重连、配对失效才需要提醒
-                if session.connection != .live {
-                    ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
-                }
-            }
+            .connectionToolbar(session)
             .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 8) }
             .fullScreenCoverCompat(item: $previewing) { w in
                 WallPreview(session: session, startName: w.name)
@@ -67,15 +62,8 @@ struct DashboardView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if case .unpaired(let msg) = session.connection {
-            ContentUnavailableView {
-                Label("配对已失效", systemImage: "lock.slash")
-            } description: {
-                Text(msg + "\n移除后重新配对。")
-            } actions: {
-                Button("移除这台 Mac", role: .destructive) { store.remove(session.macID) }
-                    .buttonStyle(.borderedProminent)
-            }
+        if case .unpaired = session.connection {
+            ConnectionFallback(session: session) { store.remove(session.macID) }
         } else if let state = session.state {
             if width >= Self.twoColumnWidth {
                 wideLayout(state)
@@ -93,16 +81,8 @@ struct DashboardView: View {
                     overviewSection(state)
                 }
             }
-        } else if case .offline(let msg) = session.connection {
-            ContentUnavailableView {
-                Label("连不上 \(session.mac.name)", systemImage: "wifi.exclamationmark")
-            } description: {
-                Text(msg)
-            } actions: {
-                Button("重试") { session.start() }.buttonStyle(.bordered)
-            }
         } else {
-            ProgressView("正在连接 \(session.mac.name)…")
+            ConnectionFallback(session: session)
         }
     }
 
@@ -516,13 +496,13 @@ struct StepsView: View {
     }
 }
 
-/// 工具栏上的连接状态小圆点。
+/// 工具栏上的连接状态小圆点。只在断开 / 重连 / 配对失效时出现（调用处已经挡掉了正常连接）。
 struct ConnectionBadge: View {
     let connection: RemoteSession.Connection
 
     var body: some View {
         let (color, text): (Color, String) = switch connection {
-        case .live: (.green, "已连接")
+        case .live: (.green, "已连接") // 走不到，调用方只在异常时放它
         case .connecting: (.orange, "正在连接")
         case .offline: (.orange, "重连中")
         case .unpaired: (.red, "未配对")

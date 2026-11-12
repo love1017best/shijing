@@ -302,6 +302,14 @@ struct PhotoView: View {
     @Environment(\.widgetFamily) private var envFamily
     private var family: WidgetFamily { familyOverride ?? envFamily }
 
+    /// 没有图时的一句话：离线（还没缓存）和「壁纸文件夹是空的」要说清楚，别让人以为壁纸被删了。
+    private var emptyText: String {
+        if let problem = entry.problem { return problem }
+        if entry.state == nil { return "正在读取…" }
+        if entry.offlineSince != nil { return "离线 · 这张还没缓存" }
+        return "壁纸文件夹是空的"
+    }
+
     var body: some View {
         if family == .accessoryRectangular {
             // 锁定屏幕：图本身就是内容（系统渲染成单色）
@@ -317,7 +325,7 @@ struct PhotoView: View {
                 if entry.image == nil {
                     VStack(alignment: .leading, spacing: 4) {
                         Image(systemName: "photo.on.rectangle.angled").font(.title3)
-                        Text(entry.problem ?? (entry.state == nil ? "正在读取…" : "壁纸文件夹是空的"))
+                        Text(emptyText)
                             .font(.footnote.weight(.medium))
                     }
                     .foregroundStyle(.white)

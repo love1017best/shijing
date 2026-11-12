@@ -10,6 +10,7 @@
 		0503A2CCB8354AC748CE77A2 /* ShiJingWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5CF0981B7D45E7EE853F6988 /* ShiJingWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		05E2E89B0C05B1BE98635414 /* WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22FA460C376FBA22B55E217F /* WidgetViews.swift */; };
 		099E53CA17FB750EED57745A /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CD57E5BA5441C8D0006947 /* DashboardView.swift */; };
+		0F54659699EBBC3BCED13F87 /* RecordsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF6C987C6A493F6426A7BFFC /* RecordsPage.swift */; };
 		21220E16DFE4ED934EEDE0FB /* Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */; };
 		297D4087083FCA357AF3B09A /* SharedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EDDF3D91E21A5E5D546ED41 /* SharedKeychain.swift */; };
 		2D6FB6DB4849F9E87ABED805 /* WidgetReload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 442B2E2EDAFCEC723F7A4D25 /* WidgetReload.swift */; };
@@ -17,17 +18,20 @@
 		36635EB138FF8A4B6698EC3A /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B88ED75230843E7FF61E79A /* APIClient.swift */; };
 		3C9BB507068538CA83EED149 /* ShiJingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51973C6B54D5C302A82E3E3F /* ShiJingWidget.swift */; };
 		3E45D53F7AFBDF56529446CF /* AppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37262552F84556E74C66F4C5 /* AppShortcuts.swift */; };
+		48728754CEFE662B227D566E /* RemoteSession+Queue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 910C0E6B6E878D4E095EBB5F /* RemoteSession+Queue.swift */; };
 		4BF86FE7CE0BC9485AD18F1C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA83EAF792D5624EEA3CE11 /* Models.swift */; };
 		6360079382418D5385977F25 /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5FA3660DB88F64E7D64A4B9 /* Intents.swift */; };
 		679FCD5B5F3188967A723F62 /* WallpapersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27D8BD3049F3539DD7DA7537 /* WallpapersView.swift */; };
 		695F85C3B4BD9A53C77CB8F3 /* SettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7B5E8EBEC71B92C27E0F19 /* SettingsSection.swift */; };
 		69B1EC2E2F6D67EBB58E6001 /* WidgetReload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 442B2E2EDAFCEC723F7A4D25 /* WidgetReload.swift */; };
+		6E3D7151A168E47303C15F31 /* RemoteSessionDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B88EDB095551E9EE240288D1 /* RemoteSessionDemo.swift */; };
 		7012C29BB4CC01CBD3B368FA /* WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22FA460C376FBA22B55E217F /* WidgetViews.swift */; };
 		833A421C3683C30CFFAE31B1 /* RunNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */; };
 		94215927670239EE363E48CE /* ShiJingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04551D48684EF104173433F5 /* ShiJingApp.swift */; };
 		964F2B423059D88E93FE60F2 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B88ED75230843E7FF61E79A /* APIClient.swift */; };
 		BD12CD4B6997209CA3570CAB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EBBECD2386D5DFE983684B8F /* Assets.xcassets */; };
 		C1D57C628AAC10FA1D1BF907 /* RunNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */; };
+		CB1F3EE7F92F5301A9C24BD6 /* ConnectionUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = D312A6D521567C089FF18F3E /* ConnectionUI.swift */; };
 		CB821EEC8C60F998A6F25950 /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5FA3660DB88F64E7D64A4B9 /* Intents.swift */; };
 		D30F6878DC0FD0D245B8FDE3 /* SharedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EDDF3D91E21A5E5D546ED41 /* SharedKeychain.swift */; };
 		D6C6708F80AFC875451C3BDD /* RemoteSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D7F2A21A98AC8FD6910260 /* RemoteSession.swift */; };
@@ -86,12 +90,17 @@
 		5CF0981B7D45E7EE853F6988 /* ShiJingWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShiJingWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		6AC7C4670660D49C3BD8F942 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		6B88ED75230843E7FF61E79A /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		910C0E6B6E878D4E095EBB5F /* RemoteSession+Queue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RemoteSession+Queue.swift"; sourceTree = "<group>"; };
 		A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageStore.swift; sourceTree = "<group>"; };
 		A5CD57E5BA5441C8D0006947 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		AF6C987C6A493F6426A7BFFC /* RecordsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsPage.swift; sourceTree = "<group>"; };
 		B5FA3660DB88F64E7D64A4B9 /* Intents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents.swift; sourceTree = "<group>"; };
+		B88EDB095551E9EE240288D1 /* RemoteSessionDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSessionDemo.swift; sourceTree = "<group>"; };
 		BCA83EAF792D5624EEA3CE11 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		D312A6D521567C089FF18F3E /* ConnectionUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionUI.swift; sourceTree = "<group>"; };
 		D86F178096ED4F9BDCD820EE /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		DB7F89AA01677C0EB4EEDE4A /* WallPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallPreview.swift; sourceTree = "<group>"; };
+		E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 		EBBECD2386D5DFE983684B8F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F148DFA81C0AF1A9841A39B7 /* PairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
 		FA7B5E8EBEC71B92C27E0F19 /* SettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSection.swift; sourceTree = "<group>"; };
@@ -145,15 +154,20 @@
 			children = (
 				37262552F84556E74C66F4C5 /* AppShortcuts.swift */,
 				EBBECD2386D5DFE983684B8F /* Assets.xcassets */,
+				D312A6D521567C089FF18F3E /* ConnectionUI.swift */,
 				A5CD57E5BA5441C8D0006947 /* DashboardView.swift */,
 				1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */,
 				A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */,
 				6AC7C4670660D49C3BD8F942 /* Info.plist */,
+				E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */,
 				15FB9144ACC689795E105A27 /* MacListView.swift */,
 				35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */,
 				37DE3185BEF88948B31C589F /* OfflineStore.swift */,
 				F148DFA81C0AF1A9841A39B7 /* PairView.swift */,
+				AF6C987C6A493F6426A7BFFC /* RecordsPage.swift */,
 				57D7F2A21A98AC8FD6910260 /* RemoteSession.swift */,
+				910C0E6B6E878D4E095EBB5F /* RemoteSession+Queue.swift */,
+				B88EDB095551E9EE240288D1 /* RemoteSessionDemo.swift */,
 				FA7B5E8EBEC71B92C27E0F19 /* SettingsSection.swift */,
 				4E2CF36D4F4743785C376FFE /* ShiJing.entitlements */,
 				04551D48684EF104173433F5 /* ShiJingApp.swift */,
@@ -261,6 +275,7 @@
 			files = (
 				964F2B423059D88E93FE60F2 /* APIClient.swift in Sources */,
 				3E45D53F7AFBDF56529446CF /* AppShortcuts.swift in Sources */,
+				CB1F3EE7F92F5301A9C24BD6 /* ConnectionUI.swift in Sources */,
 				099E53CA17FB750EED57745A /* DashboardView.swift in Sources */,
 				21220E16DFE4ED934EEDE0FB /* Discovery.swift in Sources */,
 				D7E126223CA530FF96744B6D /* ImageStore.swift in Sources */,
@@ -270,7 +285,10 @@
 				4BF86FE7CE0BC9485AD18F1C /* Models.swift in Sources */,
 				E3961E29F87DF6C22878B7BB /* OfflineStore.swift in Sources */,
 				32FAC1FD1E3F25C80AC63004 /* PairView.swift in Sources */,
+				0F54659699EBBC3BCED13F87 /* RecordsPage.swift in Sources */,
+				48728754CEFE662B227D566E /* RemoteSession+Queue.swift in Sources */,
 				D6C6708F80AFC875451C3BDD /* RemoteSession.swift in Sources */,
+				6E3D7151A168E47303C15F31 /* RemoteSessionDemo.swift in Sources */,
 				833A421C3683C30CFFAE31B1 /* RunNotifier.swift in Sources */,
 				695F85C3B4BD9A53C77CB8F3 /* SettingsSection.swift in Sources */,
 				297D4087083FCA357AF3B09A /* SharedKeychain.swift in Sources */,

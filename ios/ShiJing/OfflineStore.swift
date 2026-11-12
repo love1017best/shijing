@@ -11,6 +11,9 @@ final class OfflineStore {
         var state: RemoteState
         var walls: [Wallpaper]
         var hero: String?
+        /// `walls` 对应的是哪一批（`walls_rev`）。不能拿 `state.wallsRev` 顶替：
+        /// 状态推送比列表先到的那一小段时间里，两者不是同一批。旧版本的文件没有这个字段（nil）。
+        var wallsRev: String?
         var at: Date
     }
 

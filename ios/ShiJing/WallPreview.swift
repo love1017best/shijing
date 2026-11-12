@@ -76,7 +76,6 @@ struct WallPreview: View {
     private var wall: Wallpaper? { index.map { walls[$0] } }
     private var dragProgress: CGFloat { min(max(dragY, 0) / 400, 1) }
     private var zoomed: Bool { scale > 1.01 }
-    private var organizeDisabled: Bool { session.acting != nil || session.state?.running == true }
 
     var body: some View {
         GeometryReader { geo in
@@ -90,11 +89,17 @@ struct WallPreview: View {
             .frame(width: size.width, height: size.height)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).midX } action: { screenMidX = $0 }
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) { doubleTap() }
-            .onTapGesture {
-                // 点一下藏起 / 显示顶栏和底栏。底部的操作列表开着的话，再点回来还是开着（别顺手收掉）
-                withAnimation(.easeOut(duration: 0.2)) { chrome.toggle() }
-            }
+            // 双击和单击要互斥：分开挂两个 onTapGesture 的话，双击的第一下会先触发一次单击，
+            // 切「铺满 / 完整」时顶栏底栏也跟着闪一下。
+            .gesture(
+                ExclusiveGesture(
+                    TapGesture(count: 2).onEnded { doubleTap() },
+                    TapGesture().onEnded {
+                        // 点一下藏起 / 显示顶栏和底栏。底部的操作列表开着的话，再点回来还是开着（别顺手收掉）
+                        withAnimation(.easeOut(duration: 0.2)) { chrome.toggle() }
+                    }
+                )
+            )
             .simultaneousGesture(dragGesture(size))
             .simultaneousGesture(magnifyGesture(size))
         }
@@ -141,22 +146,23 @@ struct WallPreview: View {
 
     // MARK: 翻页
 
-    /// 只摆当前和左右相邻的两页（首尾相接）。按文件名做标识，翻页后视图不重建，大图不会闪一下。
+    /// 只摆当前和左右相邻的两页（首尾相接）。身份按文件名算：翻页时相邻页只是换了位置，
+    /// 视图（连同已经解好的图）不用重建，滑动时也不会闪一下。
     @ViewBuilder
     private func pages(_ size: CGSize) -> some View {
         let n = walls.count
         if let i = index {
             let slots: [Int] = n == 1 ? [0] : n == 2 ? [0, dragX <= 0 ? 1 : -1] : [-1, 0, 1]
+            let pages = slots.map { PageSlot(d: $0, w: walls[(i + $0 + n) % n]) }
             ZStack {
-                ForEach(slots, id: \.self) { d in
-                    let w = walls[(i + d + n) % n]
-                    PreviewPage(session: session, wall: w, size: size,
+                ForEach(pages) { p in
+                    let d = p.d
+                    PreviewPage(session: session, wall: p.w, size: size,
                                 fitInsets: fitInsets(size),
                                 flipped: d == 0 && flipped,
                                 scale: d == 0 ? scale : 1,
                                 offset: d == 0 ? offset : .zero)
                         .offset(x: CGFloat(d) * (size.width + Self.pageGap) + dragX)
-                        .id(w.name)
                 }
             }
         }
@@ -326,6 +332,8 @@ struct WallPreview: View {
             }
             .onEnded { _ in
                 pinching = false
+                // 方向锁复位：不然缩放完再单指滑，会一直走平移分支，不翻页也不关闭
+                axis = nil
                 withAnimation(.spring(duration: 0.3)) {
                     if scale < 1.05 {
                         resetZoom()
@@ -456,43 +464,14 @@ struct WallPreview: View {
     /// 左下的一组：存到相册、移出（只动壁纸文件夹里这张）。
     @ViewBuilder
     private func tweakActions(_ w: Wallpaper, toolbar: Bool = false) -> some View {
-        Button {
-            Task { await session.saveOriginal(w) }
-        } label: {
-            Label(session.saving == w.name ? "正在下载…" : "存到相册", systemImage: "square.and.arrow.down").actionLabel(toolbar)
-        }
-        .disabled(session.saving != nil || session.offline) // 要从电脑下载原文件，离线时做不了
-        .accessibilityHint(WallAction.saveHint)
-        Button {
-            Task { await session.removeWallpaper(w, exclude: false) }
-        } label: {
-            Label("移出", systemImage: "minus.circle").actionLabel(toolbar)
-        }
-        .disabled(organizeDisabled)
-        .accessibilityHint(WallAction.removeHint)
-        if session.acting == w.name {
-            ProgressView()
-        }
+        barButtons([.save, .remove], w, toolbar: toolbar)
+        if session.acting == w.name { ProgressView() }
     }
 
     /// 右下的一组：不再选它、删除原图（动的是图库里的原图）。
     @ViewBuilder
     private func sourceActions(_ w: Wallpaper, toolbar: Bool = false) -> some View {
-        if w.hasSource {
-            Button {
-                Task { await session.removeWallpaper(w, exclude: true) }
-            } label: {
-                Label("不再选它", systemImage: "nosign").actionLabel(toolbar)
-            }
-            .disabled(organizeDisabled)
-            .accessibilityHint(WallAction.excludeHint)
-            Button(role: .destructive) {
-                confirmDelete = w
-            } label: {
-                Label("删除原图…", systemImage: "trash").actionLabel(toolbar)
-            }
-            .disabled(organizeDisabled || session.offline) // 离线时不排队删原图，等连上再做
-        }
+        barButtons([.exclude, .delete], w, toolbar: toolbar)
     }
 
     /// 一排到底时（窄屏）四个按钮连在一起。toolbar：工具栏式，每个按钮平分宽度、文字可以缩小
@@ -501,6 +480,30 @@ struct WallPreview: View {
         tweakActions(w, toolbar: toolbar)
         sourceActions(w, toolbar: toolbar)
     }
+
+    @ViewBuilder
+    private func barButtons(_ kinds: [WallActionKind], _ w: Wallpaper, toolbar: Bool) -> some View {
+        ForEach(kinds, id: \.self) { kind in
+            if !kind.needsSource || w.hasSource {
+                Button(role: kind.isDestructive ? .destructive : nil) {
+                    kind.perform(session, w, confirmDelete: $confirmDelete)
+                } label: {
+                    Label(kind == .save && session.saving == w.name ? "正在下载…" : kind.barTitle,
+                          systemImage: kind.icon)
+                        .actionLabel(toolbar)
+                }
+                .disabled(!kind.isEnabled(session))
+                .accessibilityHint(kind.hint)
+            }
+        }
+    }
+}
+
+/// 预览里的一页：位置（-1 左 / 0 当前 / 1 右）和那张壁纸。身份是文件名，翻页时图不会被重建。
+private struct PageSlot: Identifiable {
+    let d: Int
+    let w: Wallpaper
+    var id: String { w.name }
 }
 
 /// 预览里的一页：按屏幕形状决定铺满还是完整显示，再叠上缩放和平移。

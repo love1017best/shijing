@@ -21,6 +21,8 @@ final class ImageStore {
     private let cache = NSCache<NSString, PlatformImage>()
     private var inflight: [String: Task<PlatformImage?, Never>] = [:]
     private var prefetchTask: Task<Void, Never>?
+    /// 每一轮预取一个编号：旧的那轮被取消后收尾时，别把新一轮的「正在缓存」标志清掉
+    private var prefetchGen = 0
     /// 演示模式（Debug）：不请求网络，按文件名画一张渐变图
     var demo = false
 
@@ -60,24 +62,25 @@ final class ImageStore {
         try? u.setResourceValues(v)
     }
 
-    private func key(_ base: URL, _ name: String, _ kind: ImageKind) -> String {
-        "\(base.absoluteString)|\(name)|\(kind.rawValue)"
+    /// 内存缓存的 key。用 Mac 的 id 而不是地址或客户端：`session.client()` 要读钥匙串，
+    /// 而 `cached` 在缩略图网格和预览的 body 里每帧都会被调用。
+    private func key(_ session: RemoteSession, _ name: String, _ kind: ImageKind) -> String {
+        "\(session.macID.uuidString)|\(name)|\(kind.rawValue)"
     }
 
     /// 已经在内存里的图（不发请求）。
     func cached(_ session: RemoteSession, _ name: String, _ kind: ImageKind) -> PlatformImage? {
-        guard let c = try? session.client() else { return nil }
-        return cache.object(forKey: key(c.base, name, kind) as NSString)
+        cache.object(forKey: key(session, name, kind) as NSString)
     }
 
     func load(_ session: RemoteSession, _ name: String, _ kind: ImageKind) async -> PlatformImage? {
-        guard let client = try? session.client() else { return nil }
-        let k = key(client.base, name, kind)
+        let k = key(session, name, kind)
         if let img = cache.object(forKey: k as NSString) { return img }
         if let t = inflight[k] { return await t.value }
         let demo = demo
         let offline = session.offline
         let rev = session.wallsRev ?? ""
+        let client = try? session.client()
         let t = Task<PlatformImage?, Never> {
             let data: Data?
             if demo {
@@ -87,7 +90,7 @@ final class ImageStore {
             } else if offline {
                 data = nil // 连不上电脑：只认磁盘上缓存过的，别干等网络超时
             } else {
-                data = try? await client.imageData(name, kind: kind)
+                data = try? await client?.imageData(name, kind: kind)
                 if let data {
                     let rev = rev, name = name, kind = kind
                     await Task.detached(priority: .utility) { Self.writeDisk(rev, name, kind, data) }.value
@@ -118,6 +121,8 @@ final class ImageStore {
         #endif
         guard let client = try? session.client(), let rev = session.wallsRev, !rev.isEmpty else { return }
         prefetchTask?.cancel()
+        prefetchGen += 1
+        let gen = prefetchGen
         prefetchPaused = false
         prefetchHitLimit = false
         // 缩略图和横幅图排前面（十几 MB），网格里每张立刻有得看；再按上限存整批预览图
@@ -128,7 +133,8 @@ final class ImageStore {
         prefetchDone = 0
         prefetching = true
         prefetchTask = Task {
-            var used = Self.diskUsage()
+            // 枚举整个缓存目录逐文件取大小，别在主线程做
+            var used = await Task.detached(priority: .utility) { Self.diskUsage() }.value
             let limit = Self.cacheLimitBytes
             var pending = queue
             var hitLimit = false
@@ -145,7 +151,7 @@ final class ImageStore {
                 while let (kind, bytes) = await group.next() {
                     if Task.isCancelled {
                         group.cancelAll()
-                        prefetching = false
+                        if gen == prefetchGen { prefetching = false }
                         return
                     }
                     if kind == .image { prefetchDone += 1 }
@@ -159,7 +165,7 @@ final class ImageStore {
                     _ = addNext()
                 }
             }
-            prefetching = false
+            if gen == prefetchGen { prefetching = false }
         }
     }
 
@@ -213,14 +219,18 @@ final class ImageStore {
     func clearDiskCache() {
         prefetchTask?.cancel()
         prefetchTask = nil
+        prefetchGen += 1
         prefetching = false
         prefetchPaused = false
         prefetchHitLimit = false
         prefetchDone = 0
         prefetchTotal = 0
         cache.removeAllObjects()
-        guard let dir = Self.diskDir else { return }
-        try? FileManager.default.removeItem(at: dir)
+        // 十几 GB 的目录，别在主线程删
+        Task.detached(priority: .utility) {
+            guard let dir = Self.diskDir else { return }
+            try? FileManager.default.removeItem(at: dir)
+        }
     }
 
     #if DEBUG

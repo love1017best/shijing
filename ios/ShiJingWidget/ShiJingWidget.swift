@@ -155,7 +155,7 @@ enum TimelineMaker {
             snap = WidgetCache.Snapshot(state: state, list: list ?? cachedList, at: now)
             WidgetCache.save(snap!, key)
             client = c
-            if !preview { RunNotifier.observe(old: nil, new: state, mac: mac.name) }
+            if !preview { RunNotifier.observe(new: state, mac: mac.name) }
         } catch APIError.unauthorized {
             problem = "配对已失效，打开拾景重新配对"
         } catch {
