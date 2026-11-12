@@ -57,11 +57,6 @@ private struct MacTitleMenu: ViewModifier {
                 }
                 Button("添加其他 Mac…", systemImage: "plus") { adding = true }
                 Button("管理已配对的 Mac…", systemImage: "list.bullet") { managing = true }
-                Section {
-                    // 只是显示版本号（标题菜单里放一行说明文字，点了什么也不做）
-                    Button("拾景 \(AppVersion.text)" + (SigningExpiry.text.map { " · 签名\($0)" } ?? ""), systemImage: "info.circle") {}
-                        .disabled(true)
-                }
             }
             .sheet(isPresented: $adding) {
                 AddMacView(store: store, discovery: discovery)
