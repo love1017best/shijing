@@ -150,6 +150,15 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 「仅采样目录」采样时走同一个 `ImageVerdict`（`scanImages` → `checkResolutions`）。「筛选并采样目录」只有真删时才干净：只模拟、定时自动换、手机「只模拟」都不删原图，以前不合格的图留在图库里、采样时又不查，竖图照样会被选进壁纸（增量模式还会把目录记成查过、以后一直跳过）。现在筛选把「不合格但没删」的图记进增量状态的 `rejected`（按目录），跳过的目录也带上，经 `SortResult.Remaining` → `CopyOptions.Rejected` 在采样时排除。`TestSimulatedFilterNeverSamplesRejected` 盖住了这条。
 - 判断逻辑改了要把 `sorter.go` 的 `verdictRules` 加 1：它记在增量状态的 `thresholds.rules` 里，不一样就整体重扫，否则以前判过、之后没动过的目录会一直被跳过，新规则永远不生效。
 
+### 16. 图库（NAS）不在时的整理：删除原图排队（v0.3.109）
+壁纸文件夹在本地，图库没挂上时看图、移出、⌘Z 撤销、不再选（`config.json` 的 `excluded`）都照常能用，只有「删除原图」要动网络卷。所以桌面端没有「离线模式」这个开关，只是把这一件事改成了队列（`desktop/pending.go` + `desktop/core/pending.go`，数据目录的 `pending_deletes.json`）。
+
+- **`os.Remove` 在卷没挂上时返回的也是 ENOENT**，跟「文件本来就不在」分不出来。旧代码把这种情况当成删掉了、还照写删除日志——这是真 bug。现在先看挂载状态（`sourceUnmounted`），再看**文件所在目录**还在不在（`dirMissing`），都不行才排队；只有 `os.IsPermission` 才弹错误。以后动删除相关的代码要注意这一点。
+- 队列每条记**路径 + 大小 + mtime**（排队时一般拿不到，记零值就只校验「文件还在」）。执行在后台（`RunPending`），只在所有图库目录都挂上时动手，避免对着断掉的卷逐个 stat 卡住；执行前指纹对不上（排队期间文件被改过）就不删、只写一行日志并从队列去掉，不自动重试。
+- 触发点：`main.go` 每分钟的定时器（先执行队列、再看挂载）和 `checkMounts` 每个目录探完的 `update`（`maybeProcessPending` 里 `unmountedCount() > 0` 就直接返回）。
+- 排队时壁纸文件夹里那份照样走 `removeWallpaper`（可以 ⌘Z 撤销）；概览横幅下面多一条 `pendingBar`，弹层 `pendingModal` 能逐条取消或全部取消。删除照旧记进删除记录（原因「手动删除」，日志里注明是排队执行）。`RemoteState.Pending` 把条数带给手机。
+- 测试：`desktop/core/pending_test.go`（校验、指纹、目录没了）、`desktop/pending_test.go`（离线排队、连上执行、等待、改过不删、概览弹层取消）。
+
 ## 两个会话并行开发（2026-11-11 起）
 
 macOS 端和 iOS 端分别由不同的会话负责，**两个会话共用同一个工作区**（同一个 checkout、都在 `main` 上，没有各自的 worktree）。所以：

@@ -16,6 +16,7 @@ type Paths struct {
 	DeleteLog string // 删除留痕
 	Selection string // 上一轮选中了哪些原图，用来算两轮之间的重合
 	History   string // 这一轮轮换里换上过哪些原图（PreferUnseen）
+	Pending   string // 图库没连上时排队的「删除原图」（pending.go）
 }
 
 // PathsIn 返回数据目录下的默认文件路径。
@@ -25,6 +26,7 @@ func PathsIn(dataDir string) Paths {
 		DeleteLog: filepath.Join(dataDir, "image_sorter_deleted.log"),
 		Selection: filepath.Join(dataDir, "last_selection.json"),
 		History:   filepath.Join(dataDir, "selection_history.json"),
+		Pending:   filepath.Join(dataDir, "pending_deletes.json"),
 	}
 }
 

@@ -24,6 +24,7 @@ func (a *app) modeLabel() string {
 func (a *app) overviewPage(c *ui.Context) {
 	pageHeader(c, "概览", "", nil)
 	a.hero(c)
+	a.pendingBar(c)
 
 	switch {
 	case a.running:
@@ -35,6 +36,7 @@ func (a *app) overviewPage(c *ui.Context) {
 	a.statStrip(c)
 	a.logPanel(c)
 	a.previewModal(c)
+	a.pendingModal(c)
 }
 
 // hero 是概览顶部的大横幅：背景是当前壁纸里的一张图，没有壁纸时画一幅暮色山景。

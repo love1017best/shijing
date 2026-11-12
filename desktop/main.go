@@ -33,6 +33,7 @@ func main() {
 	a := newApp(filepath.Join(dataDir, "config.json"), core.PathsIn(dataDir))
 	thumbCacheDir = filepath.Join(dataDir, "thumbs") // 缩略图缓存（thumbcache.go）
 	a.clearUndo()                                    // 上次打开时暂存的移出不再撤销
+	a.loadPending()                                  // 上次图库没连上时排队的删除原图
 
 	mygo.App.WhenReady(func() {
 		var win *mygo.Window
@@ -45,10 +46,17 @@ func main() {
 		}
 		a.remote.host = computerName()
 		a.remote.advertise = advertiseBonjour
-		// 定时自动换壁纸：每分钟回主线程检查一次（关窗只是隐藏，应用仍在运行）
+		// 定时自动换壁纸：每分钟回主线程检查一次（关窗只是隐藏，应用仍在运行）。
+		// 有待删原图排队时顺手再查一遍图库挂上没、挂上了就执行。
 		go func() {
 			for now := range time.Tick(time.Minute) {
-				a.update(func() { a.maybeAutoRun(now) })
+				a.update(func() {
+					a.maybeProcessPending()
+					if len(a.pending) > 0 {
+						a.checkMounts()
+					}
+					a.maybeAutoRun(now)
+				})
 			}
 		}()
 		a.version = mygo.App.Version()

@@ -189,13 +189,27 @@ func (a *app) removeWallpaper(wall string, exclude bool) {
 }
 
 // deleteOriginal 删除原图（记进删除日志）并从壁纸文件夹移除。调用前已经确认过。
+// 图库（NAS）现在连不上时不报错，而是把这一条排进待办队列，连上后自动执行（pending.go）。
 func (a *app) deleteOriginal(wall string) {
 	src := a.wallSource(wall)
 	if src == "" {
 		return
 	}
+	if a.sourceUnmounted(src) {
+		a.queueDelete(wall, src)
+		return
+	}
 	if err := os.Remove(src); err != nil && !os.IsNotExist(err) {
+		if !os.IsPermission(err) { // 删不掉多半是网络卷临时断开：排队等下次
+			a.queueDelete(wall, src)
+			return
+		}
 		a.showErr("删除原图失败", err.Error())
+		return
+	}
+	// 路径不存在要分清「文件真的没了」和「整个卷没挂上」：后者报的也是 ENOENT
+	if _, err := os.Lstat(filepath.Dir(src)); os.IsNotExist(err) {
+		a.queueDelete(wall, src)
 		return
 	}
 	core.LogDeletion(a.paths.DeleteLog, src, int(a.minW), int(a.minH), core.ReasonManual)

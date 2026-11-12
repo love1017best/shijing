@@ -594,6 +594,8 @@ type remoteState struct {
 	Settings *remoteSettings `json:"settings,omitempty"`  // 手机上能改的几项设置
 	UndoName string          `json:"undo_name,omitempty"` // 最近一次可以撤销的移出
 	Excluded int             `json:"excluded"`            // 「不再选」名单里有几张
+	// 图库没连上时排队的删除原图（pending.go）；手机上显示「N 项等电脑连上图库后执行」
+	Pending int `json:"pending"`
 }
 
 type remoteLast struct {
@@ -626,6 +628,7 @@ func (a *app) remoteSnapshot() remoteState {
 		Settings:   a.remoteSettings(),
 		UndoName:   a.undoName(),
 		Excluded:   len(a.cfg.Excluded),
+		Pending:    len(a.pending),
 	}
 	if s.WillDelete {
 		s.DeleteNote = a.deleteNotice()

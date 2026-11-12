@@ -188,6 +188,11 @@ type app struct {
 	pendLog   []string
 	pendProg  *progress
 	pendSched bool
+
+	// 图库没连上时排队的「删除原图」（pending.go）：loadPending 启动时读，连上后自动执行
+	pending      []core.PendingDelete
+	pendingBusy  bool // 正在后台执行队列
+	pendingShown bool // 「待删除的原图」弹层
 }
 
 func newApp(cfgPath string, paths core.Paths) *app {
@@ -499,7 +504,10 @@ func (a *app) checkMounts() {
 		a.mounts[d] = mountUnknown
 		go func() {
 			state := probeMount(a.statDir, d)
-			a.update(func() { a.mounts[d] = state })
+			a.update(func() {
+				a.mounts[d] = state
+				a.maybeProcessPending() // 图库挂上来了就把排队的删除执行掉
+			})
 		}()
 	}
 }
