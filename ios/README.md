@@ -19,15 +19,27 @@ SwiftUI 写的原生 iPhone / iPad 应用，在局域网里遥控 Mac 上的拾�
 3. iPhone 用线连上 Mac，在 Xcode 顶部选这台手机点运行；或者用命令行（见下面）。
 4. 第一次装：手机上打开「设置 › 隐私与安全性 › 开发者模式」并重启确认；装上后到「设置 › 通用 › VPN 与设备管理」里信任自己的开发者证书。
 
-在这个仓库里开发时直接用 `desktop/scripts/install-local.sh`：它会同时重装 Mac 端，并把 iOS 版装到所有连着的 iPhone / iPad 上（见根目录 CLAUDE.md「两个会话并行开发」）。手动的话，命令行构建并安装（`xcode-select` 指向命令行工具时用 `DEVELOPER_DIR` 指定 Xcode）：
+在这个仓库里开发时直接用 `desktop/scripts/install-local.sh`：它会同时重装 Mac 端，并把 iOS 版装到所有连着的 iPhone / iPad 上（见根目录 CLAUDE.md「两个会话并行开发」）。
+
+只想给手机 / 平板装（比如免费签名 7 天到期了续一下、不想动 Mac 端），用 `desktop/scripts/install-ios.sh`：
+
+```bash
+desktop/scripts/install-ios.sh                # GitHub 上最新发布的版本
+desktop/scripts/install-ios.sh --current      # 当前工作区的代码（包括还没提交的改动）
+desktop/scripts/install-ios.sh --device Pad   # 只装名字里含「Pad」的设备，不写就装所有连着的
+```
+
+默认装最新发布的 tag：在临时 worktree 里检出那个 tag 再构建，工作区里没提交的改动不会混进去，装完删掉。都不动 `/Applications` 里的 Mac 版。要求设备解锁、信任这台电脑、开了开发者模式。
+
+手动一步步来的话（`xcode-select` 指向命令行工具时用 `DEVELOPER_DIR` 指定 Xcode）：
 
 ```bash
 export DEVELOPER_DIR=/Applications/Xcode-27.2.0.app/Contents/Developer
 xcrun devicectl list devices                     # 找手机的 Identifier
 cd ios
-xcodebuild -project ShiJing.xcodeproj -scheme ShiJing -destination 'generic/platform=iOS' \
+xcodebuild -project ShiJing.xcodeproj -scheme ShiJing -configuration Release -destination 'generic/platform=iOS' \
   -derivedDataPath build -allowProvisioningUpdates build
-xcrun devicectl device install app --device <Identifier> build/Build/Products/Debug-iphoneos/拾景.app
+xcrun devicectl device install app --device <Identifier> build/Build/Products/Release-iphoneos/拾景.app
 xcrun devicectl device process launch --device <Identifier> com.love1017best.shijing.ios
 ```
 

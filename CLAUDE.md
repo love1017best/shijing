@@ -129,7 +129,7 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 看 iOS 布局不用配对：Debug 构建带启动参数 `-demo`（空闲 + 上次运行）或 `-demoRunning`（运行中）会显示一份假状态（`RemoteSession.demo`），`xcrun simctl launch booted com.love1017best.shijing.ios -demo` 后 `xcrun simctl io booted screenshot` 截图。
 - **模拟器验证范围（用户规定，2026-11-11）**：小版本只验 iPhone Duo 的内屏、外屏各自的横竖屏（共四种）；普通竖屏 iPhone 和 iPad 的横竖屏只在用户明确要求时临时验一次，验完 `xcrun simctl shutdown`（多开模拟器太占内存）。
 - iPhone Duo（折叠屏，iPhone19,4）有模拟器：机型 `iPhone Duo`，用它自己的运行时 `iOS-27-2-iPhone19-4`。两块屏截图要指定 `--display`：内屏（展开）`--display=3`，外屏（合上）`--display=1`。切换展开 / 合上用 Device Hub 窗口底部的 Closed / Partially Open / Open 按钮（`com.apple.dt.Devices`，命令行没有接口）；**别用 `simctl io … screenConfig power off` 关屏**，会把 SpringBoard 弄崩、要重启模拟器。内屏展开后是横向的，侧边有传感器区占安全区：大图预览因此不用 `TabView(.page)`（它按扣掉安全区的宽度分页，会露出下一张）。
-- 大图预览（`ios/ShiJing/WallPreview.swift`）的翻页是自己写的：只摆上一张 / 当前 / 下一张三页，首尾相接（和桌面一样）；一次拖动开头判断方向——横向翻页、往下关闭、放大后平移，双指缩放以手指位置为中心。屏幕横着（内屏、手机横放）默认铺满，裁掉超过三成才完整显示；竖着一律完整显示，并让开顶栏底栏（`fitInsets`）。双击在铺满 / 完整之间切换（放大时双击还原）。底部缩略图条（`FilmStrip`）拖动时大图跟着换，按屏幕正中对齐（内屏侧边的传感器区会让这条变窄，不能用它自己的正中）；点顶部编号输入数字跳转，「全部壁纸」页的缩略图标着同样的编号。`-demoPreview` 启动参数直接打开大图预览；Device Hub 里用鼠标没法双指缩放，只能真机试。
+- 大图预览（`ios/ShiJing/WallPreview.swift`）的翻页是自己写的：只摆上一张 / 当前 / 下一张三页，首尾相接（和桌面一样）；一次拖动开头判断方向——横向翻页、上下滑（`Axis.panel`）、往下关闭、放大后平移，双指缩放以手指位置为中心。上下滑和系统相册一样（用户要求，v0.3.108）：上滑拉出底部操作列表（`panel = true`，同时 `chrome = true`），列表开着时下滑先收起列表并进入全屏（`panel = false`、`chrome = false`，顶栏底栏一起藏），全屏时再下滑才关闭预览；列表的把手点一下也能开关（VoiceOver 用）。`-demoPanel` 启动参数直接打开列表看排版。底部的四个操作按钮用 `ViewThatFits(in: .horizontal)` 三档自适应（普通一排 → 小号一排 → 工具栏式四列、图标在上小字在下），竖屏时不再竖排四行占掉一大块高度。屏幕横着（内屏、手机横放）默认铺满，裁掉超过三成才完整显示；竖着一律完整显示，并让开顶栏底栏（`fitInsets`）。双击在铺满 / 完整之间切换（放大时双击还原）。底部缩略图条（`FilmStrip`）拖动时大图跟着换，按屏幕正中对齐（内屏侧边的传感器区会让这条变窄，不能用它自己的正中）；点顶部编号输入数字跳转，「全部壁纸」页的缩略图标着同样的编号。`-demoPreview` 启动参数直接打开大图预览；Device Hub 里用鼠标没法双指缩放，只能真机试。
 - iOS 的开发语言必须是 `zh-Hans`（`project.yml` 的 `developmentLanguage`）：App 没有中文本地化时 `Locale.current` 会退回英文，日期、系统按钮都显示成英文（踩过）。
 - 装到手机的是 **Release**（v0.3.106 起，`install-ios-device.sh` 带 `-configuration Release`，产物在 `ios/build/Build/Products/Release-iphoneos/`）：`project.yml` 里 Release 剥符号（`STRIP_INSTALLED_PRODUCT` + `DEPLOYMENT_POSTPROCESSING`），App 还排除了 `WidgetViews.swift`（只给 Debug 的 `-demoWidgets` 用）。包从 Debug 的 6.3 MB 降到 2.1 MB，小组件进程也省内存。`-demo*` 启动参数都包在 `#if DEBUG` 里，只在模拟器的 Debug 构建里有；Release 里 App 用到 `WidgetViews` 里的类型会编不过，要么包进 `#if DEBUG`，要么挪进 `Shared/`。
 - iOS 端没有侧栏（v0.3.21 起，用户嫌宽屏上占地方、连 Mac 只有第一次装时用）：一台都没配对时整屏是 `SetupView`（附近的 Mac + 手动输入地址）；配对过之后是三个标签（v0.3.105 起，对应桌面侧边栏）：概览（`DashboardView`，只放状态和操作，设置只读摘要在「状态」分组）、设置（`SettingsPage`，分组和桌面设置页一致：采样 / 筛选 / 自动换壁纸 / 系统 / 关于）、记录（`RecordsPage`）。用户嫌设置堆在首页，别再把可改的设置放回概览。切换 / 添加 / 管理 Mac 在概览的标题菜单里（`macTitleMenu`，点顶部 Mac 名字）。小组件深链会切回概览标签。截图用启动参数 `-demoSettings` / `-demoRecords` 直接打开对应标签。「附近的 Mac」只在有界面显示它时才用 Bonjour 搜索（`Discovery.want(名字, 开关)`）：首次配对页和「添加其他 Mac」弹层。
@@ -156,9 +156,10 @@ macOS 端和 iOS 端分别由不同的会话负责，**两个会话共用同一�
 
 - **只提交自己改的文件**：`git add <具体路径>` / `git commit -- <路径>`，**不要 `git add -A`、`git commit -a`**，否则会把另一个会话写到一半的文件一起提交。提交前 `git status` 看一眼，不认识的改动别碰、别还原、别 `git stash`。
 - 接口两边对应（`desktop/remote.go` ↔ `ios/ShiJing/Models.swift` / `APIClient.swift`）：改了一边要同步另一边。另一边归对方会话管时，在提交说明里写清楚，或者告诉用户请对方会话跟进。
-- **构建、安装、发布只用这三个脚本**，它们共用一把锁（`desktop/scripts/lock.zsh`，锁文件在 `.git/shijing-build.lock`），两个会话同时跑时后来的会排队等，不会抢 `build/` 目录、同时替换 `/Applications/拾景.app` 或撞版本号：
+- **构建、安装、发布只用这几个脚本**，它们共用一把锁（`desktop/scripts/lock.zsh`，锁文件在 `.git/shijing-build.lock`），两个会话同时跑时后来的会排队等，不会抢 `build/` 目录、同时替换 `/Applications/拾景.app` 或撞版本号：
   - `desktop/scripts/install-local.sh`：构建 macOS 并装到 `/Applications`、启动；连着 iPhone / iPad 时再构建 iOS 装到设备上并启动。**哪一端改了都跑它**，两端都会重新安装运行（iOS 会话也一样，不要只装手机）。
-  - `desktop/scripts/install-ios-device.sh`：只装手机，`install-local.sh` 会自动调，一般不单独用。
+  - `desktop/scripts/install-ios-device.sh`：只装手机，`install-local.sh` 会自动调，一般不单独用。环境变量 `SHIJING_IOS_DIR` 换一个 `ios/` 目录来构建、`SHIJING_DEVICE` 只装名字含这段文字的设备（都给 `install-ios.sh` 用）。
+  - `desktop/scripts/install-ios.sh`：给用户自己手动装手机 / 平板用（比如免费签名 7 天到期要续）。默认装 GitHub 上最新发布的 tag（在临时 worktree 里检出再构建，工作区没提交的改动不会混进去，装完删掉），`--current` 装工作区当前代码，`--device 片段` 只装匹配的设备；不动 `/Applications` 里的 Mac 版。
   - `desktop/scripts/release.sh`：发布，见下面「发布规则」（`--version X.Y.Z` 发成指定版本，只在用户要求时用）。
 - 不要手动走发布步骤、不要手动 `bump-version.sh`、不要手动打 tag。
 
