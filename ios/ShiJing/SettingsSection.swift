@@ -84,6 +84,19 @@ struct SettingsPage: View {
 
     @ViewBuilder
     private func settingsContent(_ state: RemoteState) -> some View {
+        if session.connection != .live {
+            Section {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("现在连不上电脑，设置只能查看").font(.subheadline.bold())
+                        Text("改设置、换一批都要等连上电脑。离线时记下的「移出」「不再选」连上后会自动补上。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "wifi.slash").foregroundStyle(.orange)
+                }
+            }
+        }
         if let set = state.settings {
             editable(set, state)
         } else {
@@ -234,6 +247,14 @@ struct SettingsPage: View {
 /// 「记录」页：运行日志、删除记录、不再选名单（电脑上分别在日志区、「删除记录」页、图库页）。
 struct RecordsPage: View {
     let session: RemoteSession
+    #if DEBUG
+    /// 截图用：-demoLog / -demoDeletions / -demoExcluded 直接打开对应的子页（模拟器里点不动时用）
+    @State private var demoPage: String? = {
+        let a = ProcessInfo.processInfo.arguments
+        for k in ["Log", "Deletions", "Excluded"] where a.contains("-demo" + k) { return k.lowercased() }
+        return nil
+    }()
+    #endif
 
     var body: some View {
         MacPage(session: session, title: "记录") { state in
@@ -260,39 +281,88 @@ struct RecordsPage: View {
                 }
             }
         }
+        #if DEBUG
+        .navigationDestination(isPresented: Binding(
+            get: { demoPage != nil },
+            set: { if !$0 { demoPage = nil } }
+        )) {
+            switch demoPage {
+            case "log": LogView(session: session)
+            case "deletions": DeletionsView(session: session)
+            default: ExcludedView(session: session)
+            }
+        }
+        #endif
+    }
+}
+
+/// 记录页顶部的一行：显示的是手机上存的副本时，说明那份是什么时候同步的。
+struct RecordsCacheNote: View {
+    let session: RemoteSession
+    let at: Date
+
+    var body: some View {
+        Label {
+            Text(session.offline
+                 ? "离线 · \(DashboardView.ago(at))同步，下面是手机上存的副本"
+                 : "连不上电脑 · 显示的是 \(DashboardView.ago(at))同步的副本")
+        } icon: {
+            Image(systemName: "wifi.slash").foregroundStyle(.orange)
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
     }
 }
 
 /// 电脑上的运行日志（最近 400 行），运行中每 2 秒刷新、自动滚到底。
+/// 连不上电脑时显示手机上存的那份（连上时、换完一批后自动更新）。
 struct LogView: View {
     let session: RemoteSession
     @State private var lines: [String]?
     @State private var error: String?
+    /// 显示的是存下来的副本时，那份是什么时候同步的
+    @State private var syncedAt: Date?
 
     var body: some View {
         Group {
             if let lines {
                 if lines.isEmpty {
-                    ContentUnavailableView("还没有日志", systemImage: "text.alignleft",
-                                           description: Text("电脑上的拾景这次启动后还没运行过。"))
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 3) {
-                                ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
-                                    Text(line)
-                                        .font(.footnote.monospaced())
-                                        .foregroundStyle(Self.color(line))
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .id(i)
-                                }
-                            }
-                            .textSelection(.enabled)
-                            .padding()
+                    VStack(spacing: 0) {
+                        if let at = syncedAt {
+                            RecordsCacheNote(session: session, at: at)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal).padding(.vertical, 8)
+                            Divider()
                         }
-                        .onAppear { proxy.scrollTo(lines.count - 1, anchor: .bottom) }
-                        .onChange(of: lines.count) { _, n in
-                            withAnimation { proxy.scrollTo(n - 1, anchor: .bottom) }
+                        ContentUnavailableView("还没有日志", systemImage: "text.alignleft",
+                                               description: Text("电脑上的拾景这次启动后还没运行过。"))
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        if let at = syncedAt {
+                            RecordsCacheNote(session: session, at: at)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal).padding(.vertical, 8)
+                            Divider()
+                        }
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 3) {
+                                    ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
+                                        Text(line)
+                                            .font(.footnote.monospaced())
+                                            .foregroundStyle(Self.color(line))
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .id(i)
+                                    }
+                                }
+                                .textSelection(.enabled)
+                                .padding()
+                            }
+                            .onAppear { proxy.scrollTo(lines.count - 1, anchor: .bottom) }
+                            .onChange(of: lines.count) { _, n in
+                                withAnimation { proxy.scrollTo(n - 1, anchor: .bottom) }
+                            }
                         }
                     }
                 }
@@ -304,21 +374,35 @@ struct LogView: View {
         }
         .navigationTitle("运行日志")
         .iOSInlineTitle()
-        .task(id: session.state?.running) {
+        .task(id: "\(session.state?.running ?? false)|\(session.offline)") {
             repeat {
                 await load()
                 try? await Task.sleep(for: .seconds(2))
-            } while session.state?.running == true && !Task.isCancelled
+            } while session.state?.running == true && !session.offline && !Task.isCancelled
         }
         .refreshable { await load() }
     }
 
     private func load() async {
-        do {
-            lines = try await session.client().log()
+        if !session.offline {
+            do {
+                lines = try await session.client().log()
+                syncedAt = nil
+                error = nil
+                return
+            } catch {
+                self.error = RemoteSession.describe(error)
+            }
+        }
+        // 离线（或刚连不上）：显示手机上存的那份
+        if let c: OfflineStore.Cached<[String]> = OfflineStore.shared.loadRecord(session.macID.uuidString, .log) {
+            lines = c.value
+            syncedAt = c.at
             error = nil
-        } catch {
-            self.error = RemoteSession.describe(error)
+        } else if session.offline {
+            lines = nil
+            syncedAt = nil
+            error = "现在连不上电脑，手机上还没存过日志。连上电脑后会自动存一份，断线时就能看。"
         }
     }
 
@@ -330,18 +414,34 @@ struct LogView: View {
 }
 
 /// 删除记录：从图库里删掉的原图，按天分组，新的在前。
+/// 连不上电脑时显示手机上存的那份（连上时、换完一批后自动更新）。
 struct DeletionsView: View {
     let session: RemoteSession
     @State private var list: DeletionList?
     @State private var error: String?
+    /// 显示的是存下来的副本时，那份是什么时候同步的
+    @State private var syncedAt: Date?
 
     var body: some View {
         Group {
             if let list {
                 if list.items.isEmpty {
-                    ContentUnavailableView("没有删除过原图", systemImage: "trash.slash")
+                    VStack(spacing: 0) {
+                        if let at = syncedAt {
+                            RecordsCacheNote(session: session, at: at)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal).padding(.vertical, 8)
+                            Divider()
+                        }
+                        ContentUnavailableView("没有删除过原图", systemImage: "trash.slash")
+                    }
                 } else {
                     List {
+                        if let at = syncedAt {
+                            Section {
+                                RecordsCacheNote(session: session, at: at)
+                            }
+                        }
                         if let f = list.filter, let m = list.manual {
                             Section {
                                 LabeledContent("按筛选规则删除", value: "\(f) 张")
@@ -383,7 +483,7 @@ struct DeletionsView: View {
         }
         .navigationTitle(list.map { "删除记录（\($0.total)）" } ?? "删除记录")
         .iOSInlineTitle()
-        .task { await load() }
+        .task(id: session.offline) { await load() }
         .refreshable { await load() }
     }
 
@@ -398,11 +498,24 @@ struct DeletionsView: View {
     }
 
     private func load() async {
-        do {
-            list = try await session.client().deletions()
+        if !session.offline {
+            do {
+                list = try await session.client().deletions()
+                syncedAt = nil
+                error = nil
+                return
+            } catch {
+                self.error = RemoteSession.describe(error)
+            }
+        }
+        if let c: OfflineStore.Cached<DeletionList> = OfflineStore.shared.loadRecord(session.macID.uuidString, .deletions) {
+            list = c.value
+            syncedAt = c.at
             error = nil
-        } catch {
-            self.error = RemoteSession.describe(error)
+        } else if session.offline {
+            list = nil
+            syncedAt = nil
+            error = "现在连不上电脑，手机上还没存过删除记录。连上电脑后会自动存一份，断线时就能看。"
         }
     }
 }
@@ -413,15 +526,30 @@ struct ExcludedView: View {
     @State private var items: [ExcludedItem]?
     @State private var error: String?
     @State private var confirmAll = false
+    /// 显示的是存下来的副本时，那份是什么时候同步的
+    @State private var syncedAt: Date?
 
     var body: some View {
         Group {
             if let items {
                 if items.isEmpty {
-                    ContentUnavailableView("没有不再选的图片", systemImage: "checkmark.circle",
-                                           description: Text("在大图预览里点「不再选它」的原图会出现在这里。"))
+                    VStack(spacing: 0) {
+                        if let at = syncedAt {
+                            RecordsCacheNote(session: session, at: at)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal).padding(.vertical, 8)
+                            Divider()
+                        }
+                        ContentUnavailableView("没有不再选的图片", systemImage: "checkmark.circle",
+                                               description: Text("在大图预览里点「不再选它」的原图会出现在这里。"))
+                    }
                 } else {
                     List {
+                        if let at = syncedAt {
+                            Section {
+                                RecordsCacheNote(session: session, at: at)
+                            }
+                        }
                         Section {
                             ForEach(items) { it in
                                 VStack(alignment: .leading, spacing: 2) {
@@ -437,13 +565,16 @@ struct ExcludedView: View {
                                         Task { await restore([it.path]) }
                                     }
                                 }
+                                .disabled(session.offline) // 恢复要改电脑上的名单，离线时只能看
                             }
                         } footer: {
-                            Text("恢复后，以后换一批时这些原图又可能被选上。左滑一张可以单独恢复。")
+                            Text(session.offline
+                                 ? "离线时只能查看，连上电脑后再恢复。"
+                                 : "恢复后，以后换一批时这些原图又可能被选上。左滑一张可以单独恢复。")
                         }
                     }
                     .toolbar {
-                        Button("全部恢复") { confirmAll = true }
+                        if !session.offline { Button("全部恢复") { confirmAll = true } }
                     }
                 }
             } else if let error {
@@ -458,20 +589,37 @@ struct ExcludedView: View {
             Button("全部恢复") { Task { await restore(nil) } }
             Button("取消", role: .cancel) {}
         }
-        .task { await load() }
+        .task(id: session.offline) { await load() }
         .refreshable { await load() }
     }
 
     private func load() async {
-        do {
-            items = try await session.client().excluded()
+        if !session.offline {
+            do {
+                items = try await session.client().excluded()
+                syncedAt = nil
+                error = nil
+                return
+            } catch {
+                self.error = RemoteSession.describe(error)
+            }
+        }
+        if let c: OfflineStore.Cached<[ExcludedItem]> = OfflineStore.shared.loadRecord(session.macID.uuidString, .excluded) {
+            items = c.value
+            syncedAt = c.at
             error = nil
-        } catch {
-            self.error = RemoteSession.describe(error)
+        } else if session.offline {
+            items = nil
+            syncedAt = nil
+            error = "现在连不上电脑，手机上还没存过「不再选」名单。连上电脑后会自动存一份，断线时就能看。"
         }
     }
 
     private func restore(_ paths: [String]?) async {
+        guard !session.offline else {
+            session.actionError = "连不上电脑时不能恢复，连上后再试。"
+            return
+        }
         do {
             withAnimation { items = nil == paths ? [] : items?.filter { !paths!.contains($0.path) } }
             items = try await session.client().restoreExcluded(paths)

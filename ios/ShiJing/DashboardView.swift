@@ -299,11 +299,12 @@ struct DashboardView: View {
         } label: {
             Label(s.stopping ? "正在停止…" : "停止", systemImage: "stop.circle")
         }
-        .disabled(s.stopping || session.busy)
+        .disabled(s.stopping || session.busy || session.connection != .live)
     }
 
     /// 「换一批」按钮下面的说明：点不了的原因、目录访问不了、会删原图。
     private func runNote(_ s: RemoteState) -> String? {
+        if session.connection != .live { return "现在连不上电脑，换一批要等连上后再做。" }
         if let b = s.blocked { return b }
         if s.unmounted > 0 { return "上次检查时有 \(s.unmounted) 个图库目录访问不了，换一批前会重新检查。" }
         if s.willDelete { return "会先删除图库里不合格的原图，点了之后可以选只模拟。" }

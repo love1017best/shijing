@@ -114,7 +114,11 @@ final class RemoteSession {
                 for try await s in try client().events() {
                     let wasLive = connection == .live
                     RunNotifier.observe(old: state, new: s, mac: mac.name)
-                    if state?.running == true, !s.running { WidgetReload.all() }
+                    if state?.running == true, !s.running {
+                        WidgetReload.all()
+                        // 换完一批：日志、删除记录都变了，更新手机上存的记录
+                        Task { await refreshRecordsCache() }
+                    }
                     state = s
                     snapshotAt = nil
                     remember()
@@ -127,6 +131,8 @@ final class RemoteSession {
                         if !queued.isEmpty { Task { await flushOfflineActions() } }
                         // 又连上了：上一次没缓存完的接着补（已经存下的会跳过）；换了一批时 refreshWalls 会另起一轮
                         ImageStore.shared.prefetchAll(self)
+                        // 记录页的三份数据也存一份，下次断了还能看
+                        Task { await refreshRecordsCache() }
                     }
                     if s.wallsRev != wallsRev { Task { await refreshWalls() } }
                     delay = 1
@@ -299,6 +305,19 @@ final class RemoteSession {
         }
     }
 
+    /// 连上电脑时把记录页的三份数据（运行日志、删除记录、不再选）各存一份到手机，
+    /// 断线时记录页显示的就是这一份，标出是什么时候同步的。
+    func refreshRecordsCache() async {
+        guard let client = try? client() else { return }
+        let id = macID.uuidString
+        async let log: [String]? = try? client.log()
+        async let deletions: DeletionList? = try? client.deletions()
+        async let excluded: [ExcludedItem]? = try? client.excluded()
+        if let v = await log { OfflineStore.shared.saveRecord(id, .log, v) }
+        if let v = await deletions { OfflineStore.shared.saveRecord(id, .deletions, v) }
+        if let v = await excluded { OfflineStore.shared.saveRecord(id, .excluded, v) }
+    }
+
     /// 把当前状态和壁纸列表写到磁盘（离线时显示的上次样子）。运行中状态推得很密，最多 5 秒写一次；
     /// 壁纸列表变了（wallsChanged）时立刻写。
     private func remember(wallsChanged: Bool = false) {
@@ -348,6 +367,8 @@ final class RemoteSession {
             walls.removeAll { $0.name == w.name }
             remember(wallsChanged: true)
             await refreshWalls()
+            // 删除记录 / 不再选名单变了：顺手更新手机上存的那份，断了也能看
+            Task { await refreshRecordsCache() }
             return true
         } catch APIError.unauthorized(let msg) {
             connection = .unpaired(msg)
@@ -556,6 +577,24 @@ extension RemoteSession {
             // 顺便把演示图写进磁盘缓存，让「离线也能看图」这条路径真的走一遍（读的是磁盘，不是内存里的演示图）
             ImageStore.shared.seedDiskCache(rev: "demo", names: s.walls.prefix(24).map(\.name), hero: s.heroName)
             s.seedQueuedForDemo()
+            // 记录页：存一份演示数据，断线时记录页显示的就是它
+            let at = Date().addingTimeInterval(-3 * 3600 - 2400)
+            OfflineStore.shared.saveRecord(mac.id.uuidString, .log, [
+                "[风景/冰岛] ✅ 已复制: 风景-冰岛-0423.jpg",
+                "[风景/京都] ✅ 已复制: 风景-京都-0011.jpg",
+                "[筛选] 风景/落基山 没有变化，跳过 12 个文件夹",
+            ], at: at)
+            OfflineStore.shared.saveRecord(mac.id.uuidString, .deletions, DeletionList(
+                total: 3, filter: 2, manual: 1,
+                items: [
+                    Deletion(at: now - 3600, name: "0163.jpg", dir: "/Volumes/Media0/风景/京都", reason: "竖屏"),
+                    Deletion(at: now - 4000, name: "0288.jpg", dir: "/Volumes/Media0/风景/冰岛", reason: "分辨率不足"),
+                    Deletion(at: now - 86400, name: "0512.jpg", dir: "/Volumes/Media0/风景/阿尔卑斯", reason: "手动删除"),
+                ]), at: at)
+            OfflineStore.shared.saveRecord(mac.id.uuidString, .excluded, [
+                ExcludedItem(path: "/Volumes/Media0/风景/京都/0163.jpg", display: "~/Media0/风景/京都/0163.jpg"),
+                ExcludedItem(path: "/Volumes/Media0/风景/大理/0077.jpg", display: "~/Media0/风景/大理/0077.jpg"),
+            ], at: at)
         } else {
             ImageStore.shared.demo = true
         }

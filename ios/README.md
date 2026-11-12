@@ -67,8 +67,8 @@ cd ios && xcodegen
 | `DashboardView.swift` | 遥控面板：状态、步骤、进度、换一批 / 停止、上次运行、签名到期提醒 |
 | `SettingsSection.swift` | 「设置」标签（分组同电脑上的设置页）、「记录」标签和三页（运行日志、删除记录、不再选）、概览的「状态」分组 |
 | `WallpapersView.swift` / `WallPreview.swift` | 缩略图网格、撤销移出、分享原图 / 大图预览 |
-| `RemoteSession.swift` | 和一台 Mac 的连接：事件流（SSE）、断线重连、Mac 换 IP 后按 Bonjour 名重新找；运行中切到后台时多连一会儿；每次状态更新写一份离线快照 |
-| `OfflineStore.swift` | 离线快照：最后一次连上时的状态和壁纸列表（Application Support/拾景/offline），连不上时用它显示 |
+| `RemoteSession.swift` | 和一台 Mac 的连接：事件流（SSE）、断线重连、Mac 换 IP 后按 Bonjour 名重新找；运行中切到后台时多连一会儿；每次状态更新写一份离线快照；连上时和每换完一批把日志 / 删除记录 / 不再选各存一份 |
+| `OfflineStore.swift` | 离线快照：最后一次连上时的状态和壁纸列表（Application Support/拾景/offline），连不上时用它显示；记录页的三份缓存也在这里（带同步时间） |
 | `ImageStore.swift` | 图片的内存缓存 + 按批次（`walls_rev`）的磁盘缓存：缩略图和整批 2048 宽的预览图在连上时后台预取（受缓存上限限制，默认 10 GB），离线时从磁盘读；设置页的「离线」分组用它显示占用、进度和清除 |
 | `SigningExpiry.swift` | 免费签名到期时间 |
 | `AppShortcuts.swift` | Siri / 聚焦 / 操作按钮里直接能用的快捷指令 |

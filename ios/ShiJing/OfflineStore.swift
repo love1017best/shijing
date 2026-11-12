@@ -14,6 +14,13 @@ final class OfflineStore {
         var at: Date
     }
 
+    /// 记录页（运行日志、删除记录、不再选）的一份缓存，`at` 是同步的时间。
+    /// 壁纸和状态跟着每次推送走，记录只有连上时才有机会拿，所以单独存、单独标时间。
+    struct Cached<T: Codable>: Codable {
+        var value: T
+        var at: Date
+    }
+
     static let shared = OfflineStore()
 
     private let dir: URL?
@@ -49,7 +56,36 @@ final class OfflineStore {
     }
 
     func clear(_ id: String) {
-        guard let f = file(id) else { return }
+        guard let f = file(id), let dir = dir else { return }
         try? FileManager.default.removeItem(at: f)
+        // 记录缓存也一起删掉
+        let fm = FileManager.default
+        let prefix = "records-\(id)-"
+        for u in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        where u.lastPathComponent.hasPrefix(prefix) {
+            try? fm.removeItem(at: u)
+        }
     }
+
+    // MARK: 记录页的缓存（日志 / 删除记录 / 不再选）
+
+    private func recordFile(_ id: String, _ kind: String) -> URL? {
+        dir?.appending(path: "records-\(id)-\(kind).json", directoryHint: .notDirectory)
+    }
+
+    func saveRecord<T: Codable>(_ id: String, _ kind: RecordsKind, _ value: T, at: Date = Date()) {
+        guard let f = recordFile(id, kind.rawValue),
+              let data = try? encoder.encode(Cached(value: value, at: at)) else { return }
+        try? data.write(to: f, options: .atomic)
+    }
+
+    func loadRecord<T: Codable>(_ id: String, _ kind: RecordsKind) -> Cached<T>? {
+        guard let f = recordFile(id, kind.rawValue), let data = try? Data(contentsOf: f) else { return nil }
+        return try? decoder.decode(Cached<T>.self, from: data)
+    }
+}
+
+/// 记录页缓存的种类，对应记录页里的三个列表。
+enum RecordsKind: String {
+    case log, deletions, excluded
 }
