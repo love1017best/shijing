@@ -31,7 +31,24 @@ struct ShiJingApp: App {
 /// 顶层：没配对过任何 Mac 时整屏是「找 Mac / 配对」；配对过之后是三个标签——概览、设置、记录，
 /// 对应电脑上侧边栏的概览 / 设置 / 删除记录（iPad、展开的内屏上系统把标签栏放在顶部，不占侧边）。
 /// 切换、添加、移除 Mac 收在概览的标题菜单里（点顶部的 Mac 名字）——这些只在第一次装的时候用，不值得常驻一个侧栏。
-enum RootTab: Hashable { case overview, settings, records }
+enum RootTab: Hashable, CaseIterable { case overview, settings, records
+
+    var title: String {
+        switch self {
+        case .overview: "概览"
+        case .settings: "设置"
+        case .records: "记录"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .overview: "photo.on.rectangle"
+        case .settings: "gearshape"
+        case .records: "clock.arrow.circlepath"
+        }
+    }
+}
 
 struct RootView: View {
     @State private var store = MacStore()
@@ -44,34 +61,7 @@ struct RootView: View {
     var body: some View {
         Group {
             if let session {
-                TabView(selection: $tab) {
-                    NavigationStack {
-                        DashboardView(session: session, store: store)
-                            .macTitleMenu(store: store, discovery: discovery)
-                    }
-                    .tabItem { Label("概览", systemImage: "photo.on.rectangle") }
-                    .tag(RootTab.overview)
-                    NavigationStack {
-                        #if DEBUG
-                        // 截图用：-demoLibraryPage / -demoQueuePage 直接打开对应的二级页
-                        if ProcessInfo.processInfo.arguments.contains("-demoLibraryPage") {
-                            LibraryDirsView(session: session)
-                        } else if ProcessInfo.processInfo.arguments.contains("-demoQueuePage") {
-                            QueuedActionsView(session: session)
-                        } else {
-                            SettingsPage(session: session)
-                        }
-                        #else
-                        SettingsPage(session: session)
-                        #endif
-                    }
-                        .tabItem { Label("设置", systemImage: "gearshape") }
-                        .tag(RootTab.settings)
-                    NavigationStack { RecordsPage(session: session) }
-                        .tabItem { Label("记录", systemImage: "clock.arrow.circlepath") }
-                        .tag(RootTab.records)
-                }
-                .id(session.macID)
+                tabs(session)
             } else {
                 SetupView(store: store, discovery: discovery)
             }
@@ -117,6 +107,113 @@ struct RootView: View {
                 break
             }
         }
+    }
+
+    /// 三个标签：概览 / 设置 / 记录。
+    /// iPad 上系统顶部标签栏（iOS 26/27）只画文字、没有图标，所以自己画一条带图标的顶栏，
+    /// 把系统栏隐藏掉；iPhone 还是系统的底部标签栏（iOS 18 起用新的 `Tab` API，更稳）。
+    @ViewBuilder
+    private func tabs(_ session: RemoteSession) -> some View {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            VStack(spacing: 0) {
+                padTabBar
+                    .padding(.top, 4)
+                padTabView(session)
+            }
+            .id(session.macID)
+        } else {
+            tabView(session)
+                .id(session.macID)
+        }
+    }
+
+    /// iPad 的内容区：用 page 样式，系统不再画标签栏（顶部那条是自己画的），三个页面照样由 TabView 管理，
+    /// 切回来时滚动位置和导航栈都还在。`indexDisplayMode: .never` 去掉底部小圆点。
+    private func padTabView(_ session: RemoteSession) -> some View {
+        TabView(selection: $tab) {
+            overviewStack(session).tag(RootTab.overview)
+            settingsStack(session).tag(RootTab.settings)
+            recordsStack(session).tag(RootTab.records)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+    }
+
+    /// iPad 顶部自己画的三项：图标 + 文字，选中的那一项高亮。
+    private var padTabBar: some View {
+        HStack(spacing: 6) {
+            ForEach(RootTab.allCases, id: \.self) { t in
+                Button {
+                    tab = t
+                } label: {
+                    Label(t.title, systemImage: t.icon)
+                        .font(.subheadline.weight(tab == t ? .semibold : .regular))
+                        .foregroundStyle(tab == t ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(tab == t ? Color.accentColor.opacity(0.14) : Color.clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private func tabView(_ session: RemoteSession) -> some View {
+        if #available(iOS 18.0, *) {
+            TabView(selection: $tab) {
+                Tab(RootTab.overview.title, systemImage: RootTab.overview.icon, value: RootTab.overview) {
+                    overviewStack(session)
+                }
+                Tab(RootTab.settings.title, systemImage: RootTab.settings.icon, value: RootTab.settings) {
+                    settingsStack(session)
+                }
+                Tab(RootTab.records.title, systemImage: RootTab.records.icon, value: RootTab.records) {
+                    recordsStack(session)
+                }
+            }
+        } else {
+            TabView(selection: $tab) {
+                overviewStack(session)
+                    .tabItem { Label(RootTab.overview.title, systemImage: RootTab.overview.icon) }
+                    .tag(RootTab.overview)
+                settingsStack(session)
+                    .tabItem { Label(RootTab.settings.title, systemImage: RootTab.settings.icon) }
+                    .tag(RootTab.settings)
+                recordsStack(session)
+                    .tabItem { Label(RootTab.records.title, systemImage: RootTab.records.icon) }
+                    .tag(RootTab.records)
+            }
+        }
+    }
+
+    private func overviewStack(_ session: RemoteSession) -> some View {
+        NavigationStack {
+            DashboardView(session: session, store: store)
+                .macTitleMenu(store: store, discovery: discovery)
+        }
+    }
+
+    private func settingsStack(_ session: RemoteSession) -> some View {
+        NavigationStack {
+            #if DEBUG
+            // 截图用：-demoLibraryPage / -demoQueuePage 直接打开对应的二级页
+            if ProcessInfo.processInfo.arguments.contains("-demoLibraryPage") {
+                LibraryDirsView(session: session)
+            } else if ProcessInfo.processInfo.arguments.contains("-demoQueuePage") {
+                QueuedActionsView(session: session)
+            } else {
+                SettingsPage(session: session)
+            }
+            #else
+            SettingsPage(session: session)
+            #endif
+        }
+    }
+
+    private func recordsStack(_ session: RemoteSession) -> some View {
+        NavigationStack { RecordsPage(session: session) }
     }
 
     /// 选中的 Mac 变了：换一个连接。
