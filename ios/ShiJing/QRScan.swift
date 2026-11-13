@@ -26,7 +26,7 @@ struct QRScanView: View {
                     if busy {
                         ProgressView("正在配对…")
                             .padding(.horizontal, 18).padding(.vertical, 12)
-                            .background(.ultraThinMaterial, in: Capsule())
+                            .glassBackground(in: Capsule())
                     } else if let error {
                         VStack(spacing: 10) {
                             Text(error)
@@ -39,12 +39,12 @@ struct QRScanView: View {
                             .buttonStyle(.borderedProminent)
                         }
                         .padding(18)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .glassBackground(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     } else {
                         Text("对准电脑上的配对二维码")
                             .font(.subheadline)
                             .padding(.horizontal, 18).padding(.vertical, 10)
-                            .background(.ultraThinMaterial, in: Capsule())
+                            .glassBackground(in: Capsule())
                     }
                     Spacer().frame(height: 30)
                 }

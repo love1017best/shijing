@@ -43,6 +43,7 @@
 		E3961E29F87DF6C22878B7BB /* OfflineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37DE3185BEF88948B31C589F /* OfflineStore.swift */; };
 		ED3B0A4451922C1D686A69E1 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA83EAF792D5624EEA3CE11 /* Models.swift */; };
 		F223669D3393FCDE9438804C /* MacListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FB9144ACC689795E105A27 /* MacListView.swift */; };
+		F3413348AA26794612633F8A /* Glass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B664321E5DAC9977CDA08D4 /* Glass.swift */; };
 		FF9B90C2D43F0864EF77A022 /* WallPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB7F89AA01677C0EB4EEDE4A /* WallPreview.swift */; };
 /* End PBXBuildFile section */
 
@@ -89,6 +90,7 @@
 		4E2CF36D4F4743785C376FFE /* ShiJing.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShiJing.entitlements; sourceTree = "<group>"; };
 		51973C6B54D5C302A82E3E3F /* ShiJingWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiJingWidget.swift; sourceTree = "<group>"; };
 		57D7F2A21A98AC8FD6910260 /* RemoteSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSession.swift; sourceTree = "<group>"; };
+		5B664321E5DAC9977CDA08D4 /* Glass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Glass.swift; sourceTree = "<group>"; };
 		5C9A72A38A9D6D87D9C1E560 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5CF0981B7D45E7EE853F6988 /* ShiJingWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShiJingWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		6AC7C4670660D49C3BD8F942 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -103,6 +105,7 @@
 		D312A6D521567C089FF18F3E /* ConnectionUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionUI.swift; sourceTree = "<group>"; };
 		D86F178096ED4F9BDCD820EE /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		DB7F89AA01677C0EB4EEDE4A /* WallPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallPreview.swift; sourceTree = "<group>"; };
+		E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 		EBBECD2386D5DFE983684B8F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		EF4AF9CF2058B681076FAE56 /* QueuedActionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuedActionsView.swift; sourceTree = "<group>"; };
 		F148DFA81C0AF1A9841A39B7 /* PairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
@@ -160,8 +163,10 @@
 				D312A6D521567C089FF18F3E /* ConnectionUI.swift */,
 				A5CD57E5BA5441C8D0006947 /* DashboardView.swift */,
 				1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */,
+				5B664321E5DAC9977CDA08D4 /* Glass.swift */,
 				A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */,
 				6AC7C4670660D49C3BD8F942 /* Info.plist */,
+				E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */,
 				15FB9144ACC689795E105A27 /* MacListView.swift */,
 				35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */,
 				37DE3185BEF88948B31C589F /* OfflineStore.swift */,
@@ -282,6 +287,7 @@
 				CB1F3EE7F92F5301A9C24BD6 /* ConnectionUI.swift in Sources */,
 				099E53CA17FB750EED57745A /* DashboardView.swift in Sources */,
 				21220E16DFE4ED934EEDE0FB /* Discovery.swift in Sources */,
+				F3413348AA26794612633F8A /* Glass.swift in Sources */,
 				D7E126223CA530FF96744B6D /* ImageStore.swift in Sources */,
 				CB821EEC8C60F998A6F25950 /* Intents.swift in Sources */,
 				F223669D3393FCDE9438804C /* MacListView.swift in Sources */,

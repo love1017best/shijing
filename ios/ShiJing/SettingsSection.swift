@@ -268,7 +268,7 @@ struct SettingsPage: View {
     @ViewBuilder
     private func macPage(_ state: RemoteState, built: Bool) -> some View {
         if twoColumn {
-            HStack(alignment: .top, spacing: 0) {
+            HStack(alignment: .top, spacing: 24) { // 两栏中间留一点空，卡片别贴在一起
                 List {
                     if built {
                         macNoticeSection(state)
@@ -459,7 +459,8 @@ struct SettingsPage: View {
                 }
             )) {
                 ForEach(Array(presets.enumerated()), id: \.offset) { i, p in
-                    Text("\(p.label) · \(p.w)×\(p.h)").tag(i)
+                    // verbatim：普通插值会把数字按本地化格式加上千分位（3,840）
+                    Text(verbatim: "\(p.label) · \(p.w)×\(p.h)").tag(i)
                 }
                 Text("自定义").tag(presets.count)
             }

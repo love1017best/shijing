@@ -146,7 +146,7 @@ struct DashboardView: View {
                 heroPanel(s, wide: false, button: false)
                     .padding(14)
                     .frame(maxWidth: 520, alignment: .leading)
-                    .background(glass(hero), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .modifier(HeroGlass(hero: hero, shape: RoundedRectangle(cornerRadius: 14, style: .continuous)))
                 Spacer(minLength: 0)
                 if session.connection == .live {
                     runButton(s).frame(width: 220)
@@ -168,7 +168,7 @@ struct DashboardView: View {
                 heroPanel(s, wide: wide)
                     .padding(wide ? 16 : 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(glass(hero))
+                    .modifier(HeroGlass(hero: hero, shape: RoundedRectangle(cornerRadius: 0)))
             }
             .background { heroBackground(hero) }
             .clipShape(shape)
@@ -187,8 +187,19 @@ struct DashboardView: View {
         }
     }
 
-    private func glass(_ hero: Wallpaper?) -> AnyShapeStyle {
-        hero == nil ? AnyShapeStyle(Color.groupedCell) : AnyShapeStyle(.regularMaterial)
+    /// 横幅卡上的信息块：有横幅图时是一块液态玻璃（iOS 26 起），没图时退回内容区底色
+    private struct HeroGlass: ViewModifier {
+        let hero: Wallpaper?
+        let shape: RoundedRectangle
+
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if hero == nil {
+                content.background(Color.groupedCell, in: shape)
+            } else {
+                content.glassBackground(in: shape)
+            }
+        }
     }
 
     @ViewBuilder

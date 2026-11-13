@@ -405,7 +405,7 @@ struct AllWallpapersView: View {
             }
             .font(.subheadline)
             .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(.thinMaterial, in: Capsule())
+            .glassBackground(in: Capsule())
             .transaction { $0.animation = nil } // 换目录时别做宽度动画
         }
         .buttonStyle(.plain)
@@ -438,7 +438,7 @@ struct AllWallpapersView: View {
         }
         .disabled(selected.isEmpty)
         .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .glassBackground(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
@@ -512,6 +512,10 @@ struct UndoRemoveButton: View {
 struct ShareOriginalButton: View {
     let session: RemoteSession
     let wall: Wallpaper
+    /// 预览底部那排悬浮按钮里用（一块圆形的液态玻璃），菜单里用默认的系统按钮
+    var glass = false
+    /// 预览底部那排的直径（窄屏上要和关闭按钮一起收窄）
+    var size: CGFloat = 44
     @State private var loading = false
     @State private var file: SharedFile?
     /// 当前分享出去的那份临时文件：分享面板收起后删掉，不然每分享一张就留一份原图
@@ -523,6 +527,21 @@ struct ShareOriginalButton: View {
     }
 
     var body: some View {
+        Group {
+            if glass {
+                button.buttonStyle(.plain)
+            } else {
+                button.buttonStyle(.bordered).buttonBorderShape(.circle)
+            }
+        }
+        .disabled(loading || (session.offline && cached == nil)) // 离线、手机上又没存过：下载不了
+        .accessibilityLabel("分享原图")
+        .sheet(item: $file, onDismiss: cleanUp) { f in
+            ActivitySheet(items: [f.url]).ignoresSafeArea()
+        }
+    }
+
+    private var button: some View {
         Button {
             Task { await load() }
         } label: {
@@ -530,12 +549,9 @@ struct ShareOriginalButton: View {
                 Image(systemName: "square.and.arrow.up").opacity(loading ? 0 : 1)
                 if loading { ProgressView() }
             }
-            .font(.body.weight(.semibold)).frame(width: 36, height: 36)
-        }
-        .disabled(loading || (session.offline && cached == nil)) // 离线、手机上又没存过：下载不了
-        .accessibilityLabel("分享原图")
-        .sheet(item: $file, onDismiss: cleanUp) { f in
-            ActivitySheet(items: [f.url]).ignoresSafeArea()
+            .font(.body.weight(.semibold))
+            .frame(width: glass ? size : 36, height: glass ? size : 36)
+            .modifier(ShareGlass(glass: glass))
         }
     }
 
@@ -582,6 +598,20 @@ struct ActivitySheet: View {
 }
 #endif
 
+/// 预览底部的分享按钮：外面套一块圆形的液态玻璃
+private struct ShareGlass: ViewModifier {
+    let glass: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if glass {
+            content.glassBackground(in: Circle(), interactive: true).contentShape(Circle())
+        } else {
+            content
+        }
+    }
+}
+
 /// 「已存到相册」这类一闪而过的提示。
 struct NoticeBubble: View {
     let text: String?
@@ -592,7 +622,7 @@ struct NoticeBubble: View {
                 Label(text, systemImage: "checkmark.circle.fill")
                     .font(.subheadline.weight(.medium))
                     .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule())
+                    .glassBackground(in: Capsule())
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
