@@ -27,6 +27,11 @@ final class ImageStore {
     private var prefetchTask: Task<Void, Never>?
     /// 每一轮预取一个编号：旧的那轮被取消后收尾时，别把新一轮的「正在缓存」标志清掉
     private var prefetchGen = 0
+    /// 正在删缓存的磁盘操作（清除预览图 / 原图）：补齐之前要等它做完，
+    /// 否则 `diskUsage()` 会把还没删掉的文件算进去，一上来就以为到上限了
+    private var clearTask: Task<Void, Never>?
+    /// 这一轮缓存共用的磁盘预算（见 `Budget`）
+    private var budget = Budget()
     /// 演示模式（Debug）：不请求网络，按文件名画一张渐变图
     var demo = false
 
@@ -47,6 +52,18 @@ final class ImageStore {
     private(set) var originalTotal = 0
     private(set) var originalHitLimit = false
     private(set) var originalPaused = false
+
+    /// 一轮缓存共用的磁盘预算。
+    ///
+    /// 预览图（`prefetchAll`）和原图（`prefetchOriginals`）是两轮同时跑的（换一批之后一起启动），
+    /// 以前各自从「磁盘现在多大」起步、各自往下加：两边都以为还有整份空间，加起来能超上限将近一倍。
+    /// 现在同一轮里共用一个起点和一个已写字节数，谁写下的都算在里面。
+    /// `base` 是这一轮开始时量到的磁盘占用，量的时候要等还在跑的删文件操作做完（`clearTask`）。
+    final class Budget {
+        var base: Int64?
+        var spent: Int64 = 0
+        var used: Int64 { (base ?? 0) + spent }
+    }
 
     /// 缓存上限（GB），存在手机上，和电脑上的设置无关
     nonisolated static let cacheLimitKey = "offlineCacheLimitGB"
@@ -101,6 +118,9 @@ final class ImageStore {
         let demo = demo
         let offline = session.offline
         let rev = revOverride ?? session.wallsRev ?? ""
+        // 只给「当前这一批」写盘：传了别的批次（「待补操作」里上一批的条目）或者列表还没拉到时，
+        // 写下去要么把已经被 groom 删掉的旧目录重新建出来，要么建出一个空 rev 的垃圾目录
+        let writeToDisk = !rev.isEmpty && rev == session.wallsRev
         let client = try? session.client()
         let t = Task<PlatformImage?, Never> {
             var data: Data?
@@ -120,7 +140,7 @@ final class ImageStore {
                 data = nil // 连不上电脑：只认磁盘上缓存过的，别干等网络超时
             } else {
                 data = try? await client?.imageData(name, kind: kind)
-                if let data {
+                if let data, writeToDisk {
                     let rev = rev, name = name, kind = kind
                     await Task.detached(priority: .utility) { Self.writeDisk(rev, name, kind, data) }.value
                 }
@@ -162,10 +182,10 @@ final class ImageStore {
         queue.append(contentsOf: session.walls.map { ($0.name, .image) })
         prefetchTotal = session.walls.count // 进度按壁纸张数算（缩略图不算，它很快）
         prefetchDone = 0
+        let b = budgetForRound() // 在置「正在缓存」之前取：两边都空闲才算新的一轮
         prefetching = true
         prefetchTask = Task {
-            // 枚举整个缓存目录逐文件取大小，别在主线程做
-            var used = await Task.detached(priority: .utility) { Self.diskUsage() }.value
+            await measure(b)
             let limit = Self.cacheLimitBytes
             let pending = queue
             var next = 0
@@ -188,8 +208,8 @@ final class ImageStore {
                         return
                     }
                     if kind == .image { prefetchDone += 1 }
-                    used += bytes
-                    if used >= limit, next < pending.count {
+                    b.spent += bytes
+                    if b.used >= limit, next < pending.count {
                         // 到了上限：手上这几张存完就停，后面的不存了
                         hitLimit = true
                         prefetchHitLimit = true
@@ -199,6 +219,23 @@ final class ImageStore {
             }
             if gen == prefetchGen { prefetching = false }
         }
+    }
+
+    /// 这一轮（预览图 + 原图可能同时在跑）共用的预算对象。
+    /// 两边都空闲时说明是新的一轮：重新量一次磁盘占用。量的时候要等还排着的删缓存做完
+    /// （两个指标都是 `Budget` 的 `base`，谁先开始谁量），否则会量到已经被删掉的那部分。
+    private func budgetForRound() -> Budget {
+        if !prefetching, !originaling {
+            budget = Budget()
+        }
+        return budget
+    }
+
+    /// 量这一轮开始时的磁盘占用（只量一次，两个任务共用）。
+    private func measure(_ b: Budget) async {
+        guard b.base == nil else { return }
+        if let clear = clearTask { await clear.value; clearTask = nil }
+        b.base = await Task.detached(priority: .utility) { Self.diskUsage() }.value
     }
 
     /// 暂停整批缓存（设置页）。再点「继续」会重新排队，已经存下的会跳过。
@@ -236,6 +273,7 @@ final class ImageStore {
         originalHitLimit = false
         originalDone = 0
         originalTotal = session.walls.count
+        let b = budgetForRound() // 和预览图共用这一轮的起点和已写字节
         originaling = true
         let names = session.walls.map(\.name)
         originalTask = Task {
@@ -244,7 +282,7 @@ final class ImageStore {
                 names.filter { Self.cachedOriginal(rev: rev, name: $0) == nil }
             }.value
             originalDone = names.count - pending.count
-            var used = await Task.detached(priority: .utility) { Self.diskUsage() }.value
+            await measure(b)
             let limit = Self.cacheLimitBytes
             let queue = pending
             var next = 0
@@ -267,8 +305,8 @@ final class ImageStore {
                         return
                     }
                     originalDone += 1
-                    used += bytes
-                    if used >= limit, next < queue.count {
+                    b.spent += bytes
+                    if b.used >= limit, next < queue.count {
                         hitLimit = true
                         originalHitLimit = true
                     }
@@ -297,9 +335,19 @@ final class ImageStore {
         originalHitLimit = false
         originalDone = 0
         originalTotal = 0
+        budget = Budget()
         guard let rev else { return }
-        Task.detached(priority: .utility) {
-            Self.removeFiles(rev: rev, prefix: ImageKind.original.cachePrefix + "-")
+        clearDisk(rev, [.original])
+    }
+
+    /// 删这一批的某几种缓存（在后台，排在上一次删除后面）。
+    /// 任务句柄留着：补齐缓存之前要等它删完再量磁盘，不然会把马上要删掉的文件算进「已用」，
+    /// 一上来就以为到上限、只存几张就停。
+    private func clearDisk(_ rev: String, _ kinds: [ImageKind]) {
+        let prev = clearTask
+        clearTask = Task.detached(priority: .utility) {
+            _ = await prev?.value
+            for kind in kinds { Self.removeFiles(rev: rev, prefix: kind.cachePrefix + "-") }
         }
     }
 
@@ -433,13 +481,10 @@ final class ImageStore {
         prefetchDone = 0
         prefetchTotal = 0
         cache.removeAllObjects()
+        budget = Budget()
         guard let rev else { return }
         // 几百张图，别在主线程删
-        Task.detached(priority: .utility) {
-            for kind in [ImageKind.thumb, .hero, .image] {
-                Self.removeFiles(rev: rev, prefix: kind.cachePrefix + "-")
-            }
-        }
+        clearDisk(rev, [.thumb, .hero, .image])
     }
 
     #if DEBUG
@@ -489,7 +534,8 @@ final class ImageStore {
     }
 
     private nonisolated static func diskFile(_ rev: String, _ name: String, _ kind: ImageKind) -> URL? {
-        guard let dir = diskDir, let folder = revFolder(rev) else { return nil }
+        // 空 rev 不是「当前批次」：那会儿列表还没拉到，写下去会建出一个没人认领的目录
+        guard !rev.isEmpty, let dir = diskDir, let folder = revFolder(rev) else { return nil }
         return dir.appending(path: folder, directoryHint: .isDirectory)
             .appending(path: "\(kind.cachePrefix)-\(safeName(name))", directoryHint: .notDirectory)
     }

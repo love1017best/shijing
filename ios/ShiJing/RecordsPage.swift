@@ -75,13 +75,13 @@ func loadRecord<T: Codable>(
             return RecordLoad(value: try await online(session.client()), syncedAt: nil, error: nil)
         } catch {
             // 刚连不上：接着看有没有存下来的副本
-            if let c: OfflineStore.Cached<T> = OfflineStore.shared.loadRecord(session.macID.uuidString, kind) {
+            if let c: OfflineStore.Cached<T> = await OfflineStore.shared.loadRecord(session.macID.uuidString, kind) {
                 return RecordLoad(value: c.value, syncedAt: c.at, error: nil)
             }
             return RecordLoad(value: nil, syncedAt: nil, error: RemoteSession.describe(error))
         }
     }
-    if let c: OfflineStore.Cached<T> = OfflineStore.shared.loadRecord(session.macID.uuidString, kind) {
+    if let c: OfflineStore.Cached<T> = await OfflineStore.shared.loadRecord(session.macID.uuidString, kind) {
         return RecordLoad(value: c.value, syncedAt: c.at, error: nil)
     }
     return RecordLoad(value: nil, syncedAt: nil, error: offlineNote)

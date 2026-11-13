@@ -100,8 +100,14 @@ final class OfflineStore {
         }
     }
 
-    func loadRecord<T: Codable>(_ id: String, _ kind: RecordsKind) -> Cached<T>? {
-        guard let f = recordFile(id, kind.rawValue), let data = try? Data(contentsOf: f) else { return nil }
+    /// 读记录缓存。删除记录可能有几百条，读盘放后台，别在打开页面时卡主线程
+    /// （解码留在主线程做，避开泛型跨任务带来的 Sendable 要求）。
+    func loadRecord<T: Codable>(_ id: String, _ kind: RecordsKind) async -> Cached<T>? {
+        guard let f = recordFile(id, kind.rawValue) else { return nil }
+        let data = await Task.detached(priority: .userInitiated) {
+            try? Data(contentsOf: f)
+        }.value
+        guard let data else { return nil }
         return try? decoder.decode(Cached<T>.self, from: data)
     }
 }
