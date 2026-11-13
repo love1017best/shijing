@@ -224,6 +224,15 @@ func (a *app) dropWall(wall string) {
 	w := &a.walls
 	w.all = slices.DeleteFunc(w.all, func(p string) bool { return p == wall })
 	delete(w.thumbs, wall)
+	if wall == w.heroPath {
+		// 横幅图被移出 / 删掉了：横幅不能继续显示这张已经不在文件夹里的图。
+		// 先清掉，再在后台重读一遍文件夹挑新的横幅图（wallsGen 推进，正在进行的扫描
+		// 读完发现代际变了会再读一次，不会把删掉的图又认成横幅）。
+		w.hero = nil
+		w.heroPath = ""
+		a.wallsGen++
+		a.loadWallpapers()
+	}
 	if a.preview {
 		// 停在原位置，看到的就是下一张
 		if len(w.all) == 0 {

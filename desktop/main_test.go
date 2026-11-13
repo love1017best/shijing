@@ -733,6 +733,35 @@ func TestWallpaperActions(t *testing.T) {
 	}
 }
 
+func TestRemovingHeroClearsBanner(t *testing.T) {
+	f, tt := newFakeApp(t)
+	dir := t.TempDir()
+	hero, other := filepath.Join(dir, "a.jpg"), filepath.Join(dir, "b.jpg")
+	for _, p := range []string{hero, other} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	img := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 4, 4)))
+	f.walls = wallpapers{dir: dir, hero: img, heroPath: hero, all: []string{hero, other},
+		thumbs: map[string]*ui.Bitmap{hero: img, other: img}}
+	f.wallsLoadedGen = f.wallsGen
+	tt.Frame()
+	if !tt.HasText("横幅壁纸") {
+		t.Fatalf("移出前横幅应该显示着: %q", tt.Texts())
+	}
+
+	// 手机遥控删 / 移出的也是这条路径：横幅图不在了就不能继续显示它
+	f.removeWallpaper(hero, false)
+	tt.Frame()
+	if f.walls.hero != nil || f.walls.heroPath != "" {
+		t.Fatalf("移出横幅图后横幅不能还显示它: hero=%v path=%q", f.walls.hero, f.walls.heroPath)
+	}
+	if slices.Contains(f.walls.all, hero) || tt.HasText("横幅壁纸") {
+		t.Errorf("移出的横幅图不该还留在列表和横幅上: %q", f.walls.all)
+	}
+}
+
 func TestDeletedPageAndLibraryStats(t *testing.T) {
 	f, tt := newFakeApp(t)
 	f.cfg.FilterAndSampleDirs = []string{"/Volumes/Media0/Lib"}
