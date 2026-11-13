@@ -97,22 +97,41 @@ struct SettingsPage: View {
             if ProcessInfo.processInfo.arguments.contains("-demoAbout") { groupRaw = SettingsGroup.about.rawValue }
             #endif
         }
+        // 三栏切换放在导航栏下面、一条整宽的栏里：导航栏中间只剩两百多 pt（右边还有连接徽标），
+        // 三个中文标签放不下，窄屏上会被挤成「电脑上的…」。放这里滚到哪儿都看得到，还能左右滑。
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if showsPager { groupPicker }
+        }
         .toolbar {
-            // 三栏切换固定在导航栏中间，滚到哪儿都看得到
-            ToolbarItem(placement: .principal) {
-                Picker("设置分类", selection: $groupRaw) {
-                    Text("电脑上的拾景").tag(SettingsGroup.mac.rawValue)
-                    Text(ThisDevice.label).tag(SettingsGroup.phone.rawValue)
-                    Text("关于").tag(SettingsGroup.about.rawValue)
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 340)
-            }
             if session.savingSettings {
                 ToolbarItem(placement: .automatic) { ProgressView() } // 正在把改动发给电脑
             }
         }
         .connectionToolbar(session)
+    }
+
+    /// 三栏切换：整宽一条，内容区最宽 680（和列表一致）居中。
+    private var groupPicker: some View {
+        Picker("设置分类", selection: $groupRaw) {
+            Text("电脑上的拾景").tag(SettingsGroup.mac.rawValue)
+            Text(ThisDevice.label).tag(SettingsGroup.phone.rawValue)
+            Text("关于").tag(SettingsGroup.about.rawValue)
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: 680)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+    }
+
+    /// 三栏分页才要切换控件；截图用的单页（-demoOfflineCache 这些）不显示。
+    private var showsPager: Bool {
+        guard session.state != nil else { return false }
+        #if DEBUG
+        if let state = session.state, demoPage(state) != nil { return false }
+        #endif
+        return true
     }
 
     /// 三栏并排，左右滑也能切换（分段控件和翻页用同一个 selection）。
