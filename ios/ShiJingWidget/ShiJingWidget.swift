@@ -223,12 +223,16 @@ enum TimelineMaker {
             }
         }
 
-        // 3. 什么时候再取：离线一刻钟后重试；运行中一分钟；功能小组件最多半小时刷一次状态；壁纸小组件轮完或 6 小时
+        // 3. 什么时候再取：离线一刻钟后重试；运行中一分钟；缓存池还没填满时也早点再来（1 分钟轮换要多备几张图）；
+        //    功能小组件最多半小时刷一次状态；壁纸小组件轮完或 6 小时
         let end = Date(timeIntervalSince1970: Double(slot0 + count) * step)
+        let filling = client != nil && cachedNames.count < poolTarget
         let next: Date = if client == nil {
             retry
         } else if running {
             now.addingTimeInterval(60)
+        } else if filling {
+            min(end, now.addingTimeInterval(15 * 60))
         } else {
             min(end, now.addingTimeInterval(photo ? 6 * 3600 : 30 * 60))
         }
