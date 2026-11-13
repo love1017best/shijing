@@ -5,7 +5,6 @@ import SwiftUI
 struct SetupView: View {
     let store: MacStore
     let discovery: Discovery
-    @State private var width: CGFloat = 0
     @State private var flow = NearbyFlow()
     /// 截图用：-demoScan 一进来就打开扫码页，只开一次
     @State private var demoScanOpened = false
@@ -27,8 +26,7 @@ struct SetupView: View {
             }
             .navigationTitle("拾景")
             // 内屏、iPad 上内容别拉得太宽（只收窄内容，背景照样铺满）
-            .contentMargins(.horizontal, max(0, (width - 640) / 2), for: .scrollContent)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            .contentWidthCap(max: 640)
         }
         .nearbyPresenters(store: store, flow: flow)
         .onAppear {

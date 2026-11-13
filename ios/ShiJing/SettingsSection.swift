@@ -32,19 +32,17 @@ struct MacPage<Content: View>: View {
     let session: RemoteSession
     let title: String
     @ViewBuilder let content: (RemoteState) -> Content
-    @State private var width: CGFloat = 0
 
     var body: some View {
         Group {
             if let state = session.state {
                 List { content(state) }
                     // 内屏、iPad 上别拉得太宽（和电脑上设置页的单栏最宽一样的思路）
-                    .contentWidthCap(width, max: 680)
+                    .contentWidthCap(max: 680)
             } else {
                 ConnectionFallback(session: session)
             }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .navigationTitle(title)
         .connectionToolbar(session)
     }
@@ -90,7 +88,7 @@ struct SettingsPage: View {
                 ConnectionFallback(session: session)
             }
         }
-        .frame(width: demoWidth)
+        .frame(width: demoWidth, height: demoHeight)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
             width = size.width
             height = size.height
@@ -102,6 +100,7 @@ struct SettingsPage: View {
             // 截图用：-demoAbout 直接切到「关于」这一栏，-demoMacGroup 切回「电脑上的拾景」
             if ProcessInfo.processInfo.arguments.contains("-demoAbout") { groupRaw = SettingsGroup.about.rawValue }
             if ProcessInfo.processInfo.arguments.contains("-demoMacGroup") { groupRaw = SettingsGroup.mac.rawValue }
+            if ProcessInfo.processInfo.arguments.contains("-demoPhoneGroup") { groupRaw = SettingsGroup.phone.rawValue }
             #endif
         }
         // 三栏切换放在导航栏下面、一条整宽的栏里：导航栏中间只剩两百多 pt（右边还有连接徽标），
@@ -117,11 +116,15 @@ struct SettingsPage: View {
         .connectionToolbar(session)
     }
 
-    /// 截图用：-demoWidth 669 按指定宽度排版（模拟器里没法把 Duo 展开，借大屏模拟器看内屏的宽度）。
-    private var demoWidth: CGFloat? {
+    /// 截图用：-demoWidth 951 -demoHeight 560 按指定尺寸排版（模拟器里没法把 Duo 展开，
+    /// 借大屏模拟器按内屏的尺寸看排版；内屏是 951×669，扣掉状态栏、导航栏和切换栏约 560 高）。
+    private var demoWidth: CGFloat? { demoSize("-demoWidth") }
+    private var demoHeight: CGFloat? { demoSize("-demoHeight") }
+
+    private func demoSize(_ name: String) -> CGFloat? {
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
-        if let i = args.firstIndex(of: "-demoWidth"), i + 1 < args.count { return CGFloat(Double(args[i + 1]) ?? 0) }
+        if let i = args.firstIndex(of: name), i + 1 < args.count { return CGFloat(Double(args[i + 1]) ?? 0) }
         #endif
         return nil
     }
@@ -165,7 +168,7 @@ struct SettingsPage: View {
     }
 
     /// 宽度够了才分左右两栏（iPad、Duo 内屏），和电脑上的设置页一致；单栏时最宽 680、居中。
-    /// 高度也要够：手机横放只有 400 出头，两栏会挤成一团。
+    /// 高度也要够：Duo 内屏扣掉状态栏、导航栏和切换栏之后约 560，手机横放只有 400 出头会挤成一团。
     private var twoColumn: Bool {
         #if DEBUG
         // 截图用：模拟器不好转成横屏，-demoTwoCol 直接按两栏排
@@ -174,7 +177,7 @@ struct SettingsPage: View {
         return width >= twoColMin && height >= twoColMinHeight
     }
     private let twoColMin: CGFloat = 660
-    private let twoColMinHeight: CGFloat = 600
+    private let twoColMinHeight: CGFloat = 520
     private let twoColMax: CGFloat = 1360
 
     /// 当前栏和左右邻居先构建好（滑过去不会空一帧），更远、也从没显示过的先留空。
@@ -193,7 +196,7 @@ struct SettingsPage: View {
         List {
             if built { content() }
         }
-        .contentWidthCap(width, max: 680)
+        .contentWidthCap(max: 680)
     }
 
     #if DEBUG
@@ -218,7 +221,7 @@ struct SettingsPage: View {
         }
         guard let content else { return nil }
         return AnyView(List { content }
-            .contentWidthCap(width, max: 680))
+            .contentWidthCap(max: 680))
     }
     #endif
 
@@ -280,7 +283,7 @@ struct SettingsPage: View {
             List {
                 if built { macContent(state) }
             }
-            .contentWidthCap(width, max: 680)
+            .contentWidthCap(max: 680)
         }
     }
 
@@ -657,7 +660,7 @@ struct LibraryDirsView: View {
                         Text("挂载状态由电脑检查。点「重新检查挂载」后，电脑会重新检查这些目录，结果再返回手机。目录只能在电脑上的「图库」页增删。")
                     }
                 }
-                .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent)
+                .contentWidthCap(max: 680)
             } else {
                 ContentUnavailableView("没有目录信息", systemImage: "externaldrive",
                                        description: Text("电脑上的拾景版本较旧，升级后会显示图库目录。"))
@@ -855,15 +858,15 @@ private struct OfflineCacheSection: View {
 
 
 extension View {
-    /// 宽屏时把列表内容收窄到 `cap`、居中；窄屏（手机）什么都不加。
-    /// 别在这里统一设 `contentMargins(.horizontal, 0)`：那会把系统列表自带的左右留白顶掉，
-    /// 分组卡片贴着屏幕两边画成直角（Duo 外屏上就是这样，看着很挤）。
+    /// 内容最宽 `cap`、居中；比 `cap` 窄时（手机）铺满，系统列表自带的留白照旧。
+    /// 用 frame 收窄、不按量到的宽度算 `contentMargins`：分页 TabView 里没显示过的页
+    /// 不会因为外层宽度变了就重建，量到的宽度还是 0 的话留白算出来就是 0——
+    /// Duo 内屏上「这台 iPhone」「关于」两页因此比「电脑上的拾景」宽一大截。
     @ViewBuilder
-    func contentWidthCap(_ width: CGFloat, max cap: CGFloat) -> some View {
-        if width > cap {
-            contentMargins(.horizontal, (width - cap) / 2, for: .scrollContent)
-        } else {
-            self
-        }
+    func contentWidthCap(max cap: CGFloat) -> some View {
+        self
+            .frame(maxWidth: cap)
+            .frame(maxWidth: .infinity)
+            .background(Color(uiColor: .systemGroupedBackground))
     }
 }
