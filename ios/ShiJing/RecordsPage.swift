@@ -212,7 +212,8 @@ struct LogView: View {
 
 // MARK: - 删除记录
 
-/// 删除记录：从图库里删掉的原图，按天分组，新的在前。
+/// 删除记录：从图库里删掉的原图，按天分组（可以折叠），新的在前；
+/// 顶上的分段控件可以只看筛选删的或只看手动删的。
 /// 连不上电脑时显示手机上存的那份（连上时、换完一批后自动更新）。
 struct DeletionsView: View {
     let session: RemoteSession
@@ -220,10 +221,20 @@ struct DeletionsView: View {
     @State private var error: String?
     /// 显示的是存下来的副本时，那份是什么时候同步的
     @State private var syncedAt: Date?
+    @State private var kind: Kind = .all
+    /// 折叠起来的日期（默认都展开）
+    @State private var collapsedDays: Set<Date> = []
+
+    /// 只显示哪一类
+    enum Kind: Hashable { case all, filter, manual }
+
+    /// 桌面端 core.ReasonManual 写的就是这个词，其余（包括没有原因的旧日志）都算筛选删的
+    private static let manualReason = "手动删除"
 
     var body: some View {
         Group {
             if let list {
+                let items = shown(list.items)
                 if list.items.isEmpty {
                     VStack(spacing: 0) {
                         RecordsCacheHeader(session: session, at: syncedAt)
@@ -232,31 +243,44 @@ struct DeletionsView: View {
                 } else {
                     List {
                         recordsCacheSection(session, syncedAt)
-                        if let f = list.filter, let m = list.manual {
-                            Section {
-                                LabeledContent("按筛选规则删除", value: "\(f) 张")
-                                LabeledContent("手动删除", value: "\(m) 张")
-                            } footer: {
-                                Text("筛选删的是竖屏、接近正方形、分辨率不足的图；手动删的是在预览或手机上点「删除图库里的原图」的。")
+                        Section {
+                            Picker("显示", selection: $kind) {
+                                Text("全部").tag(Kind.all)
+                                Text("筛选删除").tag(Kind.filter)
+                                Text("手动删除").tag(Kind.manual)
                             }
+                            .pickerStyle(.segmented)
+                        } footer: {
+                            Text(note(list))
                         }
-                        ForEach(groups(list.items), id: \.day) { g in
-                            Section(g.day.formatted(.dateTime.year().month().day().weekday())) {
-                                ForEach(g.items) { d in
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack {
-                                            Text(d.name).font(.subheadline).lineLimit(1).truncationMode(.middle)
-                                            Spacer()
-                                            Text(d.date, format: .dateTime.hour().minute())
-                                                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                                        }
-                                        if let r = d.reason, !r.isEmpty {
-                                            Text(r).font(.caption).foregroundStyle(.orange)
-                                        }
-                                        Text(d.dir).font(.caption2).foregroundStyle(.secondary)
-                                            .lineLimit(1).truncationMode(.head)
+                        if items.isEmpty {
+                            Text(kind == .manual ? "这段记录里没有手动删除的。" : "这段记录里没有筛选删除的。")
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(groups(items), id: \.day) { g in
+                            let open = !collapsedDays.contains(g.day)
+                            Section {
+                                if open {
+                                    ForEach(g.items) { d in
+                                        row(d)
                                     }
                                 }
+                            } header: {
+                                // 标题自己画箭头、自己收合：Section(isExpanded:) 在这个样式下不显示箭头，看不出来能折
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        if open { collapsedDays.insert(g.day) } else { collapsedDays.remove(g.day) }
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Text("\(g.day.formatted(.dateTime.year().month().day().weekday())) · \(g.items.count) 张")
+                                        Spacer()
+                                        Image(systemName: open ? "chevron.down" : "chevron.right")
+                                            .font(.caption.weight(.semibold))
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                         if list.total > list.items.count {
@@ -276,6 +300,40 @@ struct DeletionsView: View {
         // 连上 / 断开、以及电脑换完一批（last.at 变了）都重新取一次
         .task(id: "\(session.offline)|\(session.state?.last?.at ?? 0)") { await load() }
         .refreshable { await load() }
+    }
+
+    private func row(_ d: Deletion) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(d.name).font(.subheadline).lineLimit(1).truncationMode(.middle)
+                Spacer()
+                Text(d.date, format: .dateTime.hour().minute())
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            }
+            if let r = d.reason, !r.isEmpty {
+                Text(r).font(.caption).foregroundStyle(.orange)
+            }
+            Text(d.dir).font(.caption2).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.head)
+        }
+    }
+
+    /// 顶上的说明：两类的数量（旧版桌面端没推就没有）和各自的含义
+    private func note(_ list: DeletionList) -> String {
+        var head = ""
+        if let f = list.filter, let m = list.manual {
+            head = "记录里筛选删除 \(f) 张、手动删除 \(m) 张。"
+        }
+        return head + "筛选删除是竖屏、接近正方形、分辨率不够的图；手动删除是在预览或手机上点「删除图库里的原图」的。"
+    }
+
+    /// 把分段控件的选择套到记录上。没有原因的旧日志算筛选删的，和电脑上的计数一致。
+    private func shown(_ items: [Deletion]) -> [Deletion] {
+        switch kind {
+        case .all: return items
+        case .filter: return items.filter { $0.reason != Self.manualReason }
+        case .manual: return items.filter { $0.reason == Self.manualReason }
+        }
     }
 
     private func groups(_ items: [Deletion]) -> [(day: Date, items: [Deletion])] {
