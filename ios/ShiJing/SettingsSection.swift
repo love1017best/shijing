@@ -69,7 +69,7 @@ struct SettingsPage: View {
                 if !session.queued.isEmpty { offlineQueueSection }
                 aboutSection(state)
             } else if ProcessInfo.processInfo.arguments.contains("-demoLibrary") {
-                if let dirs = state.dirs { librarySection(dirs, state: state) }
+                if state.dirs != nil { libraryLink(state) }
                 pendingQueueSection
                 aboutSection(state)
             } else if ProcessInfo.processInfo.arguments.contains("-demoOfflineCache") {
@@ -221,8 +221,8 @@ struct SettingsPage: View {
         } footer: {
             Text("换完一批后重启 macOS 的壁纸服务，不然系统会继续轮换已经删掉的旧图。图库目录的添加和移除、归档位置等在电脑上改。")
         }
-        if let dirs = state.dirs {
-            librarySection(dirs, state: state)
+        if state.dirs != nil {
+            libraryLink(state)
         }
         pendingQueueSection
     }
@@ -293,62 +293,16 @@ struct SettingsPage: View {
         return "各图库目录的上级 / \(set.archiveSubdir ?? "_WallpaperArchive")"
     }
 
-    /// 图库目录：只读列表（类型、路径、挂载状态、上次扫描到的张数），可以重新检查挂载。
-    @ViewBuilder
-    private func librarySection(_ dirs: [LibraryDir], state: RemoteState) -> some View {
+    /// 图库目录：设置页里只占一行，点开是二级页面（目录多的时候不再把设置页撑长）。
+    private func libraryLink(_ state: RemoteState) -> some View {
         Section {
-            ForEach(dirs) { d in
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: d.filter ? "scissors" : "heart")
-                        .foregroundStyle(d.filter ? Color.orange : Color.accentColor)
-                        .frame(width: 20)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(d.name).font(.subheadline.bold()).lineLimit(1).truncationMode(.middle)
-                        Text(d.path).font(.caption).foregroundStyle(.secondary)
-                            .lineLimit(1).truncationMode(.middle)
-                        Text(detail(d)).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    mountBadge(d)
-                }
-            }
-            Button {
-                Task { await session.checkMounts() }
+            NavigationLink {
+                LibraryDirsView(session: session)
             } label: {
-                Label("重新检查挂载", systemImage: "arrow.clockwise")
+                LabeledContent("图库目录", value: "\(state.libraryDirs) 个")
             }
-            .disabled(session.connection != .live)
-        } header: {
-            Text("图库（\(state.libraryDirs) 个目录）")
         } footer: {
             Text("筛选 + 采样会先删掉不合格的原图；仅采样不动文件。添加、移除目录在电脑上的「图库」页，手机上只读。")
-        }
-    }
-
-    private func detail(_ d: LibraryDir) -> String {
-        var s = d.filter ? "筛选 + 采样" : "仅采样"
-        if d.images > 0 || d.folders > 0 {
-            s += " · \(d.images) 张 · \(d.folders) 个文件夹"
-        }
-        if let n = d.deleted, n > 0 { s += " · 删过 \(n) 张" }
-        return s
-    }
-
-    private func mountBadge(_ d: LibraryDir) -> some View {
-        Text(d.mountText)
-            .font(.caption2.bold())
-            .foregroundStyle(mountColor(d.mount))
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(mountColor(d.mount).opacity(0.12), in: Capsule())
-            .fixedSize()
-    }
-
-    private func mountColor(_ mount: String) -> Color {
-        switch mount {
-        case "ok": .green
-        case "missing": .red
-        case "slow": .orange
-        default: .secondary
         }
     }
 
@@ -507,6 +461,98 @@ struct SettingsPage: View {
             await session.updateSettings(["min_width": w, "min_height": h])
             draftW = nil
             draftH = nil
+        }
+    }
+}
+
+/// 「图库目录」二级页面：只读列表（类型、路径、挂载状态、上次扫描到的张数），可以重新检查挂载。
+/// 信息来自电脑推的状态快照；离线时显示的是上次同步的那一份，挂载状态可能已经变了。
+struct LibraryDirsView: View {
+    let session: RemoteSession
+    @State private var width: CGFloat = 0
+
+    var body: some View {
+        Group {
+            if let dirs = session.state?.dirs {
+                List {
+                    if session.connection != .live {
+                        Section {
+                            Label {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("现在连不上电脑，下面是上次同步的信息").font(.subheadline.bold())
+                                    Text("挂载状态和张数可能已经变了；连上电脑后才能重新检查。")
+                                        .font(.footnote).foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "wifi.slash").foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                    Section {
+                        ForEach(dirs) { d in
+                            row(d)
+                        }
+                        Button {
+                            Task { await session.checkMounts() }
+                        } label: {
+                            Label("重新检查挂载", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(session.connection != .live)
+                    } footer: {
+                        Text("挂载状态由电脑检查。点「重新检查挂载」会让电脑重新探一遍这些目录，结果再推回来。添加、移除目录在电脑上的「图库」页。")
+                    }
+                }
+                .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent)
+            } else {
+                ContentUnavailableView("没有目录信息", systemImage: "externaldrive",
+                                       description: Text("电脑上的拾景版本较旧，升级后会显示图库目录。"))
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .navigationTitle("图库目录")
+        .connectionToolbar(session)
+    }
+
+    private func row(_ d: LibraryDir) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: d.filter ? "scissors" : "heart")
+                .foregroundStyle(d.filter ? Color.orange : Color.accentColor)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(d.name).font(.subheadline.bold()).lineLimit(1).truncationMode(.middle)
+                Text(d.path).font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                Text(detail(d)).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            mountBadge(d)
+        }
+    }
+
+    private func detail(_ d: LibraryDir) -> String {
+        var s = d.filter ? "筛选 + 采样" : "仅采样"
+        if d.images > 0 || d.folders > 0 {
+            s += " · \(d.images) 张 · \(d.folders) 个文件夹"
+        }
+        if let n = d.deleted, n > 0 { s += " · 删过 \(n) 张" }
+        return s
+    }
+
+    private func mountBadge(_ d: LibraryDir) -> some View {
+        Text(d.mountText)
+            .font(.caption2.bold())
+            .foregroundStyle(mountColor(d.mount))
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(mountColor(d.mount).opacity(0.12), in: Capsule())
+            .fixedSize()
+    }
+
+    private func mountColor(_ mount: String) -> Color {
+        switch mount {
+        case "ok": .green
+        case "missing": .red
+        case "slow": .orange
+        default: .secondary
         }
     }
 }

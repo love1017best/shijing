@@ -51,7 +51,18 @@ struct RootView: View {
                     }
                     .tabItem { Label("概览", systemImage: "photo.on.rectangle") }
                     .tag(RootTab.overview)
-                    NavigationStack { SettingsPage(session: session) }
+                    NavigationStack {
+                        #if DEBUG
+                        // 截图用：-demoLibraryPage 直接打开「图库目录」二级页
+                        if ProcessInfo.processInfo.arguments.contains("-demoLibraryPage") {
+                            LibraryDirsView(session: session)
+                        } else {
+                            SettingsPage(session: session)
+                        }
+                        #else
+                        SettingsPage(session: session)
+                        #endif
+                    }
                         .tabItem { Label("设置", systemImage: "gearshape") }
                         .tag(RootTab.settings)
                     NavigationStack { RecordsPage(session: session) }
@@ -69,6 +80,7 @@ struct RootView: View {
             // 截图用：-demoSettings / -demoRecords 直接打开那个标签
             let args = ProcessInfo.processInfo.arguments
             if args.contains("-demoSettings") { tab = .settings }
+            if args.contains("-demoLibraryPage") { tab = .settings }
             if args.contains("-demoRecords") { tab = .records }
             #endif
         }
