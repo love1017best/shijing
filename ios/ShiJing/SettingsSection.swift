@@ -254,7 +254,7 @@ private struct OfflineCacheRow: View {
     private var store: ImageStore { .shared }
 
     var body: some View {
-        LabeledContent("图片缓存") {
+        LabeledContent("预览图缓存") {
             HStack(spacing: 12) {
                 if let size {
                     Text(size == 0 ? "没有" : ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
@@ -263,7 +263,7 @@ private struct OfflineCacheRow: View {
                     ProgressView().controlSize(.small)
                 }
                 Button("清除") {
-                    store.clearDiskCache()
+                    store.clearPreviews(rev: session.wallsRev)
                     size = 0
                     cached = 0
                 }
@@ -323,7 +323,10 @@ private struct OfflineCacheRow: View {
         let rev = session.wallsRev ?? ""
         Task {
             let (n, c) = await Task.detached(priority: .utility) {
-                (ImageStore.diskUsage(), rev.isEmpty ? 0 : ImageStore.cachedCount(rev: rev, kind: .image))
+                // 整个目录减去原图，就是缩略图 / 横幅 / 2732 大图占的（原图在下面单独一行）
+                let originals = rev.isEmpty ? 0 : ImageStore.cachedSize(rev: rev, kind: .original)
+                return (max(0, ImageStore.diskUsage() - originals),
+                        rev.isEmpty ? 0 : ImageStore.cachedCount(rev: rev, kind: .image))
             }.value
             size = n
             cached = c

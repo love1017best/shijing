@@ -46,6 +46,8 @@ final class RemoteSession {
     private var networkDown = false
     /// 上次把快照写到磁盘的时间（运行中状态更新很密，最多 5 秒写一次）
     private var lastSnapshotSave = Date.distantPast
+    /// 已经清理过磁盘缓存的批次（同一批只清一次，见 refreshWalls）
+    private var groomedRev: String?
     /// 离线时点的「移出 / 不再选」，连上电脑后自动补上（存在 UserDefaults 里，按 Mac 分开）
     internal(set) var queued: [OfflineAction] = []
     var flushing = false
@@ -364,8 +366,20 @@ final class RemoteSession {
             heroName = list.hero
             remember(wallsChanged: true)
             if changed {
+                // 换了一批：旧那批的缓存任务先停掉（下载中的不会再写回旧目录），
+                // 上一批留在手机上的图（预览图和原图）由下面的 groom 整个删掉，要的话再按新批次补
+                ImageStore.shared.stopForNewBatch()
+            }
+            // 不属于这一批的缓存目录删掉；同一批里换过前缀的旧文件（比如以前 2048 宽的大图）也一起清。
+            // 每次连上都跑一遍（按批次记着，同一批只跑一次），升级后不用等下一次换批
+            if groomedRev != list.rev {
+                groomedRev = list.rev
                 let rev = list.rev
-                Task.detached(priority: .utility) { ImageStore.groom(keepRev: rev) } // 上一批的图片缓存整个删掉（别在主线程删目录）
+                let names = list.items.map(\.name)
+                // 删 / 搬文件，别在主线程做
+                Task.detached(priority: .utility) { ImageStore.groom(keepRev: rev, names: names) }
+            }
+            if changed {
                 ImageStore.shared.prefetchAll(self) // 这一批的缩略图和预览图存到磁盘，离线也能看
                 if ImageStore.originalsEnabled { ImageStore.shared.prefetchOriginals(self) } // 开了「保存原图」的接着存原图
             }

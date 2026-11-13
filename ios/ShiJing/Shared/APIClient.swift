@@ -30,13 +30,11 @@ struct APIClient: Sendable {
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 30 // 事件流每 15 秒有一次保活，不会被这个超时打断
         cfg.waitsForConnectivity = false
-        // 小组件自己把缩好的图存在 Caches/widget 里，系统的网络缓存再存一份原样下载的就是重复（实测 4 MB 左右），
-        // 小组件里关掉，并清掉以前攒下的。App 里留着：缩略图重新打开时快一些。
-        if Bundle.main.bundleURL.pathExtension == "appex" {
-            cfg.urlCache = nil
-            cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
-            URLCache.shared.removeAllCachedResponses()
-        }
+        // 图片自己有磁盘缓存（ImageStore 的 images/），系统的 HTTP 缓存再存一份纯属重复：
+        // 默认容量几十 MB 级，几百张 2732 宽的图根本装不下，命中率低还把磁盘占着。
+        // 小组件一直是这样关的，App 也一起关掉；旧的缓存由 ShiJingApp 启动时清一次。
+        cfg.urlCache = nil
+        cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: cfg)
     }()
 

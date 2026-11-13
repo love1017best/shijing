@@ -8,6 +8,8 @@ struct ShiJingApp: App {
         #if canImport(UIKit)
         RunNotifier.isForeground = { UIApplication.shared.applicationState == .active }
         #endif
+        // 以前 App 的图片也进过系统的 HTTP 缓存，现在不用了（图片自己有磁盘缓存），清掉攒下的那份
+        Task.detached(priority: .utility) { URLCache.shared.removeAllCachedResponses() }
         Notifications.setUp()
     }
 

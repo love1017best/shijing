@@ -207,6 +207,16 @@ final class ImageStore {
         prefetchPaused = true
     }
 
+    /// 换了一批：先把旧的那一轮停掉，别让下载中的图写回马上要被删掉的目录。
+    func stopForNewBatch() {
+        prefetchTask?.cancel()
+        prefetchTask = nil
+        prefetching = false
+        originalTask?.cancel()
+        originalTask = nil
+        originaling = false
+    }
+
     // MARK: 原图缓存（设置里手动触发）
 
     /// 把这一批壁纸的原文件（图库里那一份，不是 2732 宽的预览图）也存到手机上：
@@ -295,6 +305,7 @@ final class ImageStore {
         if FileManager.default.fileExists(atPath: f.path) { return 0 }
         guard let tmp = try? await client.downloadOriginal(name) else { return 0 }
         defer { try? FileManager.default.removeItem(at: tmp) } // 移进缓存成功后这个文件已经不在了
+        if Task.isCancelled { return 0 } // 换批了：上一批的原图不用留，马上会跟着旧目录一起删
         let fm = FileManager.default
         try? fm.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard (try? fm.moveItem(at: tmp, to: f)) != nil else { return 0 }
@@ -333,24 +344,41 @@ final class ImageStore {
     private nonisolated static func prefetchOne(_ client: APIClient, _ rev: String, _ name: String, _ kind: ImageKind) async -> Int64 {
         if readDisk(rev, name, kind) != nil { return 0 }
         guard let data = try? await client.imageData(name, kind: kind) else { return 0 }
+        if Task.isCancelled { return 0 } // 换批了：这份属于上一批，别写回去
         writeDisk(rev, name, kind, data)
         return Int64(data.count)
     }
 
-    /// 换了一批：把不属于这一批的缓存目录删掉。启动读到快照时不要调（那一批可能正是离线要看的）。
-    nonisolated static func groom(keepRev: String) {
+    /// 壁纸列表变了：把不属于这一批的缓存目录清掉。
+    /// 名字还在这批里的文件搬到新批次的目录下（移出一两张不用整批重下），其余删掉。
+    nonisolated static func groom(keepRev: String, names: [String]) {
         guard let dir = diskDir, let keep = revFolder(keepRev) else { return }
         let fm = FileManager.default
+        let keepFolder = dir.appending(path: keep, directoryHint: .isDirectory)
+        try? fm.createDirectory(at: keepFolder, withIntermediateDirectories: true)
+        let prefixes = ImageKind.allCases.map { $0.cachePrefix + "-" }
+        let wanted = Set(names.map { safeName($0) })
         let items = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         for u in items where u.lastPathComponent != keep {
+            for f in (try? fm.contentsOfDirectory(atPath: u.path)) ?? [] {
+                let src = u.appending(path: f)
+                if let prefix = prefixes.first(where: { f.hasPrefix($0) }),
+                   wanted.contains(String(f.dropFirst(prefix.count))) {
+                    let dest = keepFolder.appending(path: f)
+                    if !fm.fileExists(atPath: dest.path) {
+                        try? fm.moveItem(at: src, to: dest) // 同名同前缀的图，内容一样，搬过来接着用
+                        continue
+                    }
+                }
+                try? fm.removeItem(at: src)
+            }
             try? fm.removeItem(at: u)
         }
         // 留下的这一批里，旧前缀的文件（比如以前 2048 宽的大图）也删掉，别白占空间
-        let prefixes = ImageKind.allCases.map { $0.cachePrefix + "-" }
-        let folder = dir.appending(path: keep, directoryHint: .isDirectory)
-        for f in (try? fm.contentsOfDirectory(atPath: folder.path)) ?? [] where f.contains("-") {
-            guard !prefixes.contains(where: { f.hasPrefix($0) }), !f.hasPrefix(".") else { continue }
-            try? fm.removeItem(at: folder.appending(path: f))
+        for f in (try? fm.contentsOfDirectory(atPath: keepFolder.path)) ?? [] where !f.hasPrefix(".") {
+            if !prefixes.contains(where: { f.hasPrefix($0) }) {
+                try? fm.removeItem(at: keepFolder.appending(path: f))
+            }
         }
     }
 
@@ -375,8 +403,9 @@ final class ImageStore {
         return items.filter { $0.hasPrefix(prefix) }.count
     }
 
-    /// 清掉磁盘上的图片缓存（内存里的一起），下次连上电脑再慢慢补回来。
-    func clearDiskCache() {
+    /// 清掉这一批的预览图（缩略图、横幅、2732 宽的大图），内存里的一起。
+    /// 原图缓存和离线快照不动（原图在设置里单独清）。下次连上电脑会慢慢补回来。
+    func clearPreviews(rev: String?) {
         prefetchTask?.cancel()
         prefetchTask = nil
         prefetchGen += 1
@@ -385,19 +414,13 @@ final class ImageStore {
         prefetchHitLimit = false
         prefetchDone = 0
         prefetchTotal = 0
-        originalTask?.cancel()
-        originalTask = nil
-        originalGen += 1
-        originaling = false
-        originalPaused = false
-        originalHitLimit = false
-        originalDone = 0
-        originalTotal = 0
         cache.removeAllObjects()
-        // 十几 GB 的目录，别在主线程删
+        guard let rev else { return }
+        // 几百张图，别在主线程删
         Task.detached(priority: .utility) {
-            guard let dir = Self.diskDir else { return }
-            try? FileManager.default.removeItem(at: dir)
+            for kind in [ImageKind.thumb, .hero, .image] {
+                Self.removeFiles(rev: rev, prefix: kind.cachePrefix + "-")
+            }
         }
     }
 
@@ -442,11 +465,15 @@ final class ImageStore {
         return String(format: "%016llx", h)
     }
 
+    /// 文件名里可能带中文，直接用没问题，但 "/" 和 ":" 要换掉（不能做文件名）。
+    private nonisolated static func safeName(_ name: String) -> String {
+        name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
+    }
+
     private nonisolated static func diskFile(_ rev: String, _ name: String, _ kind: ImageKind) -> URL? {
         guard let dir = diskDir, let folder = revFolder(rev) else { return nil }
-        let safe = name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
         return dir.appending(path: folder, directoryHint: .isDirectory)
-            .appending(path: "\(kind.cachePrefix)-\(safe)", directoryHint: .notDirectory)
+            .appending(path: "\(kind.cachePrefix)-\(safeName(name))", directoryHint: .notDirectory)
     }
 
     private nonisolated static func readDisk(_ rev: String, _ name: String, _ kind: ImageKind) -> Data? {
