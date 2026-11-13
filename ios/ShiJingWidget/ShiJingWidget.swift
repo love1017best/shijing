@@ -139,7 +139,7 @@ enum TimelineMaker {
     private static let fastTimeout: TimeInterval = 6
     /// 一次时间线最多新下几张图：第一次添加小组件时一张缓存都没有，排 60 张不该下 60 次
     private static let maxNewDownloads = 8
-    /// 本地缓存池尽量留住多少张图：1 分钟间隔排 60 条，池子有这么多就够轮一大阵不出重样
+    /// 缓存池的下限：这一批壁纸比这个少时就留这一批的张数，多出来的旧批次、旧档位按下面 `prune` 的规则清掉
     private static let poolTarget = 48
 
     static func make(_ context: TimelineProviderContext, interval: RotateInterval, photo: Bool, preview: Bool) async -> Timeline<Entry> {
@@ -193,6 +193,9 @@ enum TimelineMaker {
         let slot0 = Int(now.timeIntervalSince1970 / step)
         let px = pixels(context)
         let allNames = snap.list?.items.map(\.name) ?? []
+        // 缓存池尽量留住这一批的全部：1 分钟一换时 48 张轮得太快，也没法离线看完整一批。
+        // 一次时间线只新下 `maxNewDownloads` 张，池子小的时候每 15 分钟接着补，慢慢补满。
+        let poolTarget = max(Self.poolTarget, allNames.count)
         // 手机（小组件自己的缓存目录）里已经存下来的图优先：轮换主要在这些图里转，1 分钟一换也不用等网络。
         // 离线时只有这一份；在线时算「本地缓存池」，池子还小就在后面用剩下的时间慢慢补。
         let cachedNames = allNames.filter { WidgetCache.hasImage(key, $0, px) }
@@ -241,7 +244,7 @@ enum TimelineMaker {
         } else {
             min(end, now.addingTimeInterval(photo ? 6 * 3600 : 30 * 60))
         }
-        WidgetCache.prune()
+        WidgetCache.prune(keep: max(Self.poolTarget, allNames.count), online: client != nil)
         return Timeline(entries: entries, policy: .after(next))
     }
 
@@ -253,13 +256,13 @@ enum TimelineMaker {
     }
 
     /// 背景图要多少像素：按小组件实际尺寸（3 倍屏、宽图铺满高的小组件时按 16:10 算宽），封顶 1000。
-    /// 别再往上加：大尺寸小组件的 1600 档图在渲染进程里要十几 MB，超过小组件渲染的内存限制，
-    /// 结果是背景退回渐变、内容显示成占位骨架（v0.3.147 实测）。systemLarge 也就 1050 px 宽，1000 够。
+    /// 别再往上加：大尺寸小组件的 1800 档图在渲染进程里要十几 MB，超过小组件渲染的内存限制，
+    /// 结果是背景退回渐变、内容被系统涂成占位骨架（v0.3.149 实测）。systemLarge 也就 1050 px 宽，1000 够。
     /// 取整到 200 一档，缓存好命中。
     private static func pixels(_ context: TimelineProviderContext) -> Int {
         let s = context.displaySize
         let need = max(s.width, s.height * 1.6) * 3
-        return min(1000, max(400, Int((need / 200).rounded(.up)) * 200))
+        return min(WidgetCache.maxPx, max(WidgetCache.minPx, Int((need / 200).rounded(.up)) * 200))
     }
 
     /// 缓存里有就直接用；没有且在线就下载（横幅尺寸，旧版桌面端退回缩略图）、缩好存起来。
@@ -340,13 +343,33 @@ enum WidgetCache {
         try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
     }
 
-    /// 图最多留 120 张（离线时够轮好一阵），多了删最久没用的。
-    static func prune(keep: Int = 120) {
+    /// 背景图的像素档范围，和 `TimelineMaker.pixels` 的上下限一致
+    static let minPx = 400
+    static let maxPx = 1000
+
+    /// 清缓存：默认留 120 张，多了删最久没用的。
+    /// `keep` 传这一批壁纸的张数：缓存跟着这一批走，离线时整批都能轮。
+    /// 在线时（`online`）顺手清掉 7 天没被轮到过的：换了档位、换了批次之后就再也用不上的那些。
+    /// 离线时不动，免得把人不在电脑边时要用的缓存清空。
+    static func prune(keep: Int = 120, online: Bool = false) {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
-        let imgs = files.filter { $0.lastPathComponent.hasPrefix("img-") }
-        guard imgs.count > keep else { return }
-        let dated = imgs.map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
-        for (f, _) in dated.sorted(by: { $0.1 > $1.1 }).dropFirst(keep) { try? fm.removeItem(at: f) }
+        let now = Date()
+        var live: [(URL, Date)] = []
+        for f in files where f.lastPathComponent.hasPrefix("img-") {
+            let mtime = (try? f.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            // 文件名末尾是像素档：早先版本留下的档位（比如 1600）现在的 `pixels()` 不会再算出来，留着只会白占地方
+            let px = Int(f.deletingPathExtension().lastPathComponent.split(separator: "-").last ?? "") ?? 0
+            if px < minPx || px > maxPx {
+                try? fm.removeItem(at: f)
+                continue
+            }
+            if online, now.timeIntervalSince(mtime) > 7 * 86400 {
+                try? fm.removeItem(at: f)
+                continue
+            }
+            live.append((f, mtime))
+        }
+        for (f, _) in live.sorted(by: { $0.1 > $1.1 }).dropFirst(max(0, keep)) { try? fm.removeItem(at: f) }
     }
 }
