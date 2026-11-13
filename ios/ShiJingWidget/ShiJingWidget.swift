@@ -187,7 +187,9 @@ enum TimelineMaker {
         let running = snap.state.running && !photo
         // 一次排多久：1、5 分钟这种短间隔排 1 小时（1 分钟就是 60 条，之后靠系统再刷新接着排），其余排 2 小时；最多 60 条
         let horizon: TimeInterval = step <= 300 ? 3600 : 7200
-        let count = preview || running ? 1 : min(60, max(2, Int((horizon / step).rounded(.up))))
+        // 状态小组件每条都要带一份状态（几 KB），条数多了整条时间线会大得系统不渲染；壁纸小组件条目轻，可以多排
+        let maxEntries = photo ? 60 : 12
+        let count = preview || running ? 1 : min(maxEntries, max(2, Int((horizon / step).rounded(.up))))
         let slot0 = Int(now.timeIntervalSince1970 / step)
         let px = pixels(context)
         let allNames = snap.list?.items.map(\.name) ?? []
@@ -200,6 +202,9 @@ enum TimelineMaker {
         for i in 0..<count {
             var e = base
             e.date = i == 0 ? now : Date(timeIntervalSince1970: Double(slot0 + i) * step)
+            // 壁纸小组件只看图，不需要每条都带一份完整状态：60 条 × 几 KB 会让整条时间线大到系统不渲染
+            // （屏幕上一直是一块占位骨架，v0.3.145 踩过）
+            if photo, i > 0 { e.state = nil }
             if !names.isEmpty {
                 let name = names[pick(slot0 + i, names.count)]
                 e.wallName = name

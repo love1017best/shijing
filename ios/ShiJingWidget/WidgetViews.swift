@@ -305,11 +305,19 @@ struct PhotoView: View {
     /// 没有图时的一句话：离线（还没缓存）和「壁纸文件夹是空的」要说清楚，别让人以为壁纸被删了。
     private var emptyText: String {
         if let problem = entry.problem { return problem }
+        // 壁纸小组件的时间线上只有第一条带状态，其余条目靠有没有挑到图来判断
+        if let name = entry.wallName, !name.isEmpty {
+            return entry.offlineSince != nil ? "离线 · 这张还没缓存" : "这张还没载入，稍后刷新"
+        }
         if entry.state == nil { return "正在读取…" }
         if entry.offlineSince != nil { return "离线 · 这张还没缓存" }
-        // 选出了图但这次没下下来（网络慢，时间线先回去了）：下一轮会补
-        if entry.wallName != nil { return "这张还没载入，稍后刷新" }
         return "壁纸文件夹是空的"
+    }
+
+    /// 有没有图只看文件在不在，不解码：背景那一次已经解过了，小组件进程内存小，不重复解
+    private var hasImage: Bool {
+        guard let file = entry.imageFile else { return false }
+        return FileManager.default.fileExists(atPath: file.path)
     }
 
     var body: some View {
@@ -324,7 +332,7 @@ struct PhotoView: View {
         } else {
             ZStack(alignment: .bottomLeading) {
                 Color.clear
-                if entry.image == nil {
+                if !hasImage {
                     VStack(alignment: .leading, spacing: 4) {
                         Image(systemName: "photo.on.rectangle.angled").font(.title3)
                         Text(emptyText)
