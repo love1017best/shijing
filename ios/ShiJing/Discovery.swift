@@ -49,14 +49,22 @@ final class Discovery {
                 guard case let .service(name, _, _, _) = r.endpoint else { return nil }
                 return Found(name: name, endpoint: r.endpoint)
             }.sorted { $0.name < $1.name }
-            Task { @MainActor in self?.found = list }
+            // 结果没变（Bonjour 会反复报告同样的服务）就不要刷新界面：列表一动，
+            // 从列表里弹出的扫码 / 配对弹层会被一起重建、自己关掉
+            Task { @MainActor in
+                guard let self, self.found != list else { return }
+                self.found = list
+            }
         }
         b.stateUpdateHandler = { [weak self] state in
             let msg: String? = switch state {
             case .failed(let e), .waiting(let e): Self.describe(e)
             default: nil
             }
-            Task { @MainActor in self?.problem = msg }
+            Task { @MainActor in
+                guard let self, self.problem != msg else { return }
+                self.problem = msg
+            }
         }
         b.start(queue: .main)
         browser = b

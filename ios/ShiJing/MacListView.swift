@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 
 /// 还没配对过任何 Mac 时的首页：列出局域网里找到的拾景，点一台配对，或者手动输入地址。
@@ -5,6 +6,9 @@ struct SetupView: View {
     let store: MacStore
     let discovery: Discovery
     @State private var width: CGFloat = 0
+    @State private var flow = NearbyFlow()
+    /// 截图用：-demoScan 一进来就打开扫码页，只开一次
+    @State private var demoScanOpened = false
 
     var body: some View {
         NavigationStack {
@@ -19,14 +23,27 @@ struct SetupView: View {
                     }
                     .padding(.vertical, 6)
                 }
-                NearbySection(store: store, discovery: discovery)
+                NearbySection(store: store, discovery: discovery, flow: flow)
             }
             .navigationTitle("拾景")
             // 内屏、iPad 上内容别拉得太宽（只收窄内容，背景照样铺满）
             .contentMargins(.horizontal, max(0, (width - 640) / 2), for: .scrollContent)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         }
-        .onAppear { discovery.want("setup", true) }
+        .nearbyPresenters(store: store, flow: flow)
+        .onAppear {
+            discovery.want("setup", true)
+            #if DEBUG
+            if !demoScanOpened, ProcessInfo.processInfo.arguments.contains("-demoScan") {
+                demoScanOpened = true
+                // 等局域网搜索结果出来再打开：模拟「已经看到 Mac 列表后再点扫码」的时序
+                Task {
+                    try? await Task.sleep(for: .seconds(4))
+                    flow.scanning = true
+                }
+            }
+            #endif
+        }
         .onDisappear { discovery.want("setup", false) }
     }
 }
@@ -121,24 +138,68 @@ struct ManageMacsView: View {
 struct AddMacView: View {
     let store: MacStore
     let discovery: Discovery
+    @State private var flow = NearbyFlow()
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
-                NearbySection(store: store, discovery: discovery)
+                NearbySection(store: store, discovery: discovery, flow: flow)
             }
-            .onAppear { discovery.want("add", true) }
-            .onDisappear { discovery.want("add", false) }
             .navigationTitle("添加 Mac")
             .iOSInlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
             }
         }
+        .nearbyPresenters(store: store, flow: flow)
+        .onAppear { discovery.want("add", true) }
+        .onDisappear { discovery.want("add", false) }
         .onChange(of: store.macs.count) { old, new in
             if new > old { dismiss() }
         }
+    }
+}
+
+/// 「附近的 Mac」三个弹层（配对、手动输入、扫码）的状态。弹层要挂在 SetupView / AddMacView
+/// 这种稳定的容器上，不能挂在这个 Section 上：局域网搜索结果一变，List 的行会被重建，
+/// 挂在行里的弹层会跟着自己关掉（扫码页开着时「附近」刚好找到了 Mac，相机界面就闪退了）。
+@Observable @MainActor
+final class NearbyFlow {
+    var pairing: PairTarget?
+    var manual = false
+    var scanning = false
+}
+
+private struct NearbyPresenters: ViewModifier {
+    let store: MacStore
+    let flow: NearbyFlow
+
+    func body(content: Content) -> some View {
+        @Bindable var flow = flow
+        content
+            .fullScreenCoverCompat(isPresented: $flow.scanning) {
+                QRScanView(store: store)
+            }
+            .sheet(item: $flow.pairing) { target in
+                PairView(target: target, store: store)
+            }
+            .sheet(isPresented: $flow.manual) {
+                ManualAddView { target in
+                    flow.manual = false
+                    // 等手动输入的表单收起再弹配对
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(400))
+                        flow.pairing = target
+                    }
+                }
+            }
+    }
+}
+
+extension View {
+    func nearbyPresenters(store: MacStore, flow: NearbyFlow) -> some View {
+        modifier(NearbyPresenters(store: store, flow: flow))
     }
 }
 
@@ -146,9 +207,7 @@ struct AddMacView: View {
 struct NearbySection: View {
     let store: MacStore
     let discovery: Discovery
-    @State private var pairing: PairTarget?
-    @State private var manual = false
-    @State private var scanning = false
+    let flow: NearbyFlow
 
     private var unpaired: [Discovery.Found] {
         discovery.found.filter { store.mac(serviceName: $0.name) == nil }
@@ -158,7 +217,7 @@ struct NearbySection: View {
         Section {
             ForEach(unpaired) { found in
                 Button {
-                    pairing = PairTarget(name: found.name, serviceName: found.name, endpoint: found.endpoint)
+                    flow.pairing = PairTarget(name: found.name, serviceName: found.name, endpoint: found.endpoint)
                 } label: {
                     Label(found.name, systemImage: "plus.circle")
                 }
@@ -169,8 +228,8 @@ struct NearbySection: View {
                     Text("正在局域网里找拾景…").foregroundStyle(.secondary)
                 }
             }
-            Button("扫描电脑上的二维码…", systemImage: "qrcode.viewfinder") { scanning = true }
-            Button("手动输入地址…", systemImage: "keyboard") { manual = true }
+            Button("扫描电脑上的二维码…", systemImage: "qrcode.viewfinder") { flow.scanning = true }
+            Button("手动输入地址…", systemImage: "keyboard") { flow.manual = true }
         } header: {
             Text("附近的 Mac")
         } footer: {
@@ -178,22 +237,6 @@ struct NearbySection: View {
                 Text(p)
             } else {
                 Text("电脑上的拾景要打开「设置 › 手机遥控」，手机和电脑连同一个网络。找不到时可以在电脑上点「显示二维码」，直接扫一扫。")
-            }
-        }
-        .fullScreenCoverCompat(isPresented: $scanning) {
-            QRScanView(store: store)
-        }
-        .sheet(item: $pairing) { target in
-            PairView(target: target, store: store)
-        }
-        .sheet(isPresented: $manual) {
-            ManualAddView { target in
-                manual = false
-                // 等手动输入的表单收起再弹配对
-                Task {
-                    try? await Task.sleep(for: .milliseconds(400))
-                    pairing = target
-                }
             }
         }
     }
