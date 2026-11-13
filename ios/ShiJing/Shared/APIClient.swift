@@ -10,7 +10,7 @@ enum APIError: LocalizedError {
         switch self {
         case .unauthorized(let m): m
         case .server(_, let m): m
-        case .badResponse: "电脑返回的内容看不懂，两边的拾景版本可能不一致"
+        case .badResponse: "电脑返回的内容无法解析，两边的拾景版本可能不一致"
         }
     }
 }

@@ -32,7 +32,7 @@ struct RecordsPage: View {
                 }
             } else {
                 Section {
-                    Text("电脑上的拾景版本较旧，没有记录可看。把电脑上的拾景升到最新就有了。")
+                    Text("电脑上的拾景版本较旧，升级后才能看到记录。")
                         .foregroundStyle(.secondary)
                 }
             }

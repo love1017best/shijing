@@ -84,30 +84,68 @@ struct SettingsPage: View {
                 switch group {
                 case .mac: macContent(state)
                 case .phone: phoneContent(state)
+                case .about: aboutContent(state)
                 }
             }
             #else
             switch group {
             case .mac: macContent(state)
             case .phone: phoneContent(state)
+            case .about: aboutContent(state)
             }
             #endif
         }
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            #if DEBUG
+            // 截图用：-demoAbout 直接切到「关于」这一栏
+            if ProcessInfo.processInfo.arguments.contains("-demoAbout") { groupRaw = SettingsGroup.about.rawValue }
+            #endif
+        }
         .toolbar {
-            // 两类切换固定在导航栏中间，滚到哪儿都看得到
+            // 三栏切换固定在导航栏中间，滚到哪儿都看得到
             ToolbarItem(placement: .principal) {
                 Picker("设置分类", selection: $groupRaw) {
                     Text("电脑上的拾景").tag(SettingsGroup.mac.rawValue)
                     Text(ThisDevice.label).tag(SettingsGroup.phone.rawValue)
+                    Text("关于").tag(SettingsGroup.about.rawValue)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 320)
+                .frame(maxWidth: 340)
             }
             if session.savingSettings {
                 ToolbarItem(placement: .automatic) { ProgressView() } // 正在把改动发给电脑
             }
         }
+    }
+
+    /// 关于：两边各是什么版本、这台设备上的签名什么时候到期。
+    /// 不和「这台手机」的设置混在一起（v0.3.132 一度独立成页、入口在概览，用户觉得首页放它奇怪，改回设置里的第三栏）。
+    @ViewBuilder
+    private func aboutContent(_ state: RemoteState) -> some View {
+        Section {
+            LabeledContent("电脑上的拾景", value: macVersion(state))
+            LabeledContent(ThisDevice.label, value: AppVersion.text)
+        } header: {
+            Text("版本")
+        } footer: {
+            if !state.version.isEmpty, state.version != AppVersion.short {
+                Text("两边版本不一致，有的功能可能用不了，最好都升到最新。")
+            }
+        }
+        if let expiry = SigningExpiry.text {
+            Section {
+                LabeledContent("签名", value: expiry)
+            } header: {
+                Text(ThisDevice.label)
+            } footer: {
+                Text("免费签名只有 7 天，到期后拾景就打不开了。连上电脑重新安装一次就能续上，设置和配对都会保留。")
+            }
+        }
+    }
+
+    private func macVersion(_ state: RemoteState) -> String {
+        state.version.isEmpty ? "还没连上" : "v" + state.version
     }
 
     /// 电脑上的拾景：遥控改的都是电脑上的设置和状态。
@@ -166,7 +204,7 @@ struct SettingsPage: View {
         } header: {
             Text("输出")
         } footer: {
-            Text("复制占用磁盘空间但可以脱离图库使用；软链接省空间，但图库没挂载时壁纸会失效。")
+            Text("复制：每张图在壁纸文件夹里存一份，占空间，但图库没连上也能看。\n软链接：只存指向原图的链接，省空间，图库没连上时打不开。")
         }
         Section {
             Stepper(value: Binding(
@@ -199,7 +237,7 @@ struct SettingsPage: View {
         } header: {
             Text("筛选")
         } footer: {
-            Text("打开后，换一批时会删除图库里竖屏、分辨率不够的原图，不能撤销。从手机换一批时会先确认，也可以选这次只模拟。\n增量筛选会跳过上次检查后没有变化的文件夹。")
+            Text("打开后，换一批时会删除图库里竖屏、接近正方形、分辨率不够的原图，不能撤销。从手机换一批时会先确认，也可以选这次只模拟。\n增量筛选会跳过上次检查后没有变化的文件夹。")
         }
         Section {
             Picker("间隔", selection: Binding(
@@ -269,7 +307,7 @@ struct SettingsPage: View {
         } header: {
             Text("画质要求")
         } footer: {
-            Text("只有横屏（宽高比大于 1.1）且不低于这个分辨率的图片才会被选中。")
+            Text("只选横图（宽高比大于 1.1），分辨率不低于这里设定的值。")
         }
     }
 
@@ -288,7 +326,7 @@ struct SettingsPage: View {
         } header: {
             Text("归档")
         } footer: {
-            Text("把每次选中的图片在图库旁边留一份链接（优先硬链接，不支持时用软链接），每次运行前清空上一批。位置、文件夹名、跨挂载点换算在电脑上改。")
+            Text("每次选中的图片会在图库旁边留一份链接，每次运行前清掉上一批。位置和文件夹名在电脑上改。")
         }
     }
 
@@ -306,7 +344,7 @@ struct SettingsPage: View {
                 LabeledContent("图库目录", value: "\(state.libraryDirs) 个")
             }
         } footer: {
-            Text("筛选 + 采样会先删掉不合格的原图；仅采样不动文件。添加、移除目录在电脑上的「图库」页，手机上只读。")
+            Text("筛选 + 采样会先删掉不合格的原图；仅采样不动文件。目录只能在电脑上的「图库」页增删，手机上是只读的。")
         }
     }
 
@@ -338,7 +376,7 @@ struct SettingsPage: View {
             } header: {
                 Text("待删除（\(items.count)）")
             } footer: {
-                Text("图库（NAS）没连上时删的原图先排在电脑上，图库连上后自动删除。取消只是不删这张原图，壁纸文件夹里那张当时已经移出了。")
+                Text("图库没连上时，要删的原图会先排在电脑上，图库连上后再自动删除。取消后这张原图保留；壁纸文件夹里的那一份在手机上已经移出了。")
             }
         }
     }
@@ -375,7 +413,7 @@ struct SettingsPage: View {
         } header: {
             Text("离线")
         } footer: {
-            Text("连不上电脑时，概览和壁纸显示的是上次同步的内容：缩略图、横幅和整批 2732 宽的预览图会自动缓存在手机上，受上面的上限限制，换一批后上一批的自动删掉。打开「保存原图」还会把这一批的原文件也存下来（一张几十 MB，同样受上限限制），离线时能看原图、直接存相册或分享；关掉只是不再补齐，已经存下的可以点「清除」删掉。")
+            Text("连不上电脑时，概览和壁纸显示的是上次同步的内容。缩略图、横幅和大图会存到手机上，换一批后上一批的自动删掉。打开「保存原图」会把这一批的原文件也存下来，离线时能看原图、存到相册或分享；关掉后不再存新的，已经存下的可以点「清除」删掉。")
         }
     }
 
@@ -414,9 +452,9 @@ struct SettingsPage: View {
     }
 }
 
-/// 设置页顶部的两类：电脑上的拾景（遥控改的）/ 这台手机（离线缓存等）。
+/// 设置页的三栏：电脑上的拾景（遥控改的）/ 这台手机（离线缓存等）/ 关于（版本、签名）。
 enum SettingsGroup: String {
-    case mac, phone
+    case mac, phone, about
 }
 
 /// 「图库目录」二级页面：只读列表（类型、路径、挂载状态、上次扫描到的张数），可以重新检查挂载。
@@ -434,7 +472,7 @@ struct LibraryDirsView: View {
                             Label {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("现在连不上电脑，下面是上次同步的信息").font(.subheadline.bold())
-                                    Text("挂载状态和张数可能已经变了；连上电脑后才能重新检查。")
+                                    Text("挂载状态和张数可能已经变了，连上电脑后可以重新检查。")
                                         .font(.footnote).foregroundStyle(.secondary)
                                 }
                             } icon: {
@@ -453,7 +491,7 @@ struct LibraryDirsView: View {
                         }
                         .disabled(session.connection != .live)
                     } footer: {
-                        Text("挂载状态由电脑检查。点「重新检查挂载」会让电脑重新探一遍这些目录，结果再推回来。添加、移除目录在电脑上的「图库」页。")
+                        Text("挂载状态由电脑检查。点「重新检查挂载」后，电脑会重新检查这些目录，结果再返回手机。目录只能在电脑上的「图库」页增删。")
                     }
                 }
                 .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent)

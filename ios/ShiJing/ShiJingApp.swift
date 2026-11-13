@@ -73,6 +73,7 @@ struct RootView: View {
             // 截图用：-demoSettings / -demoRecords 直接打开那个标签
             let args = ProcessInfo.processInfo.arguments
             if args.contains("-demoSettings") { tab = .settings }
+            if args.contains("-demoAbout") { tab = .settings }
             if args.contains("-demoLibraryPage") { tab = .settings }
             if args.contains("-demoQueuePage") { tab = .settings }
             if args.contains("-demoRecords") { tab = .records }
@@ -203,14 +204,12 @@ struct RootView: View {
     }
 }
 
-/// 点开通知时要切到哪个标签（换完 → 概览；签名到期 → 概览的「关于」）。通知的回调不保证在主线程、也不保证
+/// 点开通知时要切到哪个标签（换完 → 概览；签名到期 → 设置的「关于」）。通知的回调不保证在主线程、也不保证
 /// RootView 已经显示，所以先记在这里，RootView 出现时（initial: true）再消费。
 @Observable @MainActor
 final class NotificationRouter {
     static let shared = NotificationRouter()
     var tab: RootTab?
-    /// 到了概览还要不要再推开「关于」（签名快到期的通知）
-    var about = false
 }
 
 /// 本地通知：换完了、签名快到期。权限在第一次从手机换一批时再问（不一上来就弹）。
@@ -249,8 +248,9 @@ enum Notifications {
             await MainActor.run {
                 switch target {
                 case "about":
-                    NotificationRouter.shared.tab = .overview
-                    NotificationRouter.shared.about = true
+                    // 签名到期：切到设置，并且选中「关于」那一栏
+                    UserDefaults.standard.set("about", forKey: "settingsGroup")
+                    NotificationRouter.shared.tab = .settings
                 case "settings": NotificationRouter.shared.tab = .settings
                 case "overview": NotificationRouter.shared.tab = .overview
                 default: break

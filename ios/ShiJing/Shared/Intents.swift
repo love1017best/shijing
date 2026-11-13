@@ -22,7 +22,7 @@ private func currentClient() throws -> (CurrentMac, APIClient) {
 private func explain(_ error: Error, mac: String) -> Error {
     if error is APIError || error is IntentError { return error }
     if error is URLError {
-        return APIError.server(status: 0, message: "连不上「\(mac)」：确认它没睡眠、拾景开着并允许手机遥控，手机和电脑在同一个网络里。")
+        return APIError.server(status: 0, message: "连不上「\(mac)」：确认 Mac 没有睡眠、拾景开着并允许手机遥控，手机和 Mac 在同一个网络里。")
     }
     return error
 }

@@ -36,7 +36,7 @@ struct PairView: View {
             Form {
                 Section {
                     LabeledContent("Mac", value: target.name)
-                    TextField("这台手机的名字", text: $device)
+                    TextField("设备名称", text: $device)
                         .disabled(requested)
                 } footer: {
                     Text("名字会显示在电脑的「设置 › 手机遥控」里，以后可以在那里取消配对。")

@@ -18,7 +18,7 @@ struct QueuedActionsView: View {
         List {
             if session.queued.isEmpty {
                 ContentUnavailableView("没有待补操作", systemImage: "checkmark.circle",
-                                       description: Text("离线时在壁纸上点的「移出」「不再选」「删除原图」会记在这里，连上电脑后处理。"))
+                                       description: Text("离线时点的「移出」「不再选」「删除原图」会先记在这里，连上电脑后处理。"))
             } else {
                 if !deletes.isEmpty {
                     Section {
@@ -45,13 +45,13 @@ struct QueuedActionsView: View {
                     } header: {
                         Text("连上电脑后自动补上（\(others.count)）")
                     } footer: {
-                        Text(live ? "正在陆续补上；补不上的会留在这里，过期的不算。" : "连上电脑后自动补上。")
+                        Text(live ? "正在陆续补上；补不上的会留在这里。" : "连上电脑后自动补上。")
                     }
                 }
                 Section {
                     Button("全部取消", role: .destructive) { session.cancelAllQueued() }
                 } footer: {
-                    Text("取消会把那张放回列表原来的位置；「删除原图」取消后原图还在图库里。")
+                    Text("取消会把那张放回列表原来的位置。「删除原图」取消后，原图还在图库里。")
                 }
             }
         }
@@ -66,7 +66,7 @@ struct QueuedActionsView: View {
             Button("删除原图", role: .destructive) { Task { await session.confirmQueuedDelete(a) } }
             Button("取消", role: .cancel) {}
         } message: { a in
-            Text("会从图库里删除 \(a.source ?? a.name)，不可撤销，会记进电脑上的删除记录。")
+            Text("会从图库里删除 \(a.source ?? a.name)，不可撤销，并记进电脑上的删除记录。")
         }
         .confirmationDialog(
             "确认删除 \(deletes.count) 张原图？",

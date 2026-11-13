@@ -221,7 +221,7 @@ final class RemoteSession {
         if let e = error as? URLError {
             switch e.code {
             case .timedOut, .cannotConnectToHost, .networkConnectionLost, .cannotFindHost:
-                return "连不上这台 Mac：确认它没有睡眠、拾景开着并打开了「允许手机遥控」，手机和电脑在同一个网络里。"
+                return "连不上这台 Mac：确认 Mac 没有睡眠、拾景开着并打开了「允许手机遥控」，手机和 Mac 在同一个网络里。"
             case .notConnectedToInternet:
                 return "手机没有连上网络。"
             default:
@@ -361,7 +361,7 @@ final class RemoteSession {
         let live = connection == .live
         let cached = ImageStore.cachedOriginal(rev: wallsRev ?? "", name: w.name)
         guard live || cached != nil else {
-            actionError = "连不上电脑，这张原图也没存到手机上。到「设置 › 离线」打开「保存原图」并补齐，或者等连上电脑再存。"
+            actionError = "连不上电脑，这张原图也没存在手机上。可以在「设置 › 离线」打开「保存原图」并补齐，或者连上电脑再存。"
             return
         }
         saving = w.name

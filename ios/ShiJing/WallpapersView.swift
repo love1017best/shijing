@@ -6,9 +6,9 @@ enum WallAction {
     static let exclude = "移出并不再选它"
     static let delete = "删除图库里的原图…"
     static let save = "存到相册"
-    static let saveHint = "原样存进相册（不是预览图）。离线时用手机上存过的那份原图。"
+    static let saveHint = "存的是图库里的原图，不是手机上的预览图。离线时用手机上存过的那份。"
     static let removeHint = "只删壁纸文件夹里的这一份，图库里的原图不动。"
-    static let excludeHint = "还会让以后的采样跳过这张原图（可以在电脑上的「图库」页恢复）。"
+    static let excludeHint = "以后采样不会再选这张原图，可以在电脑上的「图库」页恢复。"
 }
 /// 对一张壁纸能做的四件事。长按菜单和预览底栏都从这里取：文案、图标、能不能点、点了做什么只写一份。
 enum WallActionKind: CaseIterable {
@@ -48,7 +48,7 @@ enum WallActionKind: CaseIterable {
         case .save: WallAction.saveHint
         case .remove: WallAction.removeHint
         case .exclude: WallAction.excludeHint
-        case .delete: "从图库删除这张原图，不可撤销。连不上电脑时先记下来，连上后还要再确认一次才删。"
+        case .delete: "从图库删除这张原图，不可撤销。连不上电脑时先记下来，连上后再确认一次才会删。"
         }
     }
 
@@ -229,7 +229,7 @@ extension View {
             Button("取消", role: .cancel) {}
         } message: { w in
             if session.offline {
-                Text("会从图库里删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销。现在连不上电脑，会先记下来，连上后在「设置 › 待补操作」里再确认一次才真的删除。")
+                Text("会从图库里删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销。现在连不上电脑，会先记下来，连上后在「设置 › 待补操作」里再确认一次才会删除。")
             } else {
                 Text("会从图库里删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销，会记进电脑上的删除记录。")
             }
