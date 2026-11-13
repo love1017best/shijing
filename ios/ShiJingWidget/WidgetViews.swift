@@ -72,6 +72,38 @@ extension WidgetFamily {
 
 private let accent = Color(red: 0.894, green: 0.361, blue: 0) // 和 App 的强调色一样（#E45C00）
 
+/// 排查用：时间线有没有被调用、渲染侧看到的图在不在。写在小组件自己的缓存目录里（`debug.log`），
+/// 从 Mac 上拉容器就能看（`xcrun devicectl device copy from --domain-identifier …widget`）。
+/// 放在这个文件里是因为 App 目标也编译它（`-demoWidgets`），而 ShiJingWidget.swift 只有小组件目标编。
+enum WidgetDebug {
+    nonisolated(unsafe) private static var last = Date.distantPast
+
+    private static var dir: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appending(path: "widget", directoryHint: .isDirectory)
+    }
+
+    static func log(_ s: String, throttle: Bool = false) {
+        if throttle, Date().timeIntervalSince(last) < 3 { return }
+        last = Date()
+        let url = dir.appending(path: "debug.log")
+        let line = "\(Int(Date().timeIntervalSince1970)) \(s)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        // 太长就从头来过，别让日志把小组件的缓存目录撑大
+        if let size = try? fm.attributesOfItem(atPath: url.path)[.size] as? Int, size > 64 * 1024 {
+            try? fm.removeItem(at: url)
+        }
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(data)
+            try? h.close()
+        } else {
+            try? data.write(to: url)
+        }
+    }
+}
+
 /// 背景：壁纸铺满；功能小组件上下压一层渐暗，白字才看得清。没有图时用橙色日落渐变（和图标一个色调）。
 /// 锁定屏幕上不画背景（系统也不让画）。
 struct WidgetBackdrop: View {
