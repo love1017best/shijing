@@ -117,6 +117,7 @@ struct DashboardView: View {
                 .contentMargins(.trailing, gap + safe.trailing, for: .scrollContent)
                 .frame(width: max(300, width * 0.36) + safe.trailing)
             }
+            .padding(.top, 12) // 和上面的横幅卡留一点距离（两栏的列表本身没有外面的上边距）
             .scrollContentBackground(.hidden)
             .ignoresSafeArea(.container, edges: .horizontal)
         }
@@ -454,7 +455,7 @@ struct DashboardView: View {
                 Label {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("\(p) 项删除原图在电脑上排队").font(.subheadline.bold())
-                        Text("图库（NAS）连上电脑后自动删除。想取消的话，在电脑概览的待删除条里可以逐条取消。")
+                        Text("图库（NAS）连上电脑后自动删除；想取消的话，到「设置 › 待删除」里逐条取消。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 } icon: {

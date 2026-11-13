@@ -51,6 +51,10 @@ struct SettingsPage: View {
     /// 每次张数的草稿：步进器连点时先改这里，停手 0.8 秒再发给电脑
     @State private var draftCount: Int?
     @State private var countTask: Task<Void, Never>?
+    /// 自定义分辨率的草稿：同上，攒一会儿再发
+    @State private var draftW: Int?
+    @State private var draftH: Int?
+    @State private var resTask: Task<Void, Never>?
     /// 待补操作里正在确认的「删除原图」
     @State private var confirmDelete: RemoteSession.OfflineAction?
     @State private var confirmAllDeletes = false
@@ -59,9 +63,14 @@ struct SettingsPage: View {
         MacPage(session: session, title: "设置") { state in
             #if DEBUG
             // 截图用：-demoOfflineCache 只摆离线这一组（设置页太长，模拟器里不好滚到最下面）；
-            // -demoQueue 只摆「待补操作」这一组（含待确认的删除原图）
+            // -demoQueue 只摆「待补操作」这一组（含待确认的删除原图）；
+            // -demoLibrary 只摆「图库 / 待删除」两组（配 -demoPending 看电脑上排队的删除）
             if ProcessInfo.processInfo.arguments.contains("-demoQueue") {
                 if !session.queued.isEmpty { offlineQueueSection }
+                aboutSection(state)
+            } else if ProcessInfo.processInfo.arguments.contains("-demoLibrary") {
+                if let dirs = state.dirs { librarySection(dirs, state: state) }
+                pendingQueueSection
                 aboutSection(state)
             } else if ProcessInfo.processInfo.arguments.contains("-demoOfflineCache") {
                 offlineSection
@@ -135,6 +144,23 @@ struct SettingsPage: View {
     private func editable(_ set: RemoteSettings, _ state: RemoteState) -> some View {
         let disabled = state.running || session.connection != .live
         Section {
+            LabeledContent("壁纸文件夹", value: state.dest)
+            if set.mode != nil {
+                Picker("存放方式", selection: Binding(
+                    get: { set.mode ?? "copy" },
+                    set: { v in Task { await session.updateSettings(["mode": v]) } }
+                )) {
+                    Text("复制").tag("copy")
+                    Text("软链接").tag("symlink")
+                }
+                .disabled(disabled)
+            }
+        } header: {
+            Text("输出")
+        } footer: {
+            Text("复制占用磁盘空间但可以脱离图库使用；软链接省空间，但图库没挂载时壁纸会失效。")
+        }
+        Section {
             Stepper(value: Binding(
                 get: { draftCount ?? set.sampleCount },
                 set: { setCount($0) }
@@ -142,18 +168,30 @@ struct SettingsPage: View {
                 LabeledContent("每次张数", value: "\(draftCount ?? set.sampleCount) 张")
             }
             .disabled(disabled)
+            if let balance = set.balanceFirst {
+                toggle("平衡采样", balance, key: "balance_first", disabled: disabled)
+            }
             toggle("优先选没换上过的", set.preferUnseen, key: "prefer_unseen", disabled: disabled)
         } header: {
             Text("采样")
         } footer: {
-            Text("优先选没换上过的：这一轮里还没换上过的图片先选，都换上过一遍再从头开始。")
+            Text("平衡采样：优先让每个子文件夹至少入选一张，避免少数几个大文件夹占满名额。\n优先选没换上过的：这一轮里还没换上过的图片先选，都换上过一遍再从头开始。")
+        }
+        if set.minPresets != nil, set.minWidth != nil, set.minHeight != nil {
+            resolutionSection(set, disabled: disabled)
+        }
+        if set.archiveEnabled != nil {
+            archiveSection(set, disabled: disabled)
         }
         Section {
             toggle("删除不合格的原图", set.deleteDuringFilter, key: "delete_during_filter", tint: .red, disabled: disabled)
+            if let incremental = set.incremental {
+                toggle("增量筛选", incremental, key: "incremental", disabled: disabled)
+            }
         } header: {
             Text("筛选")
         } footer: {
-            Text("打开后，换一批时会删除图库里竖屏、分辨率不够的原图，不能撤销。从手机换一批时会先确认，也可以选这次只模拟。")
+            Text("打开后，换一批时会删除图库里竖屏、分辨率不够的原图，不能撤销。从手机换一批时会先确认，也可以选这次只模拟。\n增量筛选会跳过上次检查后没有变化的文件夹。")
         }
         Section {
             Picker("间隔", selection: Binding(
@@ -181,7 +219,169 @@ struct SettingsPage: View {
         } header: {
             Text("系统")
         } footer: {
-            Text("换完一批后重启 macOS 的壁纸服务，不然系统会继续轮换已经删掉的旧图。\n输出方式、画质要求、图库目录、归档等其他设置在电脑上改。")
+            Text("换完一批后重启 macOS 的壁纸服务，不然系统会继续轮换已经删掉的旧图。图库目录的添加和移除、归档位置等在电脑上改。")
+        }
+        if let dirs = state.dirs {
+            librarySection(dirs, state: state)
+        }
+        pendingQueueSection
+    }
+
+    /// 画质要求：预设菜单 + 自定义时两个步进器（改动攒 0.6 秒再发给电脑）。
+    @ViewBuilder
+    private func resolutionSection(_ set: RemoteSettings, disabled: Bool) -> some View {
+        let presets = set.minPresets ?? []
+        Section {
+            Picker("最低分辨率", selection: Binding(
+                get: { set.presetIndex },
+                set: { i in
+                    guard i < presets.count else { return }
+                    let p = presets[i]
+                    Task { await session.updateSettings(["min_width": p.w, "min_height": p.h]) }
+                }
+            )) {
+                ForEach(Array(presets.enumerated()), id: \.offset) { i, p in
+                    Text("\(p.label) · \(p.w)×\(p.h)").tag(i)
+                }
+                Text("自定义").tag(presets.count)
+            }
+            .disabled(disabled)
+            if set.presetIndex == presets.count {
+                Stepper(value: Binding(
+                    get: { draftW ?? set.minWidth ?? 3840 },
+                    set: { w in setResolution(w: w, h: draftH ?? set.minHeight ?? 2160) }
+                ), in: 100...99999, step: 100) {
+                    LabeledContent("宽", value: "\(draftW ?? set.minWidth ?? 0) 像素")
+                }
+                .disabled(disabled)
+                Stepper(value: Binding(
+                    get: { draftH ?? set.minHeight ?? 2160 },
+                    set: { h in setResolution(w: draftW ?? set.minWidth ?? 3840, h: h) }
+                ), in: 100...99999, step: 100) {
+                    LabeledContent("高", value: "\(draftH ?? set.minHeight ?? 0) 像素")
+                }
+                .disabled(disabled)
+            }
+        } header: {
+            Text("画质要求")
+        } footer: {
+            Text("只有横屏（宽高比大于 1.1）且不低于这个分辨率的图片才会被选中。")
+        }
+    }
+
+    /// 归档：手机上只给开关，位置和跨挂载点换算在电脑上设。
+    @ViewBuilder
+    private func archiveSection(_ set: RemoteSettings, disabled: Bool) -> some View {
+        Section {
+            toggle("启用归档", set.archiveEnabled ?? false, key: "archive_enabled", disabled: disabled)
+            if set.archiveEnabled == true {
+                LabeledContent("位置") {
+                    Text(archivePath(set))
+                        .font(.footnote)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+        } header: {
+            Text("归档")
+        } footer: {
+            Text("把每次选中的图片在图库旁边留一份链接（优先硬链接，不支持时用软链接），每次运行前清空上一批。位置、文件夹名、跨挂载点换算在电脑上改。")
+        }
+    }
+
+    private func archivePath(_ set: RemoteSettings) -> String {
+        if let dir = set.archiveDir, !dir.isEmpty { return dir }
+        return "各图库目录的上级 / \(set.archiveSubdir ?? "_WallpaperArchive")"
+    }
+
+    /// 图库目录：只读列表（类型、路径、挂载状态、上次扫描到的张数），可以重新检查挂载。
+    @ViewBuilder
+    private func librarySection(_ dirs: [LibraryDir], state: RemoteState) -> some View {
+        Section {
+            ForEach(dirs) { d in
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: d.filter ? "scissors" : "heart")
+                        .foregroundStyle(d.filter ? Color.orange : Color.accentColor)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(d.name).font(.subheadline.bold()).lineLimit(1).truncationMode(.middle)
+                        Text(d.path).font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                        Text(detail(d)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    mountBadge(d)
+                }
+            }
+            Button {
+                Task { await session.checkMounts() }
+            } label: {
+                Label("重新检查挂载", systemImage: "arrow.clockwise")
+            }
+            .disabled(session.connection != .live)
+        } header: {
+            Text("图库（\(state.libraryDirs) 个目录）")
+        } footer: {
+            Text("筛选 + 采样会先删掉不合格的原图；仅采样不动文件。添加、移除目录在电脑上的「图库」页，手机上只读。")
+        }
+    }
+
+    private func detail(_ d: LibraryDir) -> String {
+        var s = d.filter ? "筛选 + 采样" : "仅采样"
+        if d.images > 0 || d.folders > 0 {
+            s += " · \(d.images) 张 · \(d.folders) 个文件夹"
+        }
+        if let n = d.deleted, n > 0 { s += " · 删过 \(n) 张" }
+        return s
+    }
+
+    private func mountBadge(_ d: LibraryDir) -> some View {
+        Text(d.mountText)
+            .font(.caption2.bold())
+            .foregroundStyle(mountColor(d.mount))
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(mountColor(d.mount).opacity(0.12), in: Capsule())
+            .fixedSize()
+    }
+
+    private func mountColor(_ mount: String) -> Color {
+        switch mount {
+        case "ok": .green
+        case "missing": .red
+        case "slow": .orange
+        default: .secondary
+        }
+    }
+
+    /// 电脑上排队的删除原图（图库没连上时排的队），可以逐条或全部取消。
+    @ViewBuilder
+    private var pendingQueueSection: some View {
+        if let items = session.state?.pendingItems, !items.isEmpty {
+            Section {
+                ForEach(items) { it in
+                    HStack(spacing: 12) {
+                        Image(systemName: "clock").foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(it.wall ?? it.name).font(.subheadline)
+                            Text(it.display).font(.footnote).foregroundStyle(.secondary)
+                                .lineLimit(1).truncationMode(.middle)
+                            Text(it.date, format: .dateTime.month().day().hour().minute())
+                                .font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Button("取消") { Task { await session.cancelPending(it) } }
+                            .buttonStyle(.borderless)
+                            .disabled(session.connection != .live)
+                    }
+                }
+                if items.count > 1 {
+                    Button("全部取消", role: .destructive) { Task { await session.cancelAllPending() } }
+                        .disabled(session.connection != .live)
+                }
+            } header: {
+                Text("待删除（\(items.count)）")
+            } footer: {
+                Text("图库（NAS）没连上时删的原图先排在电脑上，图库连上后自动删除。取消只是不删这张原图，壁纸文件夹里那张当时已经移出了。")
+            }
         }
     }
 
@@ -293,6 +493,20 @@ struct SettingsPage: View {
             guard !Task.isCancelled else { return }
             await session.updateSettings(["sample_count": n])
             draftCount = nil
+        }
+    }
+
+    /// 自定义分辨率：步进器连点时先改草稿，停手 0.6 秒再一起发给电脑。
+    private func setResolution(w: Int, h: Int) {
+        draftW = w
+        draftH = h
+        resTask?.cancel()
+        resTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            await session.updateSettings(["min_width": w, "min_height": h])
+            draftW = nil
+            draftH = nil
         }
     }
 }

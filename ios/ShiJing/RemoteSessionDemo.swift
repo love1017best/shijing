@@ -29,12 +29,34 @@ extension RemoteSession {
                                          elapsed: 73, brief: "重合 4% · 删 3 张",
                                          detail: "和上一轮相比：新换上 288 张，重复 12 张（重合率 4%）\n筛选删除 3 张\n覆盖 300 / 415 个文件夹"),
             nextAuto: now + 6 * 3600, wallpapers: 300, wallsRev: "demo", dest: "~/Pictures/Wallpapers0", sampleCount: 300, libraryDirs: 3)
-        s.state?.settings = RemoteSettings(sampleCount: 300, autoRunHours: 6, autoOptions: [0, 6, 12, 24, 168],
-                                           deleteDuringFilter: true, preferUnseen: true, refreshWallpaper: true)
+        s.state?.settings = RemoteSettings(
+            sampleCount: 300, autoRunHours: 6, autoOptions: [0, 6, 12, 24, 168],
+            deleteDuringFilter: true, preferUnseen: true, refreshWallpaper: true,
+            balanceFirst: true, incremental: true, mode: "copy", minWidth: 3840, minHeight: 2160,
+            minPresets: [
+                ResolutionPreset(label: "4K", w: 3840, h: 2160),
+                ResolutionPreset(label: "5K", w: 5120, h: 2880),
+                ResolutionPreset(label: "2K", w: 2560, h: 1440),
+                ResolutionPreset(label: "1080p", w: 1920, h: 1080),
+            ],
+            archiveEnabled: true, archiveSubdir: "_WallpaperArchive", archiveDir: "")
+        s.state?.dirs = [
+            LibraryDir(path: "~/Media0/风景", filter: true, mount: "ok", images: 12840, folders: 415, deleted: 12),
+            LibraryDir(path: "~/Media0/收藏", filter: false, mount: "ok", images: 3120, folders: 57, deleted: 0),
+            LibraryDir(path: "~/Media0/旧图", filter: true, mount: "missing", images: 0, folders: 0, deleted: 0),
+        ]
         s.state?.undoName = running ? nil : "风景-京都-0012.jpg"
         s.state?.excluded = 12
         // 截图用：-demoPending 摆出「图库没连上，删除原图在电脑上排队」的样子
-        if ProcessInfo.processInfo.arguments.contains("-demoPending") { s.state?.pending = 2 }
+        if ProcessInfo.processInfo.arguments.contains("-demoPending") {
+            s.state?.pending = 2
+            s.state?.pendingItems = [
+                PendingItem(path: "/Volumes/Media0/风景/京都/0163.jpg", display: "~/Media0/风景/京都/0163.jpg",
+                            wall: "风景-京都-0012.jpg", at: now - 600),
+                PendingItem(path: "/Volumes/Media0/风景/冰岛/0288.jpg", display: "~/Media0/风景/冰岛/0288.jpg",
+                            wall: "风景-冰岛-0077.jpg", at: now - 300),
+            ]
+        }
         s.connection = .live
         let places = ["冰岛", "阿尔卑斯", "京都", "黄石", "新西兰", "巴塔哥尼亚", "挪威", "托斯卡纳", "大理", "落基山"]
         s.walls = (0..<300).map { i in

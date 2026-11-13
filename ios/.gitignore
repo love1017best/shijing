@@ -3,3 +3,5 @@ xcuserdata/
 DerivedData/
 ShiJing/Local.xcconfig
 build/
+build-sim/
+install-device.log

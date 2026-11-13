@@ -255,6 +255,12 @@ final class RemoteSession {
             if let v = changes["delete_during_filter"] as? Bool { set.deleteDuringFilter = v }
             if let v = changes["prefer_unseen"] as? Bool { set.preferUnseen = v }
             if let v = changes["refresh_wallpaper"] as? Bool { set.refreshWallpaper = v }
+            if let v = changes["balance_first"] as? Bool { set.balanceFirst = v }
+            if let v = changes["incremental"] as? Bool { set.incremental = v }
+            if let v = changes["mode"] as? String { set.mode = v }
+            if let v = changes["min_width"] as? Int { set.minWidth = v }
+            if let v = changes["min_height"] as? Int { set.minHeight = v }
+            if let v = changes["archive_enabled"] as? Bool { set.archiveEnabled = v }
             state?.settings = set
             return
         }
@@ -271,14 +277,57 @@ final class RemoteSession {
         }
     }
 
-    /// 撤销最近一次移出：放回壁纸文件夹原来的位置。成功时返回放回去的那张的文件名。
-    @discardableResult
+    // MARK: 待删除队列、挂载检查（第 5 期）
+
+    /// 取消电脑上排队的一项删除原图（图库没连上时排的队，电脑连上后会自己执行）。
+    func cancelPending(_ item: PendingItem) async {
+        guard await pendingAct({ try await $0.cancelPending(item.path) }) else { return }
+        showNotice("已取消排队删除：\(item.name)")
+    }
+
+    /// 一次取消所有排队的删除原图。
+    func cancelAllPending() async {
+        guard await pendingAct({ try await $0.cancelPending(nil) }) else { return }
+        showNotice("已取消所有排队删除")
+    }
+
+    private func pendingAct(_ op: (APIClient) async throws -> RemoteState) async -> Bool {
+        guard connection == .live else {
+            actionError = "连不上电脑，排队删除只能在电脑上取消。"
+            return false
+        }
+        do {
+            state = try await op(client())
+            remember(wallsChanged: true)
+            return true
+        } catch APIError.unauthorized(let msg) {
+            connection = .unpaired(msg)
+        } catch {
+            actionError = Self.describe(error)
+        }
+        return false
+    }
+
+    /// 让电脑重新检查每个图库目录能不能访问（结果会随状态推过来）。
+    func checkMounts() async {
+        guard connection == .live else { return }
+        do {
+            state = try await client().checkMounts()
+            remember()
+        } catch APIError.unauthorized(let msg) {
+            connection = .unpaired(msg)
+        } catch {
+            actionError = Self.describe(error)
+        }
+    }
+
+    /// 撤销最近一次移出：放回壁纸文件夹原来的位置。成功时返回放回去的那张的文件名。    @discardableResult
     func undoRemove() async -> String? {
         // 离线时撤销的是手机上还没补上的「移出」：直接从队列里拿掉、放回列表，不用连电脑
         if offline {
             guard let last = queued.last(where: { $0.kind == .remove }) else { return nil }
             cancelQueued(last, announce: false)
-            notice = "已撤销移出：\(last.name)"
+            showNotice("已撤销移出：\(last.name)")
             return last.name
         }
         guard let name = state?.undoName else { return nil }

@@ -77,9 +77,9 @@ extension RemoteSession {
         walls.removeAll { $0.name == w.name }
         remember(wallsChanged: true)
         switch kind {
-        case .exclude: notice = "已记下：连上电脑后移出并不再选它"
-        case .remove: notice = "已记下：连上电脑后移出"
-        case .delete: notice = "已记下：连上电脑后确认再删除原图"
+        case .exclude: showNotice("已记下：连上电脑后移出并不再选它")
+        case .remove: showNotice("已记下：连上电脑后移出")
+        case .delete: showNotice("已记下：连上电脑后确认再删除原图")
         }
     }
 
@@ -92,7 +92,7 @@ extension RemoteSession {
         let back = restore(a)
         remember(wallsChanged: true)
         if announce {
-            notice = back ? "已取消，放回列表：\(a.name)" : "已取消：\(a.name)"
+            showNotice(back ? "已取消，放回列表：\(a.name)" : "已取消：\(a.name)")
         }
     }
 
@@ -107,7 +107,7 @@ extension RemoteSession {
             restore(a)
         }
         remember(wallsChanged: true)
-        notice = "已取消 \(list.count) 项离线操作"
+        showNotice("已取消 \(list.count) 项离线操作")
     }
 
     @discardableResult
@@ -206,7 +206,7 @@ extension RemoteSession {
         if !queuedDeletes.isEmpty {
             msg += (msg.isEmpty ? "" : "；") + "\(queuedDeletes.count) 张原图等你确认删除"
         }
-        if !msg.isEmpty { notice = msg }
+        if !msg.isEmpty { showNotice(msg) }
     }
 
     enum QueuedDeleteResult { case deleted, queued, expired, cancelled }

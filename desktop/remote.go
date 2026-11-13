@@ -340,6 +340,8 @@ func (rs *remoteServer) handler() http.Handler {
 	mux.HandleFunc("GET /api/events", rs.authed(rs.handleEvents))
 	mux.HandleFunc("POST /api/run", rs.authed(rs.handleRun))
 	mux.HandleFunc("POST /api/stop", rs.authed(rs.handleStop))
+	mux.HandleFunc("POST /api/pending/cancel", rs.authed(rs.handlePendingCancel))
+	mux.HandleFunc("POST /api/mounts/check", rs.authed(rs.handleMountsCheck))
 	rs.wallRoutes(mux)
 	rs.extraRoutes(mux)
 	return mux
@@ -572,6 +574,53 @@ func (rs *remoteServer) handleStop(w http.ResponseWriter, r *http.Request, dev s
 	_, _ = w.Write(rs.snapshot())
 }
 
+// handleMountsCheck 让电脑重新检查每个图库目录能不能访问（手机上的「重新检查挂载」）。
+// 检查在后台做（网络卷卡住时 stat 会阻塞），结果随状态快照推给手机。
+func (rs *remoteServer) handleMountsCheck(w http.ResponseWriter, r *http.Request, dev string) {
+	if !rs.onMain(func() {
+		rs.a.appendLog("📱 「" + dev + "」重新检查了图库挂载")
+		rs.a.checkMounts()
+	}) {
+		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
+		return
+	}
+	rs.writeSnapshot(w)
+}
+
+// handlePendingCancel 取消电脑上排队的删除原图：{"path": ...} 或 {"all": true}。
+// 只取消队列，不动已经移出的壁纸（和电脑概览里的待删除条一样）。
+func (rs *remoteServer) handlePendingCancel(w http.ResponseWriter, r *http.Request, dev string) {
+	var body struct {
+		Path string `json:"path"`
+		All  bool   `json:"all"`
+	}
+	if err := readBody(r, &body); err != nil || (!body.All && body.Path == "") {
+		writeErr(w, http.StatusBadRequest, "请求格式不对")
+		return
+	}
+	var removed int
+	ok := rs.onMain(func() {
+		a := rs.a
+		if body.All {
+			removed = len(a.pending)
+			if removed > 0 {
+				a.cancelAllPending()
+			}
+		} else if i := slices.IndexFunc(a.pending, func(e core.PendingDelete) bool { return e.Path == body.Path }); i >= 0 {
+			a.cancelPending(i)
+			removed = 1
+		}
+		if removed > 0 {
+			a.appendLog(fmt.Sprintf("📱 「%s」取消了 %d 项排队删除", dev, removed))
+		}
+	})
+	if !ok {
+		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
+		return
+	}
+	rs.writeSnapshot(w)
+}
+
 // ── 主线程上的部分 ────────────────────────────────────────────────────────
 
 // remoteBlocked 是手机上「换一批」为什么点不了，能点时返回 ""。
@@ -636,8 +685,29 @@ type remoteState struct {
 	Settings *remoteSettings `json:"settings,omitempty"`  // 手机上能改的几项设置
 	UndoName string          `json:"undo_name,omitempty"` // 最近一次可以撤销的移出
 	Excluded int             `json:"excluded"`            // 「不再选」名单里有几张
-	// 图库没连上时排队的删除原图（pending.go）；手机上显示「N 项等电脑连上图库后执行」
-	Pending int `json:"pending"`
+	// 图库没连上时排队的删除原图（pending.go）；手机上显示「N 项等电脑连上图库后执行」，可以逐条取消
+	Pending     int                 `json:"pending"`
+	PendingList []remotePendingItem `json:"pending_items,omitempty"`
+	// 图库目录（手机上只读显示）：路径、是筛选还是仅采样、挂载状态、统计
+	Dirs []remoteDir `json:"dirs,omitempty"`
+}
+
+// remotePendingItem 是待删除队列里的一条（路径原样传回来取消）。
+type remotePendingItem struct {
+	Path    string `json:"path"`
+	Display string `json:"display"` // ~ 缩写
+	Wall    string `json:"wall,omitempty"`
+	At      int64  `json:"at"` // Unix 秒
+}
+
+// remoteDir 是一个图库目录（只读）。
+type remoteDir struct {
+	Path    string `json:"path"`   // ~ 缩写
+	Filter  bool   `json:"filter"` // true = 筛选 + 采样，false = 仅采样
+	Mount   string `json:"mount"`  // ok / missing / slow / unknown
+	Images  int    `json:"images"` // 上次成功运行时扫描到的合格图片数
+	Folders int    `json:"folders"`
+	Deleted int    `json:"deleted"` // 删除记录里这个目录下删过几张
 }
 
 type remoteLast struct {
@@ -658,19 +728,21 @@ func (a *app) remoteSnapshot() remoteState {
 	s := remoteState{
 		Version: a.version, Eyebrow: a.heroEyebrow(), Title: a.heroTitle(),
 		Running: a.running, Stopping: a.running && a.stopReq.Load(),
-		Fraction:   -1,
-		Blocked:    a.remoteBlocked(),
-		Unmounted:  a.unmountedCount(),
-		WillDelete: a.willDelete(),
-		Wallpapers: len(a.walls.all),
-		WallsRev:   wallsRev(a.walls.all),
-		Dest:       tildify(a.cfg.DestDir),
-		Sample:     int(a.num),
-		Library:    len(a.allDirs()),
-		Settings:   a.remoteSettings(),
-		UndoName:   a.undoName(),
-		Excluded:   len(a.cfg.Excluded),
-		Pending:    len(a.pending),
+		Fraction:    -1,
+		Blocked:     a.remoteBlocked(),
+		Unmounted:   a.unmountedCount(),
+		WillDelete:  a.willDelete(),
+		Wallpapers:  len(a.walls.all),
+		WallsRev:    wallsRev(a.walls.all),
+		Dest:        tildify(a.cfg.DestDir),
+		Sample:      int(a.num),
+		Library:     len(a.allDirs()),
+		Settings:    a.remoteSettings(),
+		UndoName:    a.undoName(),
+		Excluded:    len(a.cfg.Excluded),
+		Pending:     len(a.pending),
+		PendingList: a.remotePendingList(),
+		Dirs:        a.remoteDirs(),
 	}
 	if s.WillDelete {
 		s.DeleteNote = a.deleteNotice()
@@ -708,6 +780,49 @@ func (a *app) remoteSnapshot() remoteState {
 		s.NextAuto = next.Unix()
 	}
 	return s
+}
+
+// remotePendingList 是待删除队列给手机看的那一份（主线程调用）。
+func (a *app) remotePendingList() []remotePendingItem {
+	items := make([]remotePendingItem, 0, len(a.pending))
+	for _, e := range a.pending {
+		items = append(items, remotePendingItem{Path: e.Path, Display: tildify(e.Path), Wall: e.Wall, At: e.AddedAt.Unix()})
+	}
+	return items
+}
+
+// remoteDirs 是图库目录列表（只读；主线程调用）。
+func (a *app) remoteDirs() []remoteDir {
+	dirs := make([]remoteDir, 0, len(a.cfg.FilterAndSampleDirs)+len(a.cfg.SampleOnlyDirs))
+	add := func(d string, filter bool) {
+		r := remoteDir{Path: tildify(d), Filter: filter, Mount: mountName(a.mounts[d])}
+		if st, ok := a.sourceStat(d); ok {
+			r.Images, r.Folders = st.Images, st.Folders
+		}
+		r.Deleted = a.deletedIn(d)
+		dirs = append(dirs, r)
+	}
+	for _, d := range a.cfg.FilterAndSampleDirs {
+		add(d, true)
+	}
+	for _, d := range a.cfg.SampleOnlyDirs {
+		add(d, false)
+	}
+	return dirs
+}
+
+// mountName 是挂载状态给手机的值。
+func mountName(s mountState) string {
+	switch s {
+	case mountOK:
+		return "ok"
+	case mountMissing:
+		return "missing"
+	case mountSlow:
+		return "slow"
+	default:
+		return "unknown"
+	}
 }
 
 // publishRemote 在主线程上把最新状态交给手机遥控服务（没开启时什么都不做）。

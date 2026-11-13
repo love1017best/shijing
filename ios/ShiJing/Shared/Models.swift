@@ -43,8 +43,57 @@ struct RemoteState: Codable, Equatable {
     var excluded: Int?
     /// 图库没连上时在电脑上排队的删除原图，图库连上后自动执行（旧版桌面端没有）
     var pending: Int?
+    /// 待删除队列的明细（手机上可以逐条取消；旧版桌面端没有）
+    var pendingItems: [PendingItem]?
+    /// 图库目录（只读：路径、类型、挂载状态、统计；旧版桌面端没有）
+    var dirs: [LibraryDir]?
 
     var nextAutoDate: Date? { nextAuto.map { Date(timeIntervalSince1970: $0) } }
+}
+
+/// 待删除队列里的一条（desktop/remote.go 的 remotePendingItem）。
+struct PendingItem: Codable, Identifiable, Equatable {
+    /// 完整路径（取消时原样传回去）
+    var path: String
+    /// ~ 缩写的路径
+    var display: String
+    var wall: String?
+    /// 什么时候排的队（Unix 秒）
+    var at: Double
+    var id: String { path }
+    var name: String { (display as NSString).lastPathComponent }
+    var folder: String { (display as NSString).deletingLastPathComponent }
+    var date: Date { Date(timeIntervalSince1970: at) }
+}
+
+/// 一个图库目录（desktop/remote.go 的 remoteDir）。
+struct LibraryDir: Codable, Identifiable, Equatable {
+    /// ~ 缩写的路径
+    var path: String
+    /// true = 筛选 + 采样，false = 仅采样
+    var filter: Bool
+    /// ok / missing / slow / unknown
+    var mount: String
+    var images: Int
+    var folders: Int
+    var deleted: Int?
+    var id: String { path }
+    var name: String { (path as NSString).lastPathComponent }
+    var mountText: String {
+        switch mount {
+        case "ok": "可访问"
+        case "missing": "未挂载"
+        case "slow": "无响应"
+        default: "检查中"
+        }
+    }
+}
+
+/// 最低分辨率的一个预设（desktop/remoteextra.go 的 remotePreset）。
+struct ResolutionPreset: Codable, Equatable, Hashable {
+    var label: String
+    var w: Int
+    var h: Int
 }
 
 struct LastRun: Codable, Equatable {
@@ -63,6 +112,7 @@ struct LastRun: Codable, Equatable {
 }
 
 /// 手机上能改的设置（desktop/remoteextra.go 的 remoteSettings）。
+/// 第 5 期的几个字段是可选的：旧版桌面端不推，界面上就不显示那几项。
 struct RemoteSettings: Codable, Equatable {
     var sampleCount: Int
     /// 0 表示不自动换
@@ -71,6 +121,16 @@ struct RemoteSettings: Codable, Equatable {
     var deleteDuringFilter: Bool
     var preferUnseen: Bool
     var refreshWallpaper: Bool
+    var balanceFirst: Bool?
+    var incremental: Bool?
+    /// copy / symlink
+    var mode: String?
+    var minWidth: Int?
+    var minHeight: Int?
+    var minPresets: [ResolutionPreset]?
+    var archiveEnabled: Bool?
+    var archiveSubdir: String?
+    var archiveDir: String?
 
     /// 和桌面端 autoRunLabel 一样的说法。
     static func autoLabel(_ h: Int) -> String {
@@ -81,6 +141,15 @@ struct RemoteSettings: Codable, Equatable {
         case let h where h % 24 == 0: "每 \(h / 24) 天"
         default: "每 \(h) 小时"
         }
+    }
+
+    var modeLabel: String { mode == "symlink" ? "软链接" : "复制" }
+
+    /// 当前分辨率对应的预设下标；对不上任何预设时是 presets.count（「自定义」）。
+    var presetIndex: Int {
+        let presets = minPresets ?? []
+        if let i = presets.firstIndex(where: { $0.w == minWidth && $0.h == minHeight }) { return i }
+        return presets.count
     }
 }
 

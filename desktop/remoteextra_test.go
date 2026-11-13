@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"desktop/core"
 )
@@ -136,6 +137,102 @@ func TestRemoteLogDeletionsOriginal(t *testing.T) {
 	want, _ := os.ReadFile(filepath.Join(h.walls.dir, "c.jpg"))
 	if resp.StatusCode != 200 || string(body) != string(want) || resp.Header.Get("Content-Type") != "image/jpeg" {
 		t.Fatalf("original = %d %s %d 字节", resp.StatusCode, resp.Header.Get("Content-Type"), len(body))
+	}
+}
+
+func TestRemoteSettingsMore(t *testing.T) {
+	h := newRemoteHarness(t)
+	tok := h.pair(t, "iPhone")
+	code, data := h.do(t, "POST", "/api/settings", tok, map[string]any{
+		"balance_first": true, "incremental": true, "mode": "symlink",
+		"min_width": 5120, "min_height": 2880, "archive_enabled": true,
+	})
+	if code != 200 {
+		t.Fatalf("settings = %d %v", code, data)
+	}
+	got := data["settings"].(map[string]any)
+	if got["balance_first"] != true || got["incremental"] != true || got["mode"] != "symlink" ||
+		got["min_width"] != float64(5120) || got["min_height"] != float64(2880) || got["archive_enabled"] != true {
+		t.Fatalf("响应里的设置没变: %v", got)
+	}
+	if presets, _ := got["min_presets"].([]any); len(presets) != len(resPresets) {
+		t.Fatalf("预设 = %v", got["min_presets"])
+	}
+	h.tt.Frame()
+	cfg := h.buildConfig()
+	if !cfg.BalanceFirst || !cfg.Incremental || cfg.Mode != "symlink" || cfg.MinWidth != 5120 ||
+		cfg.MinHeight != 2880 || !cfg.ArchiveEnabled {
+		t.Fatalf("配置 = %+v", cfg)
+	}
+	if h.preset != 1 { // 5120×2880 是第二个预设 5K
+		t.Fatalf("预设下标 = %d", h.preset)
+	}
+	// 对不上任何预设：桌面设置页切到「自定义」
+	if code, _ := h.do(t, "POST", "/api/settings", tok, map[string]any{"min_width": 4000, "min_height": 2200}); code != 200 {
+		t.Fatalf("自定义分辨率 = %d", code)
+	}
+	h.tt.Frame()
+	if h.preset != len(resPresets) {
+		t.Fatalf("自定义时预设下标 = %d", h.preset)
+	}
+	for _, bad := range []map[string]any{{"mode": "move"}, {"min_width": 0}, {"min_height": remoteMaxPixels + 1}} {
+		if code, _ := h.do(t, "POST", "/api/settings", tok, bad); code != 400 {
+			t.Fatalf("%v = %d，应该拒绝", bad, code)
+		}
+	}
+}
+
+func TestRemotePendingCancel(t *testing.T) {
+	h := newRemoteHarness(t)
+	tok := h.pair(t, "iPhone")
+	h.pending = []core.PendingDelete{
+		{Path: "/Volumes/Media0/A/a.jpg", Wall: "a.jpg", AddedAt: time.Now()},
+		{Path: "/Volumes/Media0/A/b.jpg", Wall: "b.jpg", AddedAt: time.Now()},
+	}
+	_, st := h.do(t, "GET", "/api/state", tok, nil)
+	if st["pending"] != float64(2) {
+		t.Fatalf("pending = %v", st["pending"])
+	}
+	items, _ := st["pending_items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("pending_items = %v", st["pending_items"])
+	}
+	if first, _ := items[0].(map[string]any); first["wall"] != "a.jpg" {
+		t.Fatalf("pending_items[0] = %v", items[0])
+	}
+
+	code, data := h.do(t, "POST", "/api/pending/cancel", tok, map[string]any{"path": "/Volumes/Media0/A/a.jpg"})
+	if code != 200 || data["pending"] != float64(1) {
+		t.Fatalf("取消一条 = %d %v", code, data)
+	}
+	if len(h.pending) != 1 || h.pending[0].Path != "/Volumes/Media0/A/b.jpg" {
+		t.Fatalf("队列 = %+v", h.pending)
+	}
+	if code, _ := h.do(t, "POST", "/api/pending/cancel", tok, map[string]any{"all": true}); code != 200 {
+		t.Fatalf("全部取消 = %d", code)
+	}
+	if len(h.pending) != 0 {
+		t.Fatalf("队列没清空: %+v", h.pending)
+	}
+	if code, _ := h.do(t, "POST", "/api/pending/cancel", tok, map[string]any{}); code != 400 {
+		t.Fatalf("空请求 = %d，应该拒绝", code)
+	}
+}
+
+func TestRemoteMountsCheck(t *testing.T) {
+	h := newRemoteHarness(t)
+	tok := h.pair(t, "iPhone")
+	if code, data := h.do(t, "POST", "/api/mounts/check", tok, nil); code != 200 {
+		t.Fatalf("mounts/check = %d %v", code, data)
+	}
+	_, st := h.do(t, "GET", "/api/state", tok, nil)
+	dirs, _ := st["dirs"].([]any)
+	if len(dirs) != 1 {
+		t.Fatalf("dirs = %v", st["dirs"])
+	}
+	d := dirs[0].(map[string]any)
+	if d["filter"] != true || d["path"] != "/Volumes/Media0/A" {
+		t.Fatalf("dir = %v", d)
 	}
 }
 

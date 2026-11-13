@@ -173,6 +173,17 @@ struct APIClient: Sendable {
         try await send(request("POST", "api/excluded/add", body: ["paths": paths]), as: ExcludedR.self).items
     }
 
+    /// 取消电脑上排队的删除原图：path 为 nil 时全部取消。返回取消后的状态。
+    func cancelPending(_ path: String?) async throws -> RemoteState {
+        let body: [String: Any] = path.map { ["path": $0] } ?? ["all": true]
+        return try await send(request("POST", "api/pending/cancel", body: body), as: RemoteState.self)
+    }
+
+    /// 让电脑重新检查每个图库目录能不能访问（结果随状态推过来）。
+    func checkMounts() async throws -> RemoteState {
+        try await send(request("POST", "api/mounts/check", body: [:]), as: RemoteState.self)
+    }
+
     func deletions() async throws -> DeletionList {
         try await send(request("GET", "api/deletions"), as: DeletionList.self)
     }
