@@ -48,7 +48,6 @@ type remoteSettings struct {
 
 const (
 	remoteLogLines     = 400 // /api/log 最多给多少行
-	remoteDeleteShown  = 300 // /api/deletions 最多给多少条
 	remoteMaxSampleCnt = 9999
 	remoteMaxPixels    = 99999
 )
@@ -376,10 +375,11 @@ type remoteDeletion struct {
 }
 
 // handleDeletions 给删除记录（新的在前），读日志文件，不占主线程。
+// 全部给出去：手机在另一台机器上，没法去翻日志文件，截断只会让页面上的张数对不上。
 func (rs *remoteServer) handleDeletions(w http.ResponseWriter, r *http.Request, _ string) {
 	recs := core.ReadDeleteLog(rs.a.paths.DeleteLog)
-	items := make([]remoteDeletion, 0, min(len(recs), remoteDeleteShown))
-	for _, d := range recs[:min(len(recs), remoteDeleteShown)] {
+	items := make([]remoteDeletion, 0, len(recs))
+	for _, d := range recs {
 		items = append(items, remoteDeletion{At: d.At.Unix(), Name: filepath.Base(d.Path), Dir: tildify(filepath.Dir(d.Path)), Reason: d.Reason})
 	}
 	byFilter, manual := core.CountDeletions(recs)

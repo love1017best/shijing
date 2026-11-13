@@ -137,14 +137,18 @@ type app struct {
 	logParsed       []logEntry
 	logParsedFirst  string
 	logProblemsOnly bool
-	running         bool
-	runStats        // 这次运行的进度和删除情况，开始运行时整体清零
-	last            *runResult
-	skipConfirm     bool        // 删除原图前不再弹确认框（重新打开删除开关后恢复）
-	prevDelete      bool        // 上一帧「删除不合格原图」的值，用来发现它被重新打开
-	stopReq         atomic.Bool // 用户点了「停止」，流程在安全的地方停下
-	toast           string
-	initialized     bool
+	// 删除记录页的两个类型标签：都关着就是全部；delClosed 记着收起来的日期（2006-01-02）
+	delFilter   bool
+	delManual   bool
+	delClosed   map[string]bool
+	running     bool
+	runStats    // 这次运行的进度和删除情况，开始运行时整体清零
+	last        *runResult
+	skipConfirm bool        // 删除原图前不再弹确认框（重新打开删除开关后恢复）
+	prevDelete  bool        // 上一帧「删除不合格原图」的值，用来发现它被重新打开
+	stopReq     atomic.Bool // 用户点了「停止」，流程在安全的地方停下
+	toast       string
+	initialized bool
 
 	walls          wallpapers      // 当前壁纸文件夹的缩略图
 	wallQuery      string          // 壁纸页的搜索词（按文件名）

@@ -213,7 +213,7 @@ struct LogView: View {
 // MARK: - 删除记录
 
 /// 删除记录：从图库里删掉的原图，按天分组（可以折叠），新的在前；
-/// 顶上的分段控件可以只看筛选删的或只看手动删的。
+/// 顶上的标签可以只看筛选删的、只看手动删的，也可以两个都选（等于全看）。
 /// 连不上电脑时显示手机上存的那份（连上时、换完一批后自动更新）。
 struct DeletionsView: View {
     let session: RemoteSession
@@ -221,13 +221,13 @@ struct DeletionsView: View {
     @State private var error: String?
     /// 显示的是存下来的副本时，那份是什么时候同步的
     @State private var syncedAt: Date?
-    @State private var kind: Kind = .all
+    /// 选中的标签：空着就是全部
+    @State private var kinds: Set<Kind> = []
     /// 折叠起来的日期（默认都展开）
     @State private var collapsedDays: Set<Date> = []
 
-    /// 只显示哪一类
-    enum Kind: Hashable { case all, filter, manual }
-
+    /// 记录的类型标签（两个可以同时选）
+    enum Kind: Hashable { case filter, manual }
     /// 桌面端 core.ReasonManual 写的就是这个词，其余（包括没有原因的旧日志）都算筛选删的
     private static let manualReason = "手动删除"
 
@@ -244,18 +244,16 @@ struct DeletionsView: View {
                     List {
                         recordsCacheSection(session, syncedAt)
                         Section {
-                            Picker("显示", selection: $kind) {
-                                Text("全部").tag(Kind.all)
-                                Text("筛选删除").tag(Kind.filter)
-                                Text("手动删除").tag(Kind.manual)
+                            HStack(spacing: 8) {
+                                chip(.filter, "筛选删除", count: list.filter ?? counted(list.items, .filter))
+                                chip(.manual, "手动删除", count: list.manual ?? counted(list.items, .manual))
+                                Spacer()
                             }
-                            .pickerStyle(.segmented)
                         } footer: {
                             Text(note(list))
                         }
                         if items.isEmpty {
-                            Text(kind == .manual ? "这段记录里没有手动删除的。" : "这段记录里没有筛选删除的。")
-                                .foregroundStyle(.secondary)
+                            Text("没有符合筛选的记录。").foregroundStyle(.secondary)
                         }
                         ForEach(groups(items), id: \.day) { g in
                             let open = !collapsedDays.contains(g.day)
@@ -318,6 +316,34 @@ struct DeletionsView: View {
         }
     }
 
+    /// 一个类型标签：点一下选中，再点取消；两个都选等于全看。
+    private func chip(_ k: Kind, _ title: String, count: Int) -> some View {
+        let on = kinds.contains(k)
+        return Button {
+            if on { kinds.remove(k) } else { kinds.insert(k) }
+        } label: {
+            HStack(spacing: 6) {
+                Text(title).font(.subheadline.weight(.medium))
+                Text("\(count)").font(.caption).monospacedDigit()
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .foregroundStyle(on ? Color.white : Color.primary)
+            .background(on ? Color.accentColor : Color.secondary.opacity(0.12), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title) \(count) 张")
+        .accessibilityAddTraits(on ? [.isSelected] : [])
+    }
+
+    /// 旧版桌面端没推两类张数时，按已经拿到的记录数
+    private func counted(_ items: [Deletion], _ k: Kind) -> Int {
+        items.reduce(0) { $0 + (kindsOf($1) == k ? 1 : 0) }
+    }
+
+    private func kindsOf(_ d: Deletion) -> Kind {
+        d.reason == Self.manualReason ? .manual : .filter
+    }
+
     /// 顶上的说明：两类的数量（旧版桌面端没推就没有）和各自的含义
     private func note(_ list: DeletionList) -> String {
         var head = ""
@@ -327,13 +353,11 @@ struct DeletionsView: View {
         return head + "筛选删除是竖屏、接近正方形、分辨率不够的图；手动删除是在预览或手机上点「删除图库里的原图」的。"
     }
 
-    /// 把分段控件的选择套到记录上。没有原因的旧日志算筛选删的，和电脑上的计数一致。
+    /// 把标签的选择套到记录上：没选标签就全看，选了的类型都留下。
+    /// 没有原因的旧日志算筛选删的，和电脑上的计数一致。
     private func shown(_ items: [Deletion]) -> [Deletion] {
-        switch kind {
-        case .all: return items
-        case .filter: return items.filter { $0.reason != Self.manualReason }
-        case .manual: return items.filter { $0.reason == Self.manualReason }
-        }
+        guard !kinds.isEmpty else { return items }
+        return items.filter { kinds.contains(kindsOf($0)) }
     }
 
     private func groups(_ items: [Deletion]) -> [(day: Date, items: [Deletion])] {
