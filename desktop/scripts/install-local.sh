@@ -30,6 +30,9 @@ MNT=$(hdiutil attach -nobrowse -readonly "$DMG" 2>/dev/null | grep -o '/Volumes/
 trap 'hdiutil detach -quiet "$MNT" 2>/dev/null || true' EXIT
 command rm -rf "$APP"
 ditto "$MNT/拾景.app" "$APP"
+# 用稳定的本地证书重签：ad-hoc 每次构建指纹都变，macOS 的「访问网络卷」授权每次都要重给，
+# 手机上远程删原图时还得跑到电脑前点（见 scripts/sign-app.sh）。dmg 本身不动。
+scripts/sign-app.sh "$APP" || true
 
 open "$APP"
 sleep 1
