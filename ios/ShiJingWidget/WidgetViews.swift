@@ -38,9 +38,9 @@ enum WidgetFamilies {
         return f
     }
 
-    /// 壁纸小组件：主屏幕全部尺寸 + 锁定屏幕矩形（系统会把图渲染成单色）
+    /// 壁纸小组件：只做主屏幕（用户觉得锁屏那个没必要，v0.3.147 起去掉）
     static var photo: [WidgetFamily] {
-        var f: [WidgetFamily] = [.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge, .accessoryRectangular]
+        var f: [WidgetFamily] = [.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge]
         if #available(iOS 27.0, *) { f.append(.systemExtraLargePortrait) }
         return f
     }
@@ -330,8 +330,9 @@ struct PhotoView: View {
                 Label("拾景壁纸", systemImage: "photo").font(.caption)
             }
         } else {
-            ZStack(alignment: .bottomLeading) {
-                Color.clear
+            // 根视图自己撑满容器：靠 Color.clear 撑尺寸在某些尺寸下会让内容被裁成 0
+            VStack(alignment: .leading, spacing: 0) {
+                Spacer(minLength: 0)
                 if !hasImage {
                     VStack(alignment: .leading, spacing: 4) {
                         Image(systemName: "photo.on.rectangle.angled").font(.title3)
@@ -350,6 +351,7 @@ struct PhotoView: View {
                         .padding(10)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
     }
 }

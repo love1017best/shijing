@@ -123,6 +123,7 @@ struct PhotoProvider: AppIntentTimelineProvider {
             e.showName = configuration.showName
             return e
         }
+        WidgetDebug.log("photo timeline return entries=\(entries.count) showName=\(configuration.showName)")
         return Timeline(entries: entries, policy: t.policy)
     }
 }
@@ -145,7 +146,9 @@ enum TimelineMaker {
     static func make(_ context: TimelineProviderContext, interval: RotateInterval, photo: Bool, preview: Bool) async -> Timeline<Entry> {
         let now = Date()
         let deadline = now.addingTimeInterval(budget)
+        WidgetDebug.log("make photo=\(photo) preview=\(preview) family=\(context.family) interval=\(interval.rawValue)")
         guard let mac = CurrentMac.load() else {
+            WidgetDebug.log("no mac")
             return Timeline(entries: [Entry(problem: "打开拾景配对一台 Mac")], policy: .after(now.addingTimeInterval(3600)))
         }
         let key = "\(mac.host):\(mac.port)"
@@ -179,6 +182,7 @@ enum TimelineMaker {
         let retry = now.addingTimeInterval(15 * 60)
         guard let snap, !(accessory && !photo) else {
             let running = snap?.state.running == true
+            WidgetDebug.log("early snap=\(snap != nil) problem=\(problem ?? "-")")
             return Timeline(entries: [base], policy: .after(running ? now.addingTimeInterval(60) : retry))
         }
 
@@ -242,6 +246,7 @@ enum TimelineMaker {
             min(end, now.addingTimeInterval(photo ? 6 * 3600 : 30 * 60))
         }
         WidgetCache.prune()
+        WidgetDebug.log("done photo=\(photo) count=\(entries.count) names=\(names.count) cached=\(cachedNames.count) new=\(newDownloads) first=\(entries.first?.imageFile?.lastPathComponent ?? "nil") hasState=\(entries.first?.state != nil)")
         return Timeline(entries: entries, policy: .after(next))
     }
 
@@ -303,7 +308,7 @@ enum WidgetCache {
         var at: Date
     }
 
-    private static let dir: URL = {
+    static let dir: URL = {
         let d = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appending(path: "widget", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
@@ -346,5 +351,27 @@ enum WidgetCache {
         guard imgs.count > keep else { return }
         let dated = imgs.map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
         for (f, _) in dated.sorted(by: { $0.1 > $1.1 }).dropFirst(keep) { try? fm.removeItem(at: f) }
+    }
+}
+
+/// 排查用：时间线到底有没有被调用、返回了什么。写在小组件自己的缓存目录里（`debug.log`），
+/// 从 Mac 上拉容器就能看（`xcrun devicectl device copy from --domain-identifier …widget`）。
+enum WidgetDebug {
+    static func log(_ s: String) {
+        let url = WidgetCache.dir.appending(path: "debug.log")
+        let line = "\(Int(Date().timeIntervalSince1970)) \(s)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        let fm = FileManager.default
+        // 太长就从头来过，别让日志把小组件的缓存目录撑大
+        if let size = try? fm.attributesOfItem(atPath: url.path)[.size] as? Int, size > 64 * 1024 {
+            try? fm.removeItem(at: url)
+        }
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(data)
+            try? h.close()
+        } else {
+            try? data.write(to: url)
+        }
     }
 }
