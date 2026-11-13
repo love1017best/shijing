@@ -62,39 +62,32 @@ struct SettingsPage: View {
     @State private var draftW: Int?
     @State private var draftH: Int?
     @State private var resTask: Task<Void, Never>?
-    /// 设置分两类：mac = 电脑上的拾景（遥控改的），phone = 这台手机（离线缓存等）
+    /// 设置分三类：mac = 电脑上的拾景（遥控改的），phone = 这台手机（离线缓存等），about = 版本和签名
     @AppStorage("settingsGroup") private var groupRaw = "mac"
-    private var group: SettingsGroup { SettingsGroup(rawValue: groupRaw) ?? .mac }
+    /// 列表收窄到适合阅读的宽度（和电脑上的设置页一样），按上一帧量到的宽度算
+    @State private var width: CGFloat = 0
 
     var body: some View {
-        MacPage(session: session, title: "设置") { state in
-            #if DEBUG
-            // 截图用：-demoOfflineCache 只摆离线这一组（设置页太长，模拟器里不好滚到最下面）；
-            // -demoQueue 只摆「待补操作」这一组（点进去是专门的页面）；
-            // -demoLibrary 只摆「图库 / 待删除」两组（配 -demoPending 看电脑上排队的删除）
-            if ProcessInfo.processInfo.arguments.contains("-demoQueue") {
-                if !session.queued.isEmpty { offlineQueueLink }
-            } else if ProcessInfo.processInfo.arguments.contains("-demoLibrary") {
-                if state.dirs != nil { libraryLink(state) }
-                pendingQueueSection
-            } else if ProcessInfo.processInfo.arguments.contains("-demoOfflineCache") {
-                offlineSection
-                if !session.queued.isEmpty { offlineQueueLink }
-            } else {
-                switch group {
-                case .mac: macContent(state)
-                case .phone: phoneContent(state)
-                case .about: aboutContent(state)
+        Group {
+            if let state = session.state {
+                #if DEBUG
+                // 截图用：-demoOfflineCache 只摆离线这一组（设置页太长，模拟器里不好滚到最下面）；
+                // -demoQueue 只摆「待补操作」这一组（点进去是专门的页面）；
+                // -demoLibrary 只摆「图库 / 待删除」两组（配 -demoPending 看电脑上排队的删除）
+                if let demo = demoPage(state) {
+                    demo
+                } else {
+                    pager(state)
                 }
+                #else
+                pager(state)
+                #endif
+            } else {
+                ConnectionFallback(session: session)
             }
-            #else
-            switch group {
-            case .mac: macContent(state)
-            case .phone: phoneContent(state)
-            case .about: aboutContent(state)
-            }
-            #endif
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             #if DEBUG
@@ -117,7 +110,49 @@ struct SettingsPage: View {
                 ToolbarItem(placement: .automatic) { ProgressView() } // 正在把改动发给电脑
             }
         }
+        .connectionToolbar(session)
     }
+
+    /// 三栏并排，左右滑也能切换（分段控件和翻页用同一个 selection）。
+    private func pager(_ state: RemoteState) -> some View {
+        TabView(selection: $groupRaw) {
+            page(macContent(state)).tag(SettingsGroup.mac.rawValue)
+            page(phoneContent(state)).tag(SettingsGroup.phone.rawValue)
+            page(aboutContent(state)).tag(SettingsGroup.about.rawValue)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+    }
+
+    private func page<Content: View>(_ content: Content) -> some View {
+        List { content }
+            .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent)
+    }
+
+    #if DEBUG
+    /// 截图用的单页（不是三栏）。
+    private func demoPage(_ state: RemoteState) -> AnyView? {
+        let args = ProcessInfo.processInfo.arguments
+        let content: AnyView?
+        if args.contains("-demoQueue") {
+            content = session.queued.isEmpty ? nil : AnyView(offlineQueueLink)
+        } else if args.contains("-demoLibrary") {
+            content = AnyView(Group {
+                if state.dirs != nil { libraryLink(state) }
+                pendingQueueSection
+            })
+        } else if args.contains("-demoOfflineCache") {
+            content = AnyView(Group {
+                offlineSection
+                if !session.queued.isEmpty { offlineQueueLink }
+            })
+        } else {
+            content = nil
+        }
+        guard let content else { return nil }
+        return AnyView(List { content }
+            .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent))
+    }
+    #endif
 
     /// 关于：两边各是什么版本、这台设备上的签名什么时候到期。
     /// 不和「这台手机」的设置混在一起（v0.3.132 一度独立成页、入口在概览，用户觉得首页放它奇怪，改回设置里的第三栏）。
