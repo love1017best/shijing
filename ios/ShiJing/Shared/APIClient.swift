@@ -101,8 +101,8 @@ struct APIClient: Sendable {
         return (r.token, r.name)
     }
 
-    func state() async throws -> RemoteState {
-        try await send(request("GET", "api/state"), as: RemoteState.self)
+    func state(timeout: TimeInterval = 15) async throws -> RemoteState {
+        try await send(request("GET", "api/state", timeout: timeout), as: RemoteState.self)
     }
 
     /// 换一批。deleteOriginals 为 false 时这次只模拟筛选。
@@ -116,13 +116,13 @@ struct APIClient: Sendable {
 
     // MARK: 壁纸（第 2 期）
 
-    func wallpapers() async throws -> WallpaperList {
-        try await send(request("GET", "api/wallpapers"), as: WallpaperList.self)
+    func wallpapers(timeout: TimeInterval = 15) async throws -> WallpaperList {
+        try await send(request("GET", "api/wallpapers", timeout: timeout), as: WallpaperList.self)
     }
 
-    /// 一张壁纸的 JPEG：缩略图或大图。
-    func imageData(_ name: String, kind: ImageKind) async throws -> Data {
-        let req = request("GET", "api/wallpapers/\(name)/\(kind.rawValue)", timeout: kind.isLarge ? 40 : 20)
+    /// 一张壁纸的 JPEG：缩略图或大图。小组件会传一个更短的超时（见 TimelineMaker 的时间预算）。
+    func imageData(_ name: String, kind: ImageKind, timeout: TimeInterval? = nil) async throws -> Data {
+        let req = request("GET", "api/wallpapers/\(name)/\(kind.rawValue)", timeout: timeout ?? (kind.isLarge ? 40 : 20))
         let (data, resp) = try await Self.session.data(for: req)
         try Self.check(resp, data: data)
         return data

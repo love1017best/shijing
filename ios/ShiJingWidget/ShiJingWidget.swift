@@ -133,8 +133,16 @@ struct PhotoProvider: AppIntentTimelineProvider {
 /// 时间线里只放文件路径、显示时才解码：小组件进程内存只有几十 MB，不能把几张大图一起放在内存里。
 /// 不在局域网里、Mac 睡着时，用缓存的状态和已经下过的图接着轮换，标上「离线」，一刻钟后再试。
 enum TimelineMaker {
+    /// 系统给小组件的时间不多（几十秒），超了直接把扩展杀掉，屏幕上是**一块空白**，要等下一次刷新才恢复。
+    /// 所以整条时间线自己限时：状态和列表各 6 秒，设图最多几张，到点没下到的图就留空（显示渐变），状态照常给。
+    private static let budget: TimeInterval = 20
+    private static let fastTimeout: TimeInterval = 6
+    /// 一次时间线最多新下几张图：第一次添加小组件时一张缓存都没有，排 12 张不该下 12 次
+    private static let maxNewDownloads = 6
+
     static func make(_ context: TimelineProviderContext, interval: RotateInterval, photo: Bool, preview: Bool) async -> Timeline<Entry> {
         let now = Date()
+        let deadline = now.addingTimeInterval(budget)
         guard let mac = CurrentMac.load() else {
             return Timeline(entries: [Entry(problem: "打开拾景配对一台 Mac")], policy: .after(now.addingTimeInterval(3600)))
         }
@@ -148,9 +156,9 @@ enum TimelineMaker {
         var client: APIClient?
         do {
             let c = try mac.client()
-            let state = try await c.state()
+            let state = try await c.state(timeout: fastTimeout)
             // 锁定屏幕上的功能小组件不用图，不拉列表
-            let list = (photo || !accessory) ? (try? await c.wallpapers()) : nil
+            let list = (photo || !accessory) ? (try? await c.wallpapers(timeout: fastTimeout)) : nil
             let cachedList = WidgetCache.load(key)?.list
             snap = WidgetCache.Snapshot(state: state, list: list ?? cachedList, at: now)
             WidgetCache.save(snap!, key)
@@ -185,13 +193,20 @@ enum TimelineMaker {
         }
         let px = pixels(context)
         var entries: [Entry] = []
+        var newDownloads = 0
         for i in 0..<count {
             var e = base
             e.date = i == 0 ? now : Date(timeIntervalSince1970: Double(slot0 + i) * step)
             if !names.isEmpty {
                 let name = names[pick(slot0 + i, names.count)]
                 e.wallName = name
-                e.imageFile = await image(key, name, px, client: client, hasHero: snap.list?.hero != nil)
+                // 已经缓存上的直接用；没缓存的最多再下几张，其余的下次刷新再补
+                var canDownload = false
+                if !WidgetCache.hasImage(key, name, px), newDownloads < maxNewDownloads, Date() < deadline {
+                    canDownload = true
+                    newDownloads += 1
+                }
+                e.imageFile = await image(key, name, px, client: canDownload ? client : nil, hasHero: snap.list?.hero != nil, deadline: deadline)
             }
             entries.append(e)
         }
@@ -225,16 +240,19 @@ enum TimelineMaker {
     }
 
     /// 缓存里有就直接用；没有且在线就下载（横幅尺寸，旧版桌面端退回缩略图）、缩好存起来。
-    private static func image(_ key: String, _ name: String, _ px: Int, client: APIClient?, hasHero: Bool) async -> URL? {
+    /// 超时按剩下的时间预算压短：慢慢传的时候宁可这张先空着，也不能让整个时间线拖过系统的上限。
+    private static func image(_ key: String, _ name: String, _ px: Int, client: APIClient?, hasHero: Bool, deadline: Date) async -> URL? {
         let file = WidgetCache.imageFile(key, name, px)
         if FileManager.default.fileExists(atPath: file.path) {
             WidgetCache.touch(file)
             return file
         }
         guard let client else { return nil }
+        let remaining = deadline.timeIntervalSinceNow
+        guard remaining > 1 else { return nil }
         let kinds: [ImageKind] = hasHero ? [.hero, .thumb] : [.thumb]
         for kind in kinds {
-            if let data = try? await client.imageData(name, kind: kind),
+            if let data = try? await client.imageData(name, kind: kind, timeout: max(2, min(remaining, 12))),
                let jpeg = downsample(data, maxPixels: px) {
                 try? jpeg.write(to: file)
                 return file

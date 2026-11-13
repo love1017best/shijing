@@ -307,6 +307,8 @@ struct PhotoView: View {
         if let problem = entry.problem { return problem }
         if entry.state == nil { return "正在读取…" }
         if entry.offlineSince != nil { return "离线 · 这张还没缓存" }
+        // 选出了图但这次没下下来（网络慢，时间线先回去了）：下一轮会补
+        if entry.wallName != nil { return "这张还没载入，稍后刷新" }
         return "壁纸文件夹是空的"
     }
 
