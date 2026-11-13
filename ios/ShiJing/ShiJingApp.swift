@@ -111,8 +111,10 @@ struct RootView: View {
         }
     }
 
-    /// 三个标签：概览 / 设置 / 记录。iPhone 是系统底部标签栏，iPad 是系统顶部标签栏。
-    /// iOS 18 起用新的 `Tab` API，iOS 17 退回 `.tabItem`。
+    /// 三个标签：概览 / 设置 / 记录。iPhone 是系统底部标签栏，iPad 上系统把标签栏放在顶部。
+    /// iPhone Duo 合上时外屏只有 466pt 宽，系统把标签栏排成右侧竖排的浮动栏、吃掉右边 84pt 安全区，
+    /// 和系统自己的「设置」「照片」在外屏上一样。`defaultTabBarPlacement(.tabBar)`、`.sidebarAdaptable`、
+    /// `.tabViewStyle(.tabBarOnly)` 都试过，在这个外屏上都不起作用，所以别再加回来。
     @ViewBuilder
     private func tabs(_ session: RemoteSession) -> some View {
         tabView(session)

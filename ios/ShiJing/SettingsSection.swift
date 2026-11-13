@@ -39,7 +39,7 @@ struct MacPage<Content: View>: View {
             if let state = session.state {
                 List { content(state) }
                     // 内屏、iPad 上别拉得太宽（和电脑上设置页的单栏最宽一样的思路）
-                    .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent)
+                    .contentWidthCap(width, max: 680)
             } else {
                 ConnectionFallback(session: session)
             }
@@ -66,6 +66,8 @@ struct SettingsPage: View {
     @AppStorage("settingsGroup") private var groupRaw = "mac"
     /// 列表收窄到适合阅读的宽度（和电脑上的设置页一样），按上一帧量到的宽度算
     @State private var width: CGFloat = 0
+    /// 高度：够高才分两栏（手机横放只有 400 出头，两栏会挤）
+    @State private var height: CGFloat = 0
     /// 显示过的栏：没显示过的不构建内容（电脑状态每秒推一次，三页 List 不必一起重建）
     @State private var seenGroups: Set<String> = []
 
@@ -88,7 +90,11 @@ struct SettingsPage: View {
                 ConnectionFallback(session: session)
             }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .frame(width: demoWidth)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+            width = size.width
+            height = size.height
+        }
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -109,6 +115,15 @@ struct SettingsPage: View {
             }
         }
         .connectionToolbar(session)
+    }
+
+    /// 截图用：-demoWidth 669 按指定宽度排版（模拟器里没法把 Duo 展开，借大屏模拟器看内屏的宽度）。
+    private var demoWidth: CGFloat? {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-demoWidth"), i + 1 < args.count { return CGFloat(Double(args[i + 1]) ?? 0) }
+        #endif
+        return nil
     }
 
     /// 三栏切换：整宽一条，内容区和下方的栏一样宽（宽屏两栏时跟着变宽）居中。
@@ -149,16 +164,17 @@ struct SettingsPage: View {
         .onChange(of: groupRaw) { _, new in seenGroups.insert(new) }
     }
 
-    /// 内容区宽度到这里就分左右两栏（iPad 横放这种），和电脑上的设置页一致；
-    /// 单栏时最宽 680，再宽就居中。
+    /// 宽度够了才分左右两栏（iPad、Duo 内屏），和电脑上的设置页一致；单栏时最宽 680、居中。
+    /// 高度也要够：手机横放只有 400 出头，两栏会挤成一团。
     private var twoColumn: Bool {
         #if DEBUG
         // 截图用：模拟器不好转成横屏，-demoTwoCol 直接按两栏排
         if ProcessInfo.processInfo.arguments.contains("-demoTwoCol") { return true }
         #endif
-        return width >= twoColMin
+        return width >= twoColMin && height >= twoColMinHeight
     }
-    private let twoColMin: CGFloat = 1000
+    private let twoColMin: CGFloat = 660
+    private let twoColMinHeight: CGFloat = 600
     private let twoColMax: CGFloat = 1360
 
     /// 当前栏和左右邻居先构建好（滑过去不会空一帧），更远、也从没显示过的先留空。
@@ -177,7 +193,7 @@ struct SettingsPage: View {
         List {
             if built { content() }
         }
-        .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent)
+        .contentWidthCap(width, max: 680)
     }
 
     #if DEBUG
@@ -202,7 +218,7 @@ struct SettingsPage: View {
         }
         guard let content else { return nil }
         return AnyView(List { content }
-            .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent))
+            .contentWidthCap(width, max: 680))
     }
     #endif
 
@@ -253,16 +269,18 @@ struct SettingsPage: View {
                         macLeftSections(state)
                     }
                 }
+                .listStyle(.insetGrouped)
                 List {
                     if built { macRightSections(state) }
                 }
+                .listStyle(.insetGrouped)
             }
             .padding(.horizontal, max(0, (width - twoColMax) / 2))
         } else {
             List {
                 if built { macContent(state) }
             }
-            .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent)
+            .contentWidthCap(width, max: 680)
         }
     }
 
@@ -831,6 +849,21 @@ private struct OfflineCacheSection: View {
             originalSize = originals
             viewable = views
             originalCount = origs
+        }
+    }
+}
+
+
+extension View {
+    /// 宽屏时把列表内容收窄到 `cap`、居中；窄屏（手机）什么都不加。
+    /// 别在这里统一设 `contentMargins(.horizontal, 0)`：那会把系统列表自带的左右留白顶掉，
+    /// 分组卡片贴着屏幕两边画成直角（Duo 外屏上就是这样，看着很挤）。
+    @ViewBuilder
+    func contentWidthCap(_ width: CGFloat, max cap: CGFloat) -> some View {
+        if width > cap {
+            contentMargins(.horizontal, (width - cap) / 2, for: .scrollContent)
+        } else {
+            self
         }
     }
 }
