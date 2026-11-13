@@ -144,6 +144,22 @@ func TestScreenshots(t *testing.T) {
 		f.cfg.DestDir = "~/Pictures/Wallpapers"
 		f.cfg.SampleCount = 300
 		f.num = 300
+		// 演示用的原图记录：壁纸页的目录筛选、预览里的「原图」都有东西可看
+		var sel struct {
+			Dest    string   `json:"dest"`
+			Sources []string `json:"sources"`
+			Dests   []string `json:"dests"`
+		}
+		places := [][2]string{{"风景", "冰岛"}, {"旅行", "京都"}, {"城市", "上海"}}
+		for i := range 3 * len(pals) {
+			p := places[i%len(places)]
+			sel.Dests = append(sel.Dests, fmt.Sprintf("demo%02d.jpg", i))
+			sel.Sources = append(sel.Sources, fmt.Sprintf("/Volumes/NAS/Photos/%s/%s/IMG_%04d.jpg", p[0], p[1], 2100+i))
+		}
+		sel.Dest = core.ExpandUser(f.cfg.DestDir)
+		if data, err := json.Marshal(sel); err == nil {
+			os.WriteFile(f.paths.Selection, data, 0o644)
+		}
 		sum := core.Summary{Elapsed: 14200 * time.Millisecond}
 		sum.Sort = core.SortResult{Dirs: 3, Skipped: 412, Images: 186, Rejected: 4, Deleted: 4}
 		sum.Copy = core.CopyResult{Candidates: 27650, Selected: 300, Copied: 300, LeafFolders: 474, CoveredFolders: 300, Dest: "~/Pictures/Wallpapers", PrevSelected: 300, Repeated: 19,
@@ -199,6 +215,9 @@ func TestScreenshots(t *testing.T) {
 						return false
 					}
 				}
+				if f.page == pageWalls && (f.walls.browsing || len(f.walls.browse) < len(f.walls.all)) {
+					return false // 壁纸页的缩略图还在一批批解码
+				}
 				return !f.walls.loading && !f.walls.more && f.walls.hero != nil
 			})
 			tt.Advance(2 * time.Second)
@@ -208,6 +227,8 @@ func TestScreenshots(t *testing.T) {
 			out.Close()
 		}
 		shot("overview")
+		click(t, tt, "壁纸")
+		shot("walls")
 		click(t, tt, "图库")
 		shot("library")
 		click(t, tt, "设置")

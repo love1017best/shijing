@@ -55,6 +55,7 @@ func setupMenu(a *app, win *mygo.Window) {
 		}},
 		{Label: "显示", Submenu: []*mygo.MenuItem{
 			page("概览", "1", pageOverview),
+			{Label: "壁纸", Click: do(func() { a.page = pageWalls })},
 			page("图库", "2", pageLibrary),
 			page("设置", "3", pageSettings),
 			page("删除记录", "4", pageDeleted),

@@ -272,6 +272,8 @@ struct AllWallpapersView: View {
     @State private var busy = false
 
     var body: some View {
+        // 过滤只在每次渲染时算一遍（原来 body 和 title 各算一次）
+        let list = filtered
         ScrollView {
             if !session.walls.isEmpty {
                 HStack {
@@ -283,7 +285,7 @@ struct AllWallpapersView: View {
             if session.walls.isEmpty {
                 ContentUnavailableView("壁纸文件夹是空的", systemImage: "photo.on.rectangle")
                     .padding(.top, 80)
-            } else if filtered.isEmpty {
+            } else if list.isEmpty {
                 ContentUnavailableView {
                     Label("没有符合的图片", systemImage: "magnifyingglass")
                 } description: {
@@ -306,7 +308,7 @@ struct AllWallpapersView: View {
                             previewing = w
                         }
                     },
-                    walls: filtered,
+                    walls: list,
                     selecting: selecting,
                     selected: selected,
                     onSelect: { w in
@@ -317,7 +319,7 @@ struct AllWallpapersView: View {
                 .padding(.horizontal)
             }
         }
-        .navigationTitle(title)
+        .navigationTitle(title(count: list.count))
         .iOSInlineTitle()
         .searchableAlways(text: $query, prompt: "搜索文件名")
         .toolbar {
@@ -344,10 +346,10 @@ struct AllWallpapersView: View {
         #endif
     }
 
-    private var title: String {
+    private func title(count: Int) -> String {
         if selecting { return selected.isEmpty ? "选择几张" : "已选 \(selected.count) 张" }
-        if filtered.count != session.walls.count {
-            return "全部壁纸（\(filtered.count) / \(session.walls.count)）"
+        if count != session.walls.count {
+            return "全部壁纸（\(count) / \(session.walls.count)）"
         }
         return "全部壁纸（\(session.walls.count)）"
     }

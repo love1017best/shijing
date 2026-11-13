@@ -58,24 +58,33 @@ final class RemoteSession {
         self.mac = mac
         macID = mac.id
         self.store = store
-        // 上次连上时留下的快照：还没连上之前先用它，离线也能看上回那批壁纸
-        if let snap = OfflineStore.shared.load(macID.uuidString) {
-            state = snap.state
-            walls = snap.walls
-            wallsRev = snap.wallsRev ?? snap.state.wallsRev
-            heroName = snap.hero
-            snapshotAt = snap.at
-        }
         queued = Self.loadQueue(macID.uuidString)
         #if DEBUG
         if Self.demoMode != nil { return }
         #endif
+        // 上次连上时留下的快照：还没连上之前先用它，离线也能看上回那批壁纸。
+        // 一整份壁纸列表在后台读、解码，别卡住首帧。
+        Task { @MainActor [weak self] in
+            guard let self,
+                  let snap = await OfflineStore.shared.loadAsync(self.macID.uuidString) else { return }
+            self.restore(snap)
+        }
         // 系统网络状态变了立刻反映到连接状态：飞行模式、关掉 Wi‑Fi 时事件流可能要等很久才报错
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let ok = path.status == .satisfied
             Task { @MainActor [weak self] in self?.networkChanged(ok) }
         }
         pathMonitor.start(queue: .global(qos: .utility))
+    }
+
+    /// 用磁盘上的快照先顶着一屏；已经连上、拿到实时状态了就不再覆盖。
+    private func restore(_ snap: OfflineStore.Snapshot) {
+        guard state == nil else { return }
+        state = snap.state
+        walls = snap.walls
+        wallsRev = snap.wallsRev ?? snap.state.wallsRev
+        heroName = snap.hero
+        snapshotAt = snap.at
     }
 
     deinit {

@@ -26,7 +26,7 @@ final class OfflineStore {
 
     static let shared = OfflineStore()
 
-    private let dir: URL?
+    nonisolated let dir: URL?
     private let decoder = JSONDecoder()
 
     /// 写盘都排在这一条串行队列上：编码一整份壁纸列表 + 状态要几毫秒，不该占主线程
@@ -47,13 +47,17 @@ final class OfflineStore {
         try? d2.setResourceValues(v)
     }
 
-    private func file(_ id: String) -> URL? {
+    nonisolated private func file(_ id: String) -> URL? {
         dir?.appending(path: id + ".json", directoryHint: .notDirectory)
     }
 
-    func load(_ id: String) -> Snapshot? {
-        guard let f = file(id), let data = try? Data(contentsOf: f) else { return nil }
-        return try? decoder.decode(Snapshot.self, from: data)
+    /// 启动时读快照：一整份壁纸列表解码起来要几十毫秒，放后台做，别占首帧。
+    nonisolated func loadAsync(_ id: String) async -> Snapshot? {
+        guard let f = file(id) else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            guard let data = try? Data(contentsOf: f) else { return nil }
+            return try? JSONDecoder().decode(Snapshot.self, from: data)
+        }.value
     }
 
     func save(_ id: String, _ snap: Snapshot) {

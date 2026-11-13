@@ -76,6 +76,7 @@ func pruneThumbCache(files []string) {
 		if fi, err := os.Stat(f); err == nil {
 			keep[thumbCacheKey(f, fi, thumbWidth)] = true
 			keep[thumbCacheKey(f, fi, heroWidth)] = true
+			keep[thumbCacheKey(f, fi, browseThumbWidth)] = true
 		}
 	}
 	for _, e := range entries {

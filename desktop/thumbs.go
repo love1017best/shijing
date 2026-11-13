@@ -35,9 +35,11 @@ type wallpapers struct {
 	heroPath string     // 横幅图对应的文件，点横幅打开它的大图
 	all      []string
 	thumbs   map[string]*ui.Bitmap // 解码过的缩略图；值为 nil 表示读不了
+	browse   map[string]*ui.Bitmap // 壁纸页用的更小的缩略图（browseThumbWidth），按需分批解码
 	sources  map[string]string     // 壁纸文件名 → 原图路径（core.WallpaperSources）；旧版本换上的为 nil
 	loading  bool
 	more     bool // 正在后台解码更多缩略图
+	browsing bool // 正在后台解码壁纸页的缩略图
 }
 
 // grid 是缩略图网格里的图片：all 去掉横幅图和读不了的。
@@ -122,6 +124,10 @@ func shuffleStable(files []string) {
 
 // decodeThumbs 并发解码 files 的缩略图；读不了的值为 nil。
 func decodeThumbs(files []string) map[string]image.Image {
+	return decodeThumbsAt(files, thumbWidth)
+}
+
+func decodeThumbsAt(files []string, width int) map[string]image.Image {
 	decoded := make([]image.Image, len(files))
 	sem := make(chan struct{}, decodeWorkers)
 	var wg sync.WaitGroup
@@ -130,7 +136,7 @@ func decodeThumbs(files []string) map[string]image.Image {
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			decoded[i] = cachedScaled(f, thumbWidth)
+			decoded[i] = cachedScaled(f, width)
 		}()
 	}
 	wg.Wait()
@@ -215,6 +221,73 @@ func bitmaps(imgs map[string]image.Image) map[string]*ui.Bitmap {
 		}
 	}
 	return out
+}
+
+// reloadHero 横幅图被移出 / 删掉之后，按 all 的顺序挑一张够宽的重新当横幅。
+// 只解这一张（scanWallpapers 会把整库缩略图再解一遍，为了一张横幅不值当）；
+// 找不到够宽的就不设横幅，界面退回暮色插画。
+func (a *app) reloadHero() {
+	dir := a.walls.dir
+	candidates := slices.Clone(a.walls.all)
+	gen := a.wallsGen
+	go func() {
+		var img image.Image
+		var path string
+		for _, f := range candidates {
+			im := cachedScaled(f, heroWidth)
+			if im != nil && im.Bounds().Dx() >= thumbWidth*2 {
+				img, path = im, f
+				break
+			}
+		}
+		a.update(func() {
+			if a.walls.dir != dir || a.wallsGen != gen {
+				return // 期间重新读过壁纸文件夹，那次会自己定横幅
+			}
+			a.walls.hero = nil
+			a.walls.heroPath = path
+			if img != nil {
+				a.walls.hero = ui.NewBitmap(img)
+			}
+		})
+	}()
+}
+
+// loadBrowseThumbs 给壁纸页补一批缩略图：每次后台解一批，解完触发重绘再补下一批。
+// 用比概览更小的宽度（browseThumbWidth），几百张一起摆也不会占太多内存。
+func (a *app) loadBrowseThumbs(paths []string) {
+	w := &a.walls
+	if w.browsing || w.loading || a.update == nil {
+		return
+	}
+	var todo []string
+	for _, p := range paths {
+		if _, tried := w.browse[p]; !tried {
+			todo = append(todo, p)
+			if len(todo) >= browseBatch {
+				break
+			}
+		}
+	}
+	if len(todo) == 0 {
+		return
+	}
+	w.browsing = true
+	dir := w.dir
+	go func() {
+		imgs := decodeThumbsAt(todo, browseThumbWidth)
+		a.update(func() {
+			w := &a.walls
+			if w.dir != dir { // 期间重新读过壁纸文件夹，这批作废
+				return
+			}
+			w.browsing = false
+			if w.browse == nil {
+				w.browse = map[string]*ui.Bitmap{}
+			}
+			maps.Copy(w.browse, bitmaps(imgs))
+		})
+	}()
 }
 
 // loadMoreThumbs 在后台解码网格前 want 张里还没解码的（窗口拉大、网格放得下更多时）。

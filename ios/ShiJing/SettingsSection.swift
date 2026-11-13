@@ -66,6 +66,8 @@ struct SettingsPage: View {
     @AppStorage("settingsGroup") private var groupRaw = "mac"
     /// 列表收窄到适合阅读的宽度（和电脑上的设置页一样），按上一帧量到的宽度算
     @State private var width: CGFloat = 0
+    /// 显示过的栏：没显示过的不构建内容（电脑状态每秒推一次，三页 List 不必一起重建）
+    @State private var seenGroups: Set<String> = []
 
     var body: some View {
         Group {
@@ -116,16 +118,34 @@ struct SettingsPage: View {
     /// 三栏并排，左右滑也能切换（分段控件和翻页用同一个 selection）。
     private func pager(_ state: RemoteState) -> some View {
         TabView(selection: $groupRaw) {
-            page(macContent(state)).tag(SettingsGroup.mac.rawValue)
-            page(phoneContent(state)).tag(SettingsGroup.phone.rawValue)
-            page(aboutContent(state)).tag(SettingsGroup.about.rawValue)
+            page(builtGroups.contains(SettingsGroup.mac.rawValue)) { macContent(state) }
+                .tag(SettingsGroup.mac.rawValue)
+            page(builtGroups.contains(SettingsGroup.phone.rawValue)) { phoneContent(state) }
+                .tag(SettingsGroup.phone.rawValue)
+            page(builtGroups.contains(SettingsGroup.about.rawValue)) { aboutContent(state) }
+                .tag(SettingsGroup.about.rawValue)
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        .onChange(of: groupRaw) { _, new in seenGroups.insert(new) }
     }
 
-    private func page<Content: View>(_ content: Content) -> some View {
-        List { content }
-            .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent)
+    /// 当前栏和左右邻居先构建好（滑过去不会空一帧），更远、也从没显示过的先留空。
+    private var builtGroups: Set<String> {
+        let order = [SettingsGroup.mac.rawValue, SettingsGroup.phone.rawValue, SettingsGroup.about.rawValue]
+        var s = seenGroups
+        if let i = order.firstIndex(of: groupRaw) {
+            s.insert(order[i])
+            if i > 0 { s.insert(order[i - 1]) }
+            if i + 1 < order.count { s.insert(order[i + 1]) }
+        }
+        return s
+    }
+
+    private func page<Content: View>(_ built: Bool, @ViewBuilder content: () -> Content) -> some View {
+        List {
+            if built { content() }
+        }
+        .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent)
     }
 
     #if DEBUG

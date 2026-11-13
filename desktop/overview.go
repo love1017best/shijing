@@ -35,7 +35,6 @@ func (a *app) overviewPage(c *ui.Context) {
 	a.thumbStrip(c)
 	a.statStrip(c)
 	a.logPanel(c)
-	a.previewModal(c)
 	a.pendingModal(c)
 }
 
@@ -264,7 +263,7 @@ func (a *app) thumbStrip(c *ui.Context) {
 		more := ui.ButtonBase(c).AspectRatio(stripAspect).Radius(9).Center().Column().Gap(2).
 			Background(panelBg(t)).Border(1, hairline(t))
 		if rest > 0 {
-			more.Label("查看全部壁纸").Tooltip(fmt.Sprintf("在大图预览里从第 %d 张开始翻（Finder 里打开用横幅上的「打开」）", shown+1))
+			more.Label("查看全部壁纸").Tooltip(fmt.Sprintf("打开「壁纸」页看全部 %d 张（可以搜索、按目录筛选）", len(paths)))
 		} else {
 			more.Label("打开壁纸文件夹").Tooltip("在 Finder 中打开壁纸文件夹")
 		}
@@ -283,7 +282,7 @@ func (a *app) thumbStrip(c *ui.Context) {
 		switch {
 		case a.running || !more.Clicked():
 		case rest > 0:
-			a.openPreviewOf(paths[shown])
+			a.page = pageWalls
 		default:
 			a.openWallpapers()
 		}

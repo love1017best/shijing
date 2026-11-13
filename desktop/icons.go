@@ -43,6 +43,7 @@ var (
 	iconRotateCcw    = lucide(`<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>`)
 	iconArrowRight   = lucide(`<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>`)
 	iconClock        = lucide(`<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>`)
+	iconGrid         = lucide(`<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>`)
 )
 
 // icon256.png 是 resources/icon.png（1024 宽，mygo 拿它生成 .icns）缩到 256 宽的一份：界面上最大只画 256 宽，

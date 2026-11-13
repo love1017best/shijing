@@ -24,6 +24,7 @@ const maxLogLines = 20000
 // 侧边栏页面的 ID。
 const (
 	pageOverview = "overview"
+	pageWalls    = "walls"
 	pageLibrary  = "library"
 	pageSettings = "settings"
 	pageDeleted  = "deleted"
@@ -146,6 +147,8 @@ type app struct {
 	initialized     bool
 
 	walls          wallpapers // 当前壁纸文件夹的缩略图
+	wallQuery      string     // 壁纸页的搜索词（按文件名）
+	wallFolder     string     // 壁纸页筛选的原图目录，"" 表示全部
 	previewState              // 大图预览（preview.go、undo.go）
 	keyRecorder               // 「快捷键」页的录制状态（keysview.go）
 	wallsGen       int        // 每次运行结束 +1，提示需要重新读取壁纸文件夹

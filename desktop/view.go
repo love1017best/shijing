@@ -54,7 +54,7 @@ func (a *app) view(c *ui.Context) {
 				// 概览页铺满窗口，缩略图跟着变多；设置类页面窗口宽时分两栏，窄时单栏（表单太宽不好读）
 				// 其余页面有最大宽度，窗口更宽时居中放（单栏、两栏都一样）
 				switch {
-				case a.page == pageOverview:
+				case a.page == pageOverview || a.page == pageWalls:
 				case a.twoCol() && a.page != pageAbout: // 关于页内容少，铺宽了显得空，始终单栏
 					col.Width(min(max(a.viewW, 1), twoColMax)).AlignSelf(ui.Center)
 				default:
@@ -66,6 +66,8 @@ func (a *app) view(c *ui.Context) {
 				}
 				col.Children(func() {
 					switch a.page {
+					case pageWalls:
+						a.wallsPage(c)
 					case pageLibrary:
 						a.libraryPage(c)
 					case pageSettings:
@@ -80,6 +82,8 @@ func (a *app) view(c *ui.Context) {
 						a.overviewPage(c)
 					}
 				})
+				// 预览是全局的：概览的缩略图、横幅，壁纸页的格子都能打开它
+				a.previewModal(c)
 			})
 		})
 	})
@@ -113,6 +117,11 @@ func (a *app) sidebar(c *ui.Context, vibrant bool) {
 
 	list := ui.Sidebar(c, &a.page, func() {
 		ui.SidebarItem(c, pageOverview, iconHome, "概览")
+		ui.SidebarItem(c, pageWalls, iconGrid, "壁纸").Children(func() {
+			if n := len(a.walls.all); n > 0 {
+				ui.Badge(c, fmt.Sprint(n))
+			}
+		})
 		ui.SidebarItem(c, pageLibrary, iconFolder, "图库").Children(func() {
 			if n := a.unmountedCount(); n > 0 {
 				ui.Badge(c, fmt.Sprintf("%d 未挂载", n)).Background(t.Warning).TextColor(ui.RGB(255, 255, 255))

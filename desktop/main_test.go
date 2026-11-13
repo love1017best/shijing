@@ -373,8 +373,8 @@ func TestThumbnailOpensItsImage(t *testing.T) {
 	}
 	click(t, tt, "查看全部壁纸")
 	tt.Frame()
-	if !f.preview || f.walls.all[f.previewIdx] != all[shown+1] || len(f.opened) != 0 {
-		t.Errorf("「+N」应在预览里从第一张没显示的开始翻: idx=%d opened=%q", f.previewIdx, f.opened)
+	if f.page != pageWalls || f.preview || len(f.opened) != 0 {
+		t.Errorf("「+N」应打开壁纸页看全部: page=%q preview=%v opened=%q", f.page, f.preview, f.opened)
 	}
 }
 
