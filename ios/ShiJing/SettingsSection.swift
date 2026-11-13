@@ -93,8 +93,9 @@ struct SettingsPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             #if DEBUG
-            // 截图用：-demoAbout 直接切到「关于」这一栏
+            // 截图用：-demoAbout 直接切到「关于」这一栏，-demoMacGroup 切回「电脑上的拾景」
             if ProcessInfo.processInfo.arguments.contains("-demoAbout") { groupRaw = SettingsGroup.about.rawValue }
+            if ProcessInfo.processInfo.arguments.contains("-demoMacGroup") { groupRaw = SettingsGroup.mac.rawValue }
             #endif
         }
         // 三栏切换放在导航栏下面、一条整宽的栏里：导航栏中间只剩两百多 pt（右边还有连接徽标），
@@ -110,7 +111,7 @@ struct SettingsPage: View {
         .connectionToolbar(session)
     }
 
-    /// 三栏切换：整宽一条，内容区最宽 680（和列表一致）居中。
+    /// 三栏切换：整宽一条，内容区和下方的栏一样宽（宽屏两栏时跟着变宽）居中。
     private var groupPicker: some View {
         Picker("设置分类", selection: $groupRaw) {
             Text("电脑上的拾景").tag(SettingsGroup.mac.rawValue)
@@ -118,7 +119,7 @@ struct SettingsPage: View {
             Text("关于").tag(SettingsGroup.about.rawValue)
         }
         .pickerStyle(.segmented)
-        .frame(maxWidth: 680)
+        .frame(maxWidth: twoColumn && groupRaw == SettingsGroup.mac.rawValue ? twoColMax : 680)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
@@ -137,7 +138,7 @@ struct SettingsPage: View {
     /// 三栏并排，左右滑也能切换（分段控件和翻页用同一个 selection）。
     private func pager(_ state: RemoteState) -> some View {
         TabView(selection: $groupRaw) {
-            page(builtGroups.contains(SettingsGroup.mac.rawValue)) { macContent(state) }
+            macPage(state, built: builtGroups.contains(SettingsGroup.mac.rawValue))
                 .tag(SettingsGroup.mac.rawValue)
             page(builtGroups.contains(SettingsGroup.phone.rawValue)) { phoneContent(state) }
                 .tag(SettingsGroup.phone.rawValue)
@@ -147,6 +148,18 @@ struct SettingsPage: View {
         .tabViewStyle(.page(indexDisplayMode: .never))
         .onChange(of: groupRaw) { _, new in seenGroups.insert(new) }
     }
+
+    /// 内容区宽度到这里就分左右两栏（iPad 横放这种），和电脑上的设置页一致；
+    /// 单栏时最宽 680，再宽就居中。
+    private var twoColumn: Bool {
+        #if DEBUG
+        // 截图用：模拟器不好转成横屏，-demoTwoCol 直接按两栏排
+        if ProcessInfo.processInfo.arguments.contains("-demoTwoCol") { return true }
+        #endif
+        return width >= twoColMin
+    }
+    private let twoColMin: CGFloat = 1000
+    private let twoColMax: CGFloat = 1360
 
     /// 当前栏和左右邻居先构建好（滑过去不会空一帧），更远、也从没显示过的先留空。
     private var builtGroups: Set<String> {
@@ -222,9 +235,85 @@ struct SettingsPage: View {
         state.version.isEmpty ? "还没连上" : "v" + state.version
     }
 
-    /// 电脑上的拾景：遥控改的都是电脑上的设置和状态。
+    /// 这台手机：离线缓存、离线时记下的待补操作，还有两边的版本。
+    @ViewBuilder
+    private func phoneContent(_ state: RemoteState) -> some View {
+        if !session.queued.isEmpty { offlineQueueLink }
+        offlineSection
+    }
+
+    /// 电脑上的拾景：窄屏单栏（最宽 680 居中）；宽屏分左右两栏，和电脑上的设置页一个思路。
+    @ViewBuilder
+    private func macPage(_ state: RemoteState, built: Bool) -> some View {
+        if twoColumn {
+            HStack(alignment: .top, spacing: 0) {
+                List {
+                    if built {
+                        macNoticeSection(state)
+                        macLeftSections(state)
+                    }
+                }
+                List {
+                    if built { macRightSections(state) }
+                }
+            }
+            .padding(.horizontal, max(0, (width - twoColMax) / 2))
+        } else {
+            List {
+                if built { macContent(state) }
+            }
+            .contentMargins(.horizontal, max(0, (width - 680) / 2), for: .scrollContent)
+        }
+    }
+
+    /// 单栏时的顺序：离线提示 → 输出 / 采样 / 画质 / 归档 → 筛选 / 自动换 / 系统 → 图库入口 → 待删除。
     @ViewBuilder
     private func macContent(_ state: RemoteState) -> some View {
+        macNoticeSection(state)
+        macLeftSections(state)
+        macRightSections(state)
+    }
+
+    /// 左栏：输出和采样这一路（改的是怎么选图、怎么存）。
+    @ViewBuilder
+    private func macLeftSections(_ state: RemoteState) -> some View {
+        let disabled = state.running || session.connection != .live
+        if let set = state.settings {
+            outputSection(set, state, disabled)
+            samplingSection(set, disabled)
+            if set.minPresets != nil, set.minWidth != nil, set.minHeight != nil {
+                resolutionSection(set, disabled: disabled)
+            }
+            if set.archiveEnabled != nil {
+                archiveSection(set, disabled: disabled)
+            }
+        } else {
+            Section {
+                LabeledContent("每次换", value: "\(state.sampleCount) 张")
+            } footer: {
+                Text("电脑上的拾景版本较旧，要改设置请在电脑上改。")
+            }
+        }
+    }
+
+    /// 右栏：筛选、自动换、系统，以及两个入口（图库目录、待删除）。
+    @ViewBuilder
+    private func macRightSections(_ state: RemoteState) -> some View {
+        let disabled = state.running || session.connection != .live
+        if let set = state.settings {
+            filterSection(set, disabled)
+            autoSection(set, state, disabled)
+            systemSection(set, disabled)
+        }
+        if state.dirs != nil {
+            libraryLink(state)
+        }
+        pendingQueueSection
+    }
+
+    /// 连不上电脑时最上面那条提醒。
+    @ViewBuilder
+    private func macNoticeSection(_ state: RemoteState) -> some View {
         if session.connection != .live {
             Section {
                 Label {
@@ -238,31 +327,10 @@ struct SettingsPage: View {
                 }
             }
         }
-        if let set = state.settings {
-            editable(set, state)
-        } else {
-            Section {
-                LabeledContent("每次换", value: "\(state.sampleCount) 张")
-            } footer: {
-                Text("电脑上的拾景版本较旧，要改设置请在电脑上改。")
-            }
-        }
-        if state.dirs != nil {
-            libraryLink(state)
-        }
-        pendingQueueSection
-    }
-
-    /// 这台手机：离线缓存、离线时记下的待补操作，还有两边的版本。
-    @ViewBuilder
-    private func phoneContent(_ state: RemoteState) -> some View {
-        if !session.queued.isEmpty { offlineQueueLink }
-        offlineSection
     }
 
     @ViewBuilder
-    private func editable(_ set: RemoteSettings, _ state: RemoteState) -> some View {
-        let disabled = state.running || session.connection != .live
+    private func outputSection(_ set: RemoteSettings, _ state: RemoteState, _ disabled: Bool) -> some View {
         Section {
             LabeledContent("壁纸文件夹", value: state.dest)
             if set.mode != nil {
@@ -280,6 +348,10 @@ struct SettingsPage: View {
         } footer: {
             Text("复制：每张图在壁纸文件夹里存一份，占空间，但图库没连上也能看。\n软链接：只存指向原图的链接，省空间，图库没连上时打不开。")
         }
+    }
+
+    @ViewBuilder
+    private func samplingSection(_ set: RemoteSettings, _ disabled: Bool) -> some View {
         Section {
             Stepper(value: Binding(
                 get: { draftCount ?? set.sampleCount },
@@ -297,12 +369,10 @@ struct SettingsPage: View {
         } footer: {
             Text("平衡采样：优先让每个子文件夹至少入选一张，避免少数几个大文件夹占满名额。\n优先选没换上过的：这一轮里还没换上过的图片先选，都换上过一遍再从头开始。")
         }
-        if set.minPresets != nil, set.minWidth != nil, set.minHeight != nil {
-            resolutionSection(set, disabled: disabled)
-        }
-        if set.archiveEnabled != nil {
-            archiveSection(set, disabled: disabled)
-        }
+    }
+
+    @ViewBuilder
+    private func filterSection(_ set: RemoteSettings, _ disabled: Bool) -> some View {
         Section {
             toggle("删除不合格的原图", set.deleteDuringFilter, key: "delete_during_filter", tint: .red, disabled: disabled)
             if let incremental = set.incremental {
@@ -313,6 +383,10 @@ struct SettingsPage: View {
         } footer: {
             Text("打开后，换一批时会删除图库里竖屏、接近正方形、分辨率不够的原图，不能撤销。从手机换一批时会先确认，也可以选这次只模拟。\n增量筛选会跳过上次检查后没有变化的文件夹。")
         }
+    }
+
+    @ViewBuilder
+    private func autoSection(_ set: RemoteSettings, _ state: RemoteState, _ disabled: Bool) -> some View {
         Section {
             Picker("间隔", selection: Binding(
                 get: { set.autoRunHours },
@@ -334,6 +408,10 @@ struct SettingsPage: View {
         } footer: {
             Text("电脑上的拾景开着时按这个间隔自动换一批。自动运行不会删除原图。")
         }
+    }
+
+    @ViewBuilder
+    private func systemSection(_ set: RemoteSettings, _ disabled: Bool) -> some View {
         Section {
             toggle("刷新系统壁纸", set.refreshWallpaper, key: "refresh_wallpaper", disabled: disabled)
         } header: {
