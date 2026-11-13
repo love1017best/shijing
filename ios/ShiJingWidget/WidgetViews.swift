@@ -26,7 +26,12 @@ struct Entry: TimelineEntry {
         return URL(string: "shijing://wall")!.appending(path: wallName)
     }
 
-    var image: UIImage? { imageFile.flatMap { UIImage(contentsOfFile: $0.path) } }
+    var image: UIImage? {
+        guard let file = imageFile else { return nil }
+        let img = UIImage(contentsOfFile: file.path)
+        if img == nil { WidgetDebug.log("decode fail \(file.lastPathComponent)", throttle: true) }
+        return img
+    }
 }
 
 enum WidgetFamilies {
@@ -316,8 +321,13 @@ struct PhotoView: View {
 
     /// 有没有图只看文件在不在，不解码：背景那一次已经解过了，小组件进程内存小，不重复解
     private var hasImage: Bool {
-        guard let file = entry.imageFile else { return false }
-        return FileManager.default.fileExists(atPath: file.path)
+        guard let file = entry.imageFile else {
+            WidgetDebug.log("photoView: imageFile nil", throttle: true)
+            return false
+        }
+        let ok = FileManager.default.fileExists(atPath: file.path)
+        WidgetDebug.log("photoView: hasImage=\(ok) \(file.lastPathComponent)", throttle: true)
+        return ok
     }
 
     var body: some View {

@@ -257,12 +257,14 @@ enum TimelineMaker {
         return Int(x % UInt64(count))
     }
 
-    /// 背景图要多少像素：按小组件实际尺寸（3 倍屏、宽图铺满高的小组件时按 16:10 算宽），封顶 1600（横幅图本来就这么宽）。
+    /// 背景图要多少像素：按小组件实际尺寸（3 倍屏、宽图铺满高的小组件时按 16:10 算宽），封顶 1000。
+    /// 别再往上加：大尺寸小组件的 1600 档图在渲染进程里要十几 MB，超过小组件渲染的内存限制，
+    /// 结果是背景退回渐变、内容显示成占位骨架（v0.3.147 实测）。systemLarge 也就 1050 px 宽，1000 够。
     /// 取整到 200 一档，缓存好命中。
     private static func pixels(_ context: TimelineProviderContext) -> Int {
         let s = context.displaySize
         let need = max(s.width, s.height * 1.6) * 3
-        return min(1600, max(400, Int((need / 200).rounded(.up)) * 200))
+        return min(1000, max(400, Int((need / 200).rounded(.up)) * 200))
     }
 
     /// 缓存里有就直接用；没有且在线就下载（横幅尺寸，旧版桌面端退回缩略图）、缩好存起来。
@@ -357,7 +359,11 @@ enum WidgetCache {
 /// 排查用：时间线到底有没有被调用、返回了什么。写在小组件自己的缓存目录里（`debug.log`），
 /// 从 Mac 上拉容器就能看（`xcrun devicectl device copy from --domain-identifier …widget`）。
 enum WidgetDebug {
-    static func log(_ s: String) {
+    nonisolated(unsafe) private static var last = Date.distantPast
+
+    static func log(_ s: String, throttle: Bool = false) {
+        if throttle, Date().timeIntervalSince(last) < 3 { return }
+        last = Date()
         let url = WidgetCache.dir.appending(path: "debug.log")
         let line = "\(Int(Date().timeIntervalSince1970)) \(s)\n"
         guard let data = line.data(using: .utf8) else { return }
