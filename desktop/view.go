@@ -64,6 +64,9 @@ func (a *app) view(c *ui.Context) {
 				if a.page != pageKeys && a.recording != "" {
 					a.stopRecording() // 录制到一半切走了
 				}
+				if a.page != pageWalls && a.wallSelecting {
+					a.endWallSelection() // 选择到一半切走了
+				}
 				col.Children(func() {
 					switch a.page {
 					case pageWalls:

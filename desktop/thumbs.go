@@ -202,6 +202,7 @@ func (a *app) loadWallpapers() {
 				w.hero = ui.NewBitmap(s.hero)
 			}
 			a.walls = w
+			a.endWallSelection() // 换了一批，之前勾选的都对不上了
 			// 加载期间改了壁纸文件夹、或者又跑完一批：按最新的再读一次
 			if core.ExpandUser(a.cfg.DestDir) != dir || a.wallsGen != gen {
 				a.loadWallpapers()

@@ -88,3 +88,53 @@ func TestWallsPageSearchFolderAndPreview(t *testing.T) {
 		t.Errorf("点缩略图应打开对应的大图: preview=%v idx=%d texts=%q", f.preview, f.previewIdx, tt.Texts())
 	}
 }
+
+func TestWallsPageBatchRemove(t *testing.T) {
+	f, tt := newFakeApp(t)
+	img := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 16, 10)))
+	all := []string{"/w/a.jpg", "/w/b.jpg", "/w/c.jpg", "/w/d.jpg"}
+	browse := map[string]*ui.Bitmap{}
+	for _, p := range all {
+		browse[p] = img
+	}
+	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), all: all, browse: browse,
+		thumbs: map[string]*ui.Bitmap{}, sources: map[string]string{}}
+	f.wallsLoadedGen = f.wallsGen
+	f.page = pageWalls
+	tt.Frame()
+
+	click(t, tt, "选择")
+	tt.Frame()
+	if !f.wallSelecting {
+		t.Fatal("点「选择」应进入选择模式")
+	}
+	click(t, tt, "第 1 张 a.jpg")
+	click(t, tt, "第 3 张 c.jpg")
+	tt.Frame()
+	if f.preview || !f.wallSel["/w/a.jpg"] || !f.wallSel["/w/c.jpg"] {
+		t.Errorf("选择模式下点格子应该勾选而不是开预览: preview=%v sel=%v", f.preview, f.wallSel)
+	}
+	if !tt.HasText("已选 2 张") {
+		t.Fatalf("应显示已选张数: %q", tt.Texts())
+	}
+
+	click(t, tt, "移出 2 张")
+	tt.Frame()
+	if len(f.walls.all) != 2 || f.wallSelecting || len(f.wallSel) != 0 {
+		t.Errorf("批量移出后应只剩 2 张并退出选择模式: all=%v selecting=%v sel=%v", f.walls.all, f.wallSelecting, f.wallSel)
+	}
+	if !tt.HasText("壁纸文件夹里一共 2 张") || tt.HasText("已选") {
+		t.Errorf("批量移出后页面应更新: %q", tt.Texts())
+	}
+
+	// 全选：只选当前筛选出来的
+	click(t, tt, "选择")
+	tt.Frame()
+	f.wallQuery = "b"
+	tt.Frame()
+	click(t, tt, "全选")
+	tt.Frame()
+	if len(f.wallSel) != 1 || !f.wallSel["/w/b.jpg"] {
+		t.Errorf("全选应只选筛选出来的那张: %v", f.wallSel)
+	}
+}

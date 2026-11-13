@@ -146,12 +146,18 @@ type app struct {
 	toast           string
 	initialized     bool
 
-	walls          wallpapers // 当前壁纸文件夹的缩略图
-	wallQuery      string     // 壁纸页的搜索词（按文件名）
-	wallFolder     string     // 壁纸页筛选的原图目录，"" 表示全部
-	previewState              // 大图预览（preview.go、undo.go）
-	keyRecorder               // 「快捷键」页的录制状态（keysview.go）
-	wallsGen       int        // 每次运行结束 +1，提示需要重新读取壁纸文件夹
+	walls          wallpapers      // 当前壁纸文件夹的缩略图
+	wallQuery      string          // 壁纸页的搜索词（按文件名）
+	wallFolder     string          // 壁纸页筛选的原图目录，"" 表示全部
+	wallSelecting  bool            // 壁纸页在选择模式：点格子是勾选，不是看大图
+	wallSel        map[string]bool // 壁纸页勾选的壁纸
+	wallGrid       ui.GridState    // 壁纸页网格的滚动位置：GridView 只建看得见的行
+	wallHeadH      float32         // 壁纸页头部（标题 + 筛选条）的高度，上一帧量到的
+	wallBarH       float32         // 选择操作条的高度，上一帧量到的
+	wallFilterKey  string          // 上次的筛选条件；变了就把网格滚回顶部
+	previewState                   // 大图预览（preview.go、undo.go）
+	keyRecorder                    // 「快捷键」页的录制状态（keysview.go）
+	wallsGen       int             // 每次运行结束 +1，提示需要重新读取壁纸文件夹
 	wallsLoadedGen int
 
 	// 以下由 main 注入：真实窗口里是 Window.Update / 系统对话框，测试里是假的实现。
