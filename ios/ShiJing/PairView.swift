@@ -134,10 +134,17 @@ extension View {
     func iOSKeyboard(_ type: UIKeyboardType) -> some View { keyboardType(type) }
     func iOSOneTimeCode() -> some View { textContentType(.oneTimeCode) }
     func iOSInlineTitle() -> some View { navigationBarTitleDisplayMode(.inline) }
+    /// 搜索框一直显示在标题下面（默认会被滚走）；macOS 上没这个位置
+    func searchableAlways(text: Binding<String>, prompt: String) -> some View {
+        searchable(text: text, placement: .navigationBarDrawer(displayMode: .always), prompt: prompt)
+    }
     #else
     func iOSKeyboard(_ type: KeyboardKind) -> some View { self }
     func iOSOneTimeCode() -> some View { self }
     func iOSInlineTitle() -> some View { self }
+    func searchableAlways(text: Binding<String>, prompt: String) -> some View {
+        searchable(text: text, prompt: prompt)
+    }
     #endif
 }
 

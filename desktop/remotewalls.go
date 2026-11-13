@@ -23,7 +23,7 @@ import (
 
 const (
 	remoteThumbWidth    = thumbWidth // 和桌面缩略图同宽，直接命中磁盘缓存
-	remoteImageWidth    = 2048       // 大图宽度：手机全屏、横屏都够清楚
+	remoteImageWidth    = 2732       // 大图宽度：覆盖 iPhone Duo 内屏（2853 像素宽）的绝大部分，离线缓存也按这个宽度存
 	remoteDecodeWorkers = 2
 )
 

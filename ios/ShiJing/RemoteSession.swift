@@ -177,6 +177,7 @@ final class RemoteSession {
                         if !queued.isEmpty { Task { await flushOfflineActions() } }
                         // 又连上了：上一次没缓存完的接着补（已经存下的会跳过）；换了一批时 refreshWalls 会另起一轮
                         ImageStore.shared.prefetchAll(self)
+                        if ImageStore.originalsEnabled { ImageStore.shared.prefetchOriginals(self) }
                         // 记录页的三份数据也存一份，下次断了还能看
                         Task { await refreshRecordsCache() }
                     }
@@ -297,9 +298,12 @@ final class RemoteSession {
     var notice: String?
 
     /// 从电脑下载原文件，原样存进相册（不重新编码，保留原分辨率和 EXIF）。
+    /// 离线时用手机上存着的那份原图（设置 › 离线 › 保存原图），没存过就只能等连上电脑。
     func saveOriginal(_ w: Wallpaper) async {
-        guard connection == .live else {
-            actionError = "连不上电脑时不能存原图：原文件在电脑那边，等连上再试。"
+        let live = connection == .live
+        let cached = ImageStore.cachedOriginal(rev: wallsRev ?? "", name: w.name)
+        guard live || cached != nil else {
+            actionError = "连不上电脑，这张原图也没存到手机上。到「设置 › 离线」打开「保存原图」并补齐，或者等连上电脑再存。"
             return
         }
         saving = w.name
@@ -310,8 +314,16 @@ final class RemoteSession {
             return
         }
         do {
-            let file = try await client().downloadOriginal(w.name)
-            defer { try? FileManager.default.removeItem(at: file) }
+            // 在线时下载到临时目录、用完删掉；离线用的是缓存里的，不能删
+            var temp: URL?
+            let file: URL
+            if live {
+                file = try await client().downloadOriginal(w.name)
+                temp = file
+            } else {
+                file = cached!
+            }
+            defer { if let temp { try? FileManager.default.removeItem(at: temp) } }
             try await PHPhotoLibrary.shared().performChanges {
                 let opts = PHAssetResourceCreationOptions()
                 opts.originalFilename = w.name
@@ -355,6 +367,7 @@ final class RemoteSession {
                 let rev = list.rev
                 Task.detached(priority: .utility) { ImageStore.groom(keepRev: rev) } // 上一批的图片缓存整个删掉（别在主线程删目录）
                 ImageStore.shared.prefetchAll(self) // 这一批的缩略图和预览图存到磁盘，离线也能看
+                if ImageStore.originalsEnabled { ImageStore.shared.prefetchOriginals(self) } // 开了「保存原图」的接着存原图
             }
         } catch {
             // 列表拉不到不影响别的，下次状态推送再试

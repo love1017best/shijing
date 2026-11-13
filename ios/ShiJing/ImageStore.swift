@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 
 #if os(iOS)
@@ -11,8 +12,11 @@ typealias PlatformImage = NSImage
 /// 壁纸图片的内存缓存和加载：同一张同时只请求一次，缩略图和大图分开存。
 ///
 /// 下载下来的图还会按批次（`walls_rev`）写到磁盘，连不上 Mac 时图片也还看得见：
-/// 缩略图（360 宽）和整批大图（2048 宽）同步完一轮就在后台预取，受「缓存上限」限制（默认 10 GB）。
+/// 缩略图（360 宽）、横幅（1600 宽）和整批大图（2732 宽）同步完一轮就在后台预取，受「缓存上限」限制（默认 10 GB）。
 /// 换了一批（rev 变了）就把上一批的缓存目录整个删掉，不会越积越多。
+///
+/// 另外设置里可以手动「保存原图」（`prefetchOriginals`）：把图库里那一份原始文件也存到手机上，
+/// 离线时能看原图、直接存相册 / 分享；单独算进度，可以暂停、清除，换批时和预览图一起删。
 @MainActor
 @Observable
 final class ImageStore {
@@ -35,9 +39,25 @@ final class ImageStore {
     /// 用户手动暂停了整批缓存
     private(set) var prefetchPaused = false
 
+    // 原图缓存（设置 › 离线 › 原图，手动补齐）
+    private var originalTask: Task<Void, Never>?
+    private var originalGen = 0
+    private(set) var originaling = false
+    private(set) var originalDone = 0
+    private(set) var originalTotal = 0
+    private(set) var originalHitLimit = false
+    private(set) var originalPaused = false
+
     /// 缓存上限（GB），存在手机上，和电脑上的设置无关
-    static let cacheLimitKey = "offlineCacheLimitGB"
-    static let defaultCacheLimitGB = 10
+    nonisolated static let cacheLimitKey = "offlineCacheLimitGB"
+    nonisolated static let defaultCacheLimitGB = 10
+    /// 设置里「保存原图」的开关（默认关，手动点「补齐原图」才开始下载）
+    nonisolated static let cacheOriginalsKey = "cacheOriginals"
+
+    /// 打开了「保存原图」：换了一批、重新连上时自动跟着补齐原图。
+    nonisolated static var originalsEnabled: Bool {
+        UserDefaults.standard.bool(forKey: cacheOriginalsKey)
+    }
 
     /// 上限换成字节；没设过就是默认的 10 GB。
     nonisolated static var cacheLimitBytes: Int64 {
@@ -82,11 +102,16 @@ final class ImageStore {
         let rev = session.wallsRev ?? ""
         let client = try? session.client()
         let t = Task<PlatformImage?, Never> {
-            let data: Data?
+            var data: Data?
+            var original: URL?
             if demo {
                 data = nil
             } else if let d = await Task.detached(priority: .userInitiated, operation: { Self.readDisk(rev, name, kind) }).value {
                 data = d
+            } else if kind == .image, let f = ImageStore.cachedOriginal(rev: rev, name: name) {
+                // 设置里存过原图、但这一批的大图还没缓存：用原图缩到展示尺寸解码
+                // （按文件读，不整份读进内存；原图整张解码会爆内存）
+                original = f
             } else if offline {
                 data = nil // 连不上电脑：只认磁盘上缓存过的，别干等网络超时
             } else {
@@ -98,7 +123,9 @@ final class ImageStore {
             }
             return await Task.detached(priority: .userInitiated) {
                 if demo { return Self.demoImage(name, large: kind.isLarge) }
-                return data.flatMap(Self.decode)
+                if let original { return Self.downsampleFile(original, maxPixel: Self.downsampleWidth) }
+                guard let data else { return nil }
+                return Self.decode(data)
             }.value
         }
         inflight[k] = t
@@ -110,9 +137,12 @@ final class ImageStore {
         return img
     }
 
+    /// 大图缓存的目标宽度（和桌面的 remoteImageWidth 一致）。
+    static let downsampleWidth = 2732
+
     // MARK: 磁盘缓存
 
-    /// 把当前这批的缩略图、横幅图和整批 2048 宽的预览图在后台存到磁盘：
+    /// 把当前这批的缩略图、横幅图和整批 2732 宽的预览图在后台存到磁盘：
     /// 离线打开时网格和大图都能看。上限按「缓存上限」算，到了就不再往后存。
     /// 换一批时调用（上一次的预取会被取消）；用户暂停过也照样重新开始（新一批了）。
     func prefetchAll(_ session: RemoteSession) {
@@ -177,6 +207,129 @@ final class ImageStore {
         prefetchPaused = true
     }
 
+    // MARK: 原图缓存（设置里手动触发）
+
+    /// 把这一批壁纸的原文件（图库里那一份，不是 2732 宽的预览图）也存到手机上：
+    /// 离线时能看原图、直接存相册 / 分享。只在设置里点「补齐原图」时跑，已经存下的会跳过；
+    /// 受同一个「缓存上限」约束，到上限就停。
+    func prefetchOriginals(_ session: RemoteSession) {
+        #if DEBUG
+        if demo { return }
+        #endif
+        guard let client = try? session.client(), let rev = session.wallsRev, !rev.isEmpty else { return }
+        originalTask?.cancel()
+        originalGen += 1
+        let gen = originalGen
+        originalPaused = false
+        originalHitLimit = false
+        originalDone = 0
+        originalTotal = session.walls.count
+        originaling = true
+        let names = session.walls.map(\.name)
+        originalTask = Task {
+            // 已经存过的跳过（几百次 stat，别放主线程；别读文件内容，原图一张几十 MB）
+            let pending = await Task.detached(priority: .utility) {
+                names.filter { Self.cachedOriginal(rev: rev, name: $0) == nil }
+            }.value
+            originalDone = names.count - pending.count
+            var used = await Task.detached(priority: .utility) { Self.diskUsage() }.value
+            let limit = Self.cacheLimitBytes
+            var queue = pending
+            var hitLimit = false
+            await withTaskGroup(of: Int64.self) { group in
+                // 原图一张几十 MB，同时最多 2 张
+                let workers = 2
+                func addNext() -> Bool {
+                    guard !queue.isEmpty, !hitLimit else { return false }
+                    let n = queue.removeFirst()
+                    group.addTask { await Self.prefetchOriginal(client, rev, n) }
+                    return true
+                }
+                for _ in 0..<workers where addNext() {}
+                while let bytes = await group.next() {
+                    if Task.isCancelled {
+                        group.cancelAll()
+                        if gen == originalGen { originaling = false }
+                        return
+                    }
+                    originalDone += 1
+                    used += bytes
+                    if used >= limit, !queue.isEmpty {
+                        hitLimit = true
+                        queue.removeAll()
+                        originalHitLimit = true
+                    }
+                    _ = addNext()
+                }
+            }
+            if gen == originalGen { originaling = false }
+        }
+    }
+
+    /// 暂停补齐原图（设置页）。再点「补齐原图」会接着存，已有的跳过。
+    func pauseOriginals() {
+        originalTask?.cancel()
+        originalTask = nil
+        originaling = false
+        originalPaused = true
+    }
+
+    /// 清除这一批已经存下的原图（预览图缓存不动）。
+    func clearOriginals(rev: String?) {
+        originalTask?.cancel()
+        originalTask = nil
+        originalGen += 1
+        originaling = false
+        originalPaused = false
+        originalHitLimit = false
+        originalDone = 0
+        originalTotal = 0
+        guard let rev else { return }
+        Task.detached(priority: .utility) {
+            Self.removeFiles(rev: rev, prefix: ImageKind.original.cachePrefix + "-")
+        }
+    }
+
+    private nonisolated static func prefetchOriginal(_ client: APIClient, _ rev: String, _ name: String) async -> Int64 {
+        guard let f = diskFile(rev, name, .original) else { return 0 }
+        if FileManager.default.fileExists(atPath: f.path) { return 0 }
+        guard let tmp = try? await client.downloadOriginal(name) else { return 0 }
+        defer { try? FileManager.default.removeItem(at: tmp) } // 移进缓存成功后这个文件已经不在了
+        let fm = FileManager.default
+        try? fm.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard (try? fm.moveItem(at: tmp, to: f)) != nil else { return 0 }
+        return Int64((try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+    }
+
+    /// 手机上存着的那张原图（离线时存相册 / 分享、预览兜底用）。
+    nonisolated static func cachedOriginal(rev: String, name: String) -> URL? {
+        guard !rev.isEmpty, let f = diskFile(rev, name, .original),
+              FileManager.default.fileExists(atPath: f.path) else { return nil }
+        return f
+    }
+
+    /// 磁盘上这一批某种图占了多少（设置页显示原图占用）。
+    nonisolated static func cachedSize(rev: String, kind: ImageKind) -> Int64 {
+        guard let dir = diskDir, let folder = revFolder(rev) else { return 0 }
+        let path = dir.appending(path: folder, directoryHint: .isDirectory)
+        let prefix = kind.cachePrefix + "-"
+        let items = (try? FileManager.default.contentsOfDirectory(at: path, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+        var total: Int64 = 0
+        for u in items where u.lastPathComponent.hasPrefix(prefix) {
+            total += Int64((try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        return total
+    }
+
+    private nonisolated static func removeFiles(rev: String, prefix: String) {
+        guard let dir = diskDir, let folder = revFolder(rev) else { return }
+        let path = dir.appending(path: folder, directoryHint: .isDirectory)
+        let items = (try? FileManager.default.contentsOfDirectory(atPath: path.path)) ?? []
+        for f in items where f.hasPrefix(prefix) {
+            try? FileManager.default.removeItem(atPath: path.appending(path: f).path)
+        }
+    }
+
     private nonisolated static func prefetchOne(_ client: APIClient, _ rev: String, _ name: String, _ kind: ImageKind) async -> Int64 {
         if readDisk(rev, name, kind) != nil { return 0 }
         guard let data = try? await client.imageData(name, kind: kind) else { return 0 }
@@ -191,6 +344,13 @@ final class ImageStore {
         let items = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         for u in items where u.lastPathComponent != keep {
             try? fm.removeItem(at: u)
+        }
+        // 留下的这一批里，旧前缀的文件（比如以前 2048 宽的大图）也删掉，别白占空间
+        let prefixes = ImageKind.allCases.map { $0.cachePrefix + "-" }
+        let folder = dir.appending(path: keep, directoryHint: .isDirectory)
+        for f in (try? fm.contentsOfDirectory(atPath: folder.path)) ?? [] where f.contains("-") {
+            guard !prefixes.contains(where: { f.hasPrefix($0) }), !f.hasPrefix(".") else { continue }
+            try? fm.removeItem(at: folder.appending(path: f))
         }
     }
 
@@ -210,7 +370,7 @@ final class ImageStore {
     nonisolated static func cachedCount(rev: String, kind: ImageKind) -> Int {
         guard let dir = diskDir, let folder = revFolder(rev) else { return 0 }
         let path = dir.appending(path: folder, directoryHint: .isDirectory).path
-        let prefix = kind.rawValue + "-"
+        let prefix = kind.cachePrefix + "-"
         let items = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
         return items.filter { $0.hasPrefix(prefix) }.count
     }
@@ -225,6 +385,14 @@ final class ImageStore {
         prefetchHitLimit = false
         prefetchDone = 0
         prefetchTotal = 0
+        originalTask?.cancel()
+        originalTask = nil
+        originalGen += 1
+        originaling = false
+        originalPaused = false
+        originalHitLimit = false
+        originalDone = 0
+        originalTotal = 0
         cache.removeAllObjects()
         // 十几 GB 的目录，别在主线程删
         Task.detached(priority: .utility) {
@@ -249,6 +417,12 @@ final class ImageStore {
            let data = img.jpegData(compressionQuality: 0.7) {
             Self.writeDisk(rev, hero, .hero, data)
         }
+        // 设置 › 离线 › 原图那一行：种一半的「原图」，看有数字的样子
+        for n in names.prefix(names.count / 2) {
+            guard let img = Self.demoImage(n, large: true),
+                  let data = img.jpegData(compressionQuality: 0.8) else { continue }
+            Self.writeDisk(rev, n, .original, data)
+        }
         #endif
     }
     #endif
@@ -272,7 +446,7 @@ final class ImageStore {
         guard let dir = diskDir, let folder = revFolder(rev) else { return nil }
         let safe = name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
         return dir.appending(path: folder, directoryHint: .isDirectory)
-            .appending(path: "\(kind.rawValue)-\(safe)", directoryHint: .notDirectory)
+            .appending(path: "\(kind.cachePrefix)-\(safe)", directoryHint: .notDirectory)
     }
 
     private nonisolated static func readDisk(_ rev: String, _ name: String, _ kind: ImageKind) -> Data? {
@@ -293,6 +467,24 @@ final class ImageStore {
         return UIImage(data: data)?.preparingForDisplay()
         #else
         return NSImage(data: data)
+        #endif
+    }
+
+    /// 按最长边缩小解码：设置里存过原图、但这一批的预览图还没缓存时，用原图缩到展示尺寸，
+    /// 别整张解进内存（几千万像素的原图直接解码要几百 MB，还可能失败）。顺带按 EXIF 转正。
+    private nonisolated static func downsampleFile(_ url: URL, maxPixel: Int) -> PlatformImage? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        #if os(iOS)
+        return UIImage(cgImage: cg, scale: 1, orientation: .up)
+        #else
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
         #endif
     }
 

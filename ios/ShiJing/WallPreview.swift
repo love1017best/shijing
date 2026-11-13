@@ -522,7 +522,7 @@ struct WallPreview: View {
                             }
                         }
                 }
-                .disabled(!kind.isEnabled(session))
+                .disabled(!kind.isEnabled(session, w))
                 .accessibilityHint(kind.hint)
             }
         }

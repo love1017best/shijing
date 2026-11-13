@@ -6,7 +6,7 @@ enum WallAction {
     static let exclude = "移出并不再选它"
     static let delete = "删除图库里的原图…"
     static let save = "存到相册"
-    static let saveHint = "从电脑下载原文件（不是预览图），原样存进相册。"
+    static let saveHint = "原样存进相册（不是预览图）。离线时用手机上存过的那份原图。"
     static let removeHint = "只删壁纸文件夹里的这一份，图库里的原图不动。"
     static let excludeHint = "还会让以后的采样跳过这张原图（可以在电脑上的「图库」页恢复）。"
 }
@@ -57,17 +57,18 @@ enum WallActionKind: CaseIterable {
 
     /// 动的是图库里的原图：旧版本换上的没有原图路径，这两种就不显示
     var needsSource: Bool { self == .exclude || self == .delete }
-
-    /// 要连上电脑才能做（下载原文件 / 删原图不排队）
-    var needsOnline: Bool { self == .save || self == .delete }
 }
 
 extension WallActionKind {
-    /// 现在能不能点。换壁纸的过程中不能整理；存原图和删原图离线时做不了。
+    /// 现在能不能点。换壁纸的过程中不能整理；删原图离线时做不了（不可撤销、不排队）；
+    /// 存原图离线时只有手机上存过那张的原图才能点。
     @MainActor
-    func isEnabled(_ session: RemoteSession) -> Bool {
-        if needsOnline, session.offline { return false }
-        if self == .save { return session.saving == nil }
+    func isEnabled(_ session: RemoteSession, _ w: Wallpaper) -> Bool {
+        if self == .save {
+            if session.saving != nil { return false }
+            return !session.offline || ImageStore.cachedOriginal(rev: session.wallsRev ?? "", name: w.name) != nil
+        }
+        if self == .delete, session.offline { return false }
         return session.acting == nil && session.state?.running != true
     }
 
@@ -207,7 +208,7 @@ struct WallActionButtons: View {
                 } label: {
                     Label(kind.menuTitle, systemImage: kind.icon)
                 }
-                .disabled(!kind.isEnabled(session))
+                .disabled(!kind.isEnabled(session, wall))
                 .accessibilityHint(kind.hint)
                 if kind == .save { Divider() }
             }
@@ -312,7 +313,7 @@ struct AllWallpapersView: View {
         }
         .navigationTitle(title)
         .iOSInlineTitle()
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索文件名")
+        .searchableAlways(text: $query, prompt: "搜索文件名")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 if selecting {
@@ -495,7 +496,8 @@ struct UndoRemoveButton: View {
     }
 }
 
-/// 分享 / 存原图：先从电脑下载原文件（不是 2048 宽的预览图），下完弹系统分享面板（里面有「存储图像」）。
+/// 分享 / 存原图：先从电脑下载原文件（不是 2732 宽的预览图），下完弹系统分享面板（里面有「存储图像」）。
+/// 离线时用手机上存过的那份原图（设置 › 离线 › 保存原图）。
 struct ShareOriginalButton: View {
     let session: RemoteSession
     let wall: Wallpaper
@@ -503,6 +505,11 @@ struct ShareOriginalButton: View {
     @State private var file: SharedFile?
     /// 当前分享出去的那份临时文件：分享面板收起后删掉，不然每分享一张就留一份原图
     @State private var shared: URL?
+
+    /// 手机上存过这张的原图（离线时唯一能用的那份）
+    private var cached: URL? {
+        ImageStore.cachedOriginal(rev: session.wallsRev ?? "", name: wall.name)
+    }
 
     var body: some View {
         Button {
@@ -514,7 +521,7 @@ struct ShareOriginalButton: View {
             }
             .font(.body.weight(.semibold)).frame(width: 36, height: 36)
         }
-        .disabled(loading || session.offline) // 离线时下载不了原文件
+        .disabled(loading || (session.offline && cached == nil)) // 离线、手机上又没存过：下载不了
         .accessibilityLabel("分享原图")
         .sheet(item: $file, onDismiss: cleanUp) { f in
             ActivitySheet(items: [f.url]).ignoresSafeArea()
@@ -530,9 +537,14 @@ struct ShareOriginalButton: View {
         loading = true
         defer { loading = false }
         do {
-            let url = try await session.client().downloadOriginal(wall.name)
-            shared = url
-            file = SharedFile(url: url)
+            if let cached, session.offline {
+                shared = nil // 缓存里的那份不能删
+                file = SharedFile(url: cached)
+            } else {
+                let url = try await session.client().downloadOriginal(wall.name)
+                shared = url
+                file = SharedFile(url: url)
+            }
         } catch {
             session.actionError = RemoteSession.describe(error)
         }

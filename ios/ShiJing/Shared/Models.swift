@@ -130,11 +130,21 @@ struct WallpaperList: Codable {
     var items: [Wallpaper]
 }
 
-/// 要哪种尺寸的图：缩略图（360 宽）、横幅（1600 宽）或大图（2048 宽）。
-enum ImageKind: String {
-    case thumb, hero, image
+/// 要哪种尺寸的图：缩略图（360 宽）、横幅（1600 宽）、大图（2732 宽）或图库里的原始文件。
+enum ImageKind: String, CaseIterable {
+    case thumb, hero, image, original
 
     var isLarge: Bool { self != .thumb }
+
+    /// 磁盘缓存的文件名前缀。大图的宽度变了就换前缀，旧的缓存不会再被命中（换一批时整个目录删掉）。
+    var cachePrefix: String {
+        switch self {
+        case .thumb: "thumb"
+        case .hero: "hero"
+        case .image: "image2732"
+        case .original: "original"
+        }
+    }
 }
 
 struct ServerInfo: Codable {

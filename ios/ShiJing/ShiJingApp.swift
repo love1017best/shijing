@@ -5,7 +5,9 @@ import UserNotifications
 @main
 struct ShiJingApp: App {
     init() {
+        #if canImport(UIKit)
         RunNotifier.isForeground = { UIApplication.shared.applicationState == .active }
+        #endif
         Notifications.setUp()
     }
 
