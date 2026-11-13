@@ -646,7 +646,8 @@ private struct OfflineCacheSection: View {
                         refresh()
                     }
 
-                if keepOriginals {
+                // 开关关掉后已经存下的原图还留在手机上，也要能看见、能单独清掉，否则「已用」对不上
+                if keepOriginals || (originalSize ?? 0) > 0 {
                     LabeledContent("原图") {
                         HStack(spacing: 12) {
                             Text(detail(originalCount, originalSize)).foregroundStyle(.secondary)
@@ -657,7 +658,14 @@ private struct OfflineCacheSection: View {
                             .disabled(originalCount == 0)
                         }
                     }
-                    originalStatus
+                    if keepOriginals {
+                        originalStatus
+                    } else {
+                        HStack {
+                            Text("「保存原图」已关掉，已经存下的还留着").foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                    }
                 }
 
                 Stepper(value: $limitGB, in: 1...50) {
