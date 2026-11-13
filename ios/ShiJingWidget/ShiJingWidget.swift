@@ -123,7 +123,6 @@ struct PhotoProvider: AppIntentTimelineProvider {
             e.showName = configuration.showName
             return e
         }
-        WidgetDebug.log("photo timeline return entries=\(entries.count) showName=\(configuration.showName)")
         return Timeline(entries: entries, policy: t.policy)
     }
 }
@@ -146,9 +145,7 @@ enum TimelineMaker {
     static func make(_ context: TimelineProviderContext, interval: RotateInterval, photo: Bool, preview: Bool) async -> Timeline<Entry> {
         let now = Date()
         let deadline = now.addingTimeInterval(budget)
-        WidgetDebug.log("make photo=\(photo) preview=\(preview) family=\(context.family) interval=\(interval.rawValue)")
         guard let mac = CurrentMac.load() else {
-            WidgetDebug.log("no mac")
             return Timeline(entries: [Entry(problem: "打开拾景配对一台 Mac")], policy: .after(now.addingTimeInterval(3600)))
         }
         let key = "\(mac.host):\(mac.port)"
@@ -182,7 +179,6 @@ enum TimelineMaker {
         let retry = now.addingTimeInterval(15 * 60)
         guard let snap, !(accessory && !photo) else {
             let running = snap?.state.running == true
-            WidgetDebug.log("early snap=\(snap != nil) problem=\(problem ?? "-")")
             return Timeline(entries: [base], policy: .after(running ? now.addingTimeInterval(60) : retry))
         }
 
@@ -246,7 +242,6 @@ enum TimelineMaker {
             min(end, now.addingTimeInterval(photo ? 6 * 3600 : 30 * 60))
         }
         WidgetCache.prune()
-        WidgetDebug.log("done photo=\(photo) count=\(entries.count) names=\(names.count) cached=\(cachedNames.count) new=\(newDownloads) first=\(entries.first?.imageFile?.lastPathComponent ?? "nil") hasState=\(entries.first?.state != nil)")
         return Timeline(entries: entries, policy: .after(next))
     }
 
