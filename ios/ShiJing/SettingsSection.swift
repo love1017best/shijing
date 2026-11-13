@@ -615,6 +615,7 @@ enum AppVersion {
 private struct OfflineCacheRow: View {
     let session: RemoteSession
     @State private var size: Int64?
+    @State private var used: Int64?
     @State private var cached = 0
     @AppStorage(ImageStore.cacheLimitKey) private var limitGB = ImageStore.defaultCacheLimitGB
 
@@ -632,6 +633,7 @@ private struct OfflineCacheRow: View {
                 Button("清除") {
                     store.clearPreviews(rev: session.wallsRev)
                     size = 0
+                    used = nil
                     cached = 0
                 }
                 .disabled(size == nil || size == 0)
@@ -646,11 +648,20 @@ private struct OfflineCacheRow: View {
             if store.prefetchDone % 20 == 0 { refresh() }
         }
         Stepper(value: $limitGB, in: 1...50) {
-            Text("缓存上限 \(limitGB) GB")
+            HStack {
+                Text("缓存上限 \(limitGB) GB")
+                if let used {
+                    Spacer()
+                    Text(used == 0 ? "还没占用" : "已用 " + ByteCountFormatter.string(fromByteCount: used, countStyle: .file))
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .onChange(of: limitGB) { _, _ in
-            guard !session.offline, !session.walls.isEmpty else { return }
+            guard !session.offline, !session.walls.isEmpty else { refresh(); return }
             store.prefetchAll(session)
+            // 上限调大了，原图也跟着补（以前只重跑预览图）
+            if ImageStore.originalsEnabled { store.prefetchOriginals(session) }
             refresh()
         }
         HStack {
@@ -690,14 +701,17 @@ private struct OfflineCacheRow: View {
         let rev = session.wallsRev ?? ""
         let names = session.walls.map(\.name)
         Task {
-            let (n, c) = await Task.detached(priority: .utility) {
+            let (n, c, all) = await Task.detached(priority: .utility) {
                 // 整个目录减去原图，就是缩略图 / 横幅 / 2732 大图占的（原图在下面单独一行）
+                let total = ImageStore.diskUsage()
                 let originals = rev.isEmpty ? 0 : ImageStore.cachedSize(rev: rev, kind: .original)
-                return (max(0, ImageStore.diskUsage() - originals),
-                        rev.isEmpty ? 0 : ImageStore.viewableCount(rev: rev, names: names))
+                return (max(0, total - originals),
+                        rev.isEmpty ? 0 : ImageStore.viewableCount(rev: rev, names: names),
+                        total)
             }.value
             size = n
             cached = c
+            used = all
         }
     }
 }

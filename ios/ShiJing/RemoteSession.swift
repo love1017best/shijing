@@ -195,9 +195,20 @@ final class RemoteSession {
                     connection = .live
                     if !wasLive {
                         if !queued.isEmpty { Task { await flushOfflineActions() } }
-                        // 又连上了：上一次没缓存完的接着补（已经存下的会跳过）；换了一批时 refreshWalls 会另起一轮
-                        ImageStore.shared.prefetchAll(self)
-                        if ImageStore.originalsEnabled { ImageStore.shared.prefetchOriginals(self) }
+                        Task {
+                            if s.wallsRev != wallsRev {
+                                // 换了一批：refreshWalls 里先收拾掉上一批的缓存，再按新批次预取
+                                await refreshWalls()
+                            } else {
+                                // 还是同一批：上一次没缓存完的接着补（已经存下的会跳过）
+                                if !ImageStore.shared.prefetching {
+                                    ImageStore.shared.prefetchAll(self)
+                                }
+                                if ImageStore.originalsEnabled, !ImageStore.shared.originaling {
+                                    ImageStore.shared.prefetchOriginals(self)
+                                }
+                            }
+                        }
                         // 记录页的三份数据也存一份，下次断了还能看
                         Task { await refreshRecordsCache() }
                     }
@@ -447,8 +458,9 @@ final class RemoteSession {
                 groomedRev = list.rev
                 let rev = list.rev
                 let names = list.items.map(\.name)
-                // 删 / 搬文件，别在主线程做
-                Task.detached(priority: .utility) { ImageStore.groom(keepRev: rev, names: names) }
+                // 删 / 搬文件，别在主线程做。要等它做完再开始预取：预取按「磁盘现在占了多少」算上限，
+                // 上一批还没删掉的话会被一起算进去，新一批没存几张就以为到上限了
+                await Task.detached(priority: .utility) { ImageStore.groom(keepRev: rev, names: names) }.value
             }
             if changed {
                 ImageStore.shared.prefetchAll(self) // 这一批的缩略图和预览图存到磁盘，离线也能看
