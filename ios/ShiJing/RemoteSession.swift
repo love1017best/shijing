@@ -361,10 +361,11 @@ final class RemoteSession {
     // MARK: 壁纸
 
     /// 重新拉壁纸列表（状态里的 walls_rev 变了时自动调；force 时不管变没变都拉，
-    /// 补离线操作之前要看电脑上现在有哪些）。
-    func refreshWalls(force: Bool = false) async {
-        guard let rev = state?.wallsRev else { return }
-        if !force, rev == wallsRev { return }
+    /// 补离线操作之前要看电脑上现在有哪些）。返回是否拿到了最新的列表（没变化也算）。
+    @discardableResult
+    func refreshWalls(force: Bool = false) async -> Bool {
+        guard let rev = state?.wallsRev else { return false }
+        if !force, rev == wallsRev { return true }
         do {
             let list = try await client().wallpapers()
             let changed = list.rev != wallsRev
@@ -390,8 +391,10 @@ final class RemoteSession {
                 ImageStore.shared.prefetchAll(self) // 这一批的缩略图和预览图存到磁盘，离线也能看
                 if ImageStore.originalsEnabled { ImageStore.shared.prefetchOriginals(self) } // 开了「保存原图」的接着存原图
             }
+            return true
         } catch {
             // 列表拉不到不影响别的，下次状态推送再试
+            return false
         }
     }
 
@@ -445,13 +448,14 @@ final class RemoteSession {
         return done
     }
 
-    /// 删除图库里的原图（界面上已经二次确认过）。离线时不能排队（不可撤销，等连上再做），
-    /// 手机误触一下、电脑半夜连上网就把 NAS 上的原图删了，后果太重。
+    /// 删除图库里的原图（界面上已经二次确认过）。离线时只登记「想删」，
+    /// 连上电脑后还要在「设置 › 待补操作」里再确认一次才真的删——不可撤销，
+    /// 不能像「移出」「不再选」那样自动补上。
     @discardableResult
     func deleteOriginal(_ w: Wallpaper) async -> Bool {
         guard connection == .live else {
-            actionError = "连不上电脑时不能删除原图（不可撤销）。可以先移出或者「不再选它」，连上电脑后自动补上。"
-            return false
+            enqueue(.delete, w)
+            return true
         }
         let before = state?.pending ?? 0
         let ok = await wallAct(w, kind: .remove) { try await $0.deleteOriginal(w.name) }

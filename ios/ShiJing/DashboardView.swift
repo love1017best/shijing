@@ -244,7 +244,7 @@ struct DashboardView: View {
                             Text(msg).font(.footnote).foregroundStyle(.secondary)
                         }
                         if !session.queued.isEmpty {
-                            Text("离线时记下的 \(session.queued.count) 项操作，连上电脑后自动补上（删除原图要等连上再做）。")
+                            Text("离线时记下的 \(session.queued.count) 项操作，连上电脑后自动补上（删除原图要你确认后才删）。")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
                     }
@@ -447,6 +447,7 @@ struct DashboardView: View {
 
     /// 图库（NAS）没连上时删的原图没法立刻删，电脑那边排着队：放在横幅下面提醒一下，
     /// 图库连上后电脑会自动删掉（和电脑概览里的「待删除」条一致）。
+    /// 另外离线时在手机上记下的「删除原图」也放在这里：连上后要到设置里确认一次才会删。
     @ViewBuilder private var pendingSection: some View {
         if let p = session.state?.pending, p > 0 {
             Section {
@@ -458,6 +459,29 @@ struct DashboardView: View {
                     }
                 } icon: {
                     Image(systemName: "clock").foregroundStyle(.orange)
+                }
+            }
+        }
+        if !session.queuedDeletes.isEmpty {
+            let n = session.queuedDeletes.count
+            let live = session.connection == .live
+            Section {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(n) 张原图等你确认删除").font(.subheadline.bold())
+                        Text(live ? "在「设置 › 待补操作」里逐张或全部确认后才会删除，取消会把那张放回列表。"
+                                  : "连上电脑后到「设置 › 待补操作」里逐张或全部确认后才会删除。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "trash").foregroundStyle(.red)
+                }
+                if live {
+                    Button {
+                        NotificationRouter.shared.tab = .settings
+                    } label: {
+                        Label("去确认", systemImage: "checkmark.circle")
+                    }
                 }
             }
         }

@@ -10,7 +10,6 @@ enum WallAction {
     static let removeHint = "只删壁纸文件夹里的这一份，图库里的原图不动。"
     static let excludeHint = "还会让以后的采样跳过这张原图（可以在电脑上的「图库」页恢复）。"
 }
-
 /// 对一张壁纸能做的四件事。长按菜单和预览底栏都从这里取：文案、图标、能不能点、点了做什么只写一份。
 enum WallActionKind: CaseIterable {
     case save, remove, exclude, delete
@@ -49,7 +48,7 @@ enum WallActionKind: CaseIterable {
         case .save: WallAction.saveHint
         case .remove: WallAction.removeHint
         case .exclude: WallAction.excludeHint
-        case .delete: "从图库删除这张原图，不可撤销。"
+        case .delete: "从图库删除这张原图，不可撤销。连不上电脑时先记下来，连上后还要再确认一次才删。"
         }
     }
 
@@ -60,15 +59,14 @@ enum WallActionKind: CaseIterable {
 }
 
 extension WallActionKind {
-    /// 现在能不能点。换壁纸的过程中不能整理；删原图离线时做不了（不可撤销、不排队）；
-    /// 存原图离线时只有手机上存过那张的原图才能点。
+    /// 现在能不能点。换壁纸的过程中不能整理；存原图离线时只有手机上存过那张的原图才能点。
+    /// 删除原图离线时也能点：只登记「想删」，连上电脑后还要再确认一次才真的删。
     @MainActor
     func isEnabled(_ session: RemoteSession, _ w: Wallpaper) -> Bool {
         if self == .save {
             if session.saving != nil { return false }
             return !session.offline || ImageStore.cachedOriginal(rev: session.wallsRev ?? "", name: w.name) != nil
         }
-        if self == .delete, session.offline { return false }
         return session.acting == nil && session.state?.running != true
     }
 
@@ -230,7 +228,11 @@ extension View {
             }
             Button("取消", role: .cancel) {}
         } message: { w in
-            Text("会从图库里删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销，会记进电脑上的删除记录。")
+            if session.offline {
+                Text("会从图库里删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销。现在连不上电脑，会先记下来，连上后在「设置 › 待补操作」里再确认一次才真的删除。")
+            } else {
+                Text("会从图库里删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销，会记进电脑上的删除记录。")
+            }
         }
     }
 
