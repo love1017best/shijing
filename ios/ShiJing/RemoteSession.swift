@@ -48,6 +48,8 @@ final class RemoteSession {
     private var lastSnapshotSave = Date.distantPast
     /// 已经清理过磁盘缓存的批次（同一批只清一次，见 refreshWalls）
     private var groomedRev: String?
+    /// 有一轮壁纸列表正在拉：状态推得很密时别每次推送都再发一个请求
+    private var refreshingWalls = false
     /// 离线时点的「移出 / 不再选」，连上电脑后自动补上（存在 UserDefaults 里，按 Mac 分开）
     internal(set) var queued: [OfflineAction] = []
     var flushing = false
@@ -415,6 +417,9 @@ final class RemoteSession {
     func refreshWalls(force: Bool = false) async -> Bool {
         guard let rev = state?.wallsRev else { return false }
         if !force, rev == wallsRev { return true }
+        if !force, refreshingWalls { return true } // 已经有一轮在拉了，等它拉完
+        defer { if !force { refreshingWalls = false } }
+        if !force { refreshingWalls = true }
         do {
             let list = try await client().wallpapers()
             let changed = list.rev != wallsRev

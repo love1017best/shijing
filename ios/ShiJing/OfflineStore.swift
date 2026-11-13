@@ -27,8 +27,11 @@ final class OfflineStore {
     static let shared = OfflineStore()
 
     private let dir: URL?
-    private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+
+    /// 写盘都排在这一条串行队列上：编码一整份壁纸列表 + 状态要几毫秒，不该占主线程
+    /// （每 5 秒就要写一次）；串行是为了保证先排的写完再写后一份，别让旧快照盖掉新的。
+    private static let writeQueue = DispatchQueue(label: "com.love1017best.shijing.offline-write", qos: .utility)
 
     private init() {
         let fm = FileManager.default
@@ -54,19 +57,26 @@ final class OfflineStore {
     }
 
     func save(_ id: String, _ snap: Snapshot) {
-        guard let f = file(id), let data = try? encoder.encode(snap) else { return }
-        try? data.write(to: f, options: .atomic)
+        guard let f = file(id) else { return }
+        Self.writeQueue.async {
+            let encoder = JSONEncoder()
+            guard let data = try? encoder.encode(snap) else { return }
+            try? data.write(to: f, options: .atomic)
+        }
     }
 
     func clear(_ id: String) {
         guard let f = file(id), let dir = dir else { return }
-        try? FileManager.default.removeItem(at: f)
-        // 记录缓存也一起删掉
-        let fm = FileManager.default
-        let prefix = "records-\(id)-"
-        for u in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-        where u.lastPathComponent.hasPrefix(prefix) {
-            try? fm.removeItem(at: u)
+        // 和写盘排同一条队列：清掉之后不会被还在排队的旧快照又写回来
+        Self.writeQueue.async {
+            let fm = FileManager.default
+            try? fm.removeItem(at: f)
+            // 记录缓存也一起删掉
+            let prefix = "records-\(id)-"
+            for u in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            where u.lastPathComponent.hasPrefix(prefix) {
+                try? fm.removeItem(at: u)
+            }
         }
     }
 
@@ -77,9 +87,13 @@ final class OfflineStore {
     }
 
     func saveRecord<T: Codable>(_ id: String, _ kind: RecordsKind, _ value: T, at: Date = Date()) {
-        guard let f = recordFile(id, kind.rawValue),
-              let data = try? encoder.encode(Cached(value: value, at: at)) else { return }
-        try? data.write(to: f, options: .atomic)
+        guard let f = recordFile(id, kind.rawValue) else { return }
+        let cached = Cached(value: value, at: at)
+        Self.writeQueue.async {
+            let encoder = JSONEncoder()
+            guard let data = try? encoder.encode(cached) else { return }
+            try? data.write(to: f, options: .atomic)
+        }
     }
 
     func loadRecord<T: Codable>(_ id: String, _ kind: RecordsKind) -> Cached<T>? {

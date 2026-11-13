@@ -167,14 +167,16 @@ final class ImageStore {
             // 枚举整个缓存目录逐文件取大小，别在主线程做
             var used = await Task.detached(priority: .utility) { Self.diskUsage() }.value
             let limit = Self.cacheLimitBytes
-            var pending = queue
+            let pending = queue
+            var next = 0
             var hitLimit = false
             await withTaskGroup(of: (ImageKind, Int64).self) { group in
                 // 同时最多 3 张，别把手机的网络和解码占满
                 let workers = 3
                 func addNext() -> Bool {
-                    guard !pending.isEmpty, !hitLimit else { return false }
-                    let (n, kind) = pending.removeFirst()
+                    guard next < pending.count, !hitLimit else { return false }
+                    let (n, kind) = pending[next]
+                    next += 1
                     group.addTask { (kind, await Self.prefetchOne(client, rev, n, kind)) }
                     return true
                 }
@@ -187,10 +189,9 @@ final class ImageStore {
                     }
                     if kind == .image { prefetchDone += 1 }
                     used += bytes
-                    if used >= limit, !pending.isEmpty {
+                    if used >= limit, next < pending.count {
                         // 到了上限：手上这几张存完就停，后面的不存了
                         hitLimit = true
-                        pending.removeAll()
                         prefetchHitLimit = true
                     }
                     _ = addNext()
@@ -245,14 +246,16 @@ final class ImageStore {
             originalDone = names.count - pending.count
             var used = await Task.detached(priority: .utility) { Self.diskUsage() }.value
             let limit = Self.cacheLimitBytes
-            var queue = pending
+            let queue = pending
+            var next = 0
             var hitLimit = false
             await withTaskGroup(of: Int64.self) { group in
                 // 原图一张几十 MB，同时最多 2 张
                 let workers = 2
                 func addNext() -> Bool {
-                    guard !queue.isEmpty, !hitLimit else { return false }
-                    let n = queue.removeFirst()
+                    guard next < queue.count, !hitLimit else { return false }
+                    let n = queue[next]
+                    next += 1
                     group.addTask { await Self.prefetchOriginal(client, rev, n) }
                     return true
                 }
@@ -265,9 +268,8 @@ final class ImageStore {
                     }
                     originalDone += 1
                     used += bytes
-                    if used >= limit, !queue.isEmpty {
+                    if used >= limit, next < queue.count {
                         hitLimit = true
-                        queue.removeAll()
                         originalHitLimit = true
                     }
                     _ = addNext()

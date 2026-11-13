@@ -111,19 +111,23 @@ struct WallGrid: View {
         rows.map { list.prefix($0 * columns) } ?? list[...]
     }
 
-    /// 编号按壁纸文件夹里的完整顺序算（筛选后也要和大图预览顶部的编号对得上）
-    private func number(_ w: Wallpaper, _ offset: Int) -> Int {
-        if walls == nil { return offset + 1 }
-        return session.walls.firstIndex(of: w).map { $0 + 1 } ?? offset + 1
+    /// 编号按壁纸文件夹里的完整顺序算（筛选后也要和大图预览顶部的编号对得上）。
+    /// 一次排好查表的字典，别在每个格子里去 `firstIndex` 从头找。
+    private var numbering: [String: Int]? {
+        guard walls != nil else { return nil }
+        var m = [String: Int](minimumCapacity: session.walls.count)
+        for (i, w) in session.walls.enumerated() { m[w.id] = i + 1 }
+        return m
     }
 
     var body: some View {
+        let order = numbering
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Self.gap), count: columns), spacing: Self.gap) {
             ForEach(Array(shown.enumerated()), id: \.element.id) { i, w in
                 if selecting {
-                    cell(w, i)
+                    cell(w, number: order?[w.id] ?? i + 1)
                 } else {
-                    cell(w, i)
+                    cell(w, number: order?[w.id] ?? i + 1)
                         .contextMenu {
                             WallActionButtons(session: session, wall: w, confirmDelete: $confirmDelete)
                             if let onSelect {
@@ -144,7 +148,7 @@ struct WallGrid: View {
         .deleteOriginalDialog(session: session, wall: $confirmDelete)
     }
 
-    private func cell(_ w: Wallpaper, _ i: Int) -> some View {
+    private func cell(_ w: Wallpaper, number: Int) -> some View {
         Button {
             if let onOpen { onOpen(w) } else { previewing = w }
         } label: {
@@ -155,7 +159,7 @@ struct WallGrid: View {
                 .overlay(alignment: .bottomTrailing) {
                     // 「全部壁纸」页标上编号，和大图预览顶部的编号一致，方便对照着找
                     if rows == nil {
-                        Text("\(number(w, i))")
+                        Text("\(number)")
                             .font(.caption2.monospacedDigit().weight(.medium))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 4).padding(.vertical, 1)

@@ -149,7 +149,8 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
   - 离线队列 `flushOfflineActions` 是**逐条消费**：取走第一条就 `saveQueue`，失败了再 `insert(at: 0)` 放回。别回到「遍历快照 + 批量删」，那期间用户取消掉一条会被误补。桌面返回 409 时按消息区分：「正在换壁纸」放回队列下次再补，「已经不在壁纸文件夹里」才算过期。
   - 离线快照 `OfflineStore.Snapshot` 除了状态和壁纸列表还存了 `wallsRev`（壁纸属于哪一批）。旧文件没有这个字段时回退到 `state.wallsRev`。
   - 预览翻页的三页（`PageSlot`）按**文件名**做身份，同一张图翻页时不会整个重建；双击和单击用 `ExclusiveGesture`（双击不再顺带触发隐藏工具栏）；双指缩放结束后 `axis = nil` 复位，否则下一段拖拽会沿用缩放时的判定。
-  - `ImageStore` 内存缓存的 key 只用 macID + 文件名 + 尺寸，不碰 `session.client()`——那会每帧查一次钥匙串。`prefetchAll` 用代际号（`prefetchGen`）判「这轮是不是已经被新一轮顶掉」，旧的收尾不会把新的 `prefetching` 置回 false。删目录、算占用这类磁盘操作放 `Task.detached`，不占主线程。
+  - `ImageStore` 内存缓存的 key 只用 macID + 文件名 + 尺寸，不碰 `session.client()`。`MacStore.token(for:)` 读一次钥匙串就缓存在内存里（配对 / 取消配对时更新），`client()` 才能随便调——每张图加载都查一次钥匙串会卡主线程。`prefetchAll` 用代际号（`prefetchGen`）判「这轮是不是已经被新一轮顶掉」，旧的收尾不会把新的 `prefetching` 置回 false。删目录、算占用这类磁盘操作放 `Task.detached`，不占主线程。
+  - 写盘别放主线程：`OfflineStore` 的保存（快照每 5 秒一次，带一整份壁纸列表）和记录缓存都排在同一条串行 `writeQueue` 上编码 + 写；`clear` 也排进这条队列，免得还在排队的旧快照把删掉的文件又写回来。`refreshWalls` 有一轮在拉时后来的非 force 调用直接返回，状态推得密也不会重复发请求。
   - 记录页三个页面的取数共用 `loadRecord(session, kind, offlineNote:online:)`（`RecordLoad`：值 + 是否来自磁盘副本的时间 + 错误），在线失败自动落到磁盘副本；`RecordsCacheHeader` / `recordsCacheSection` 分别给非 List 页面和 List 页面顶部那行「离线 · X 前同步」。加新的记录页照这个来，别各写一份。
   - 预览和长按菜单的四个整理操作统一成 `WallActionKind`（`save / remove / exclude / delete`，带图标、文案、是否要原图、是否要在线、是否危险），`WallActionButtons` 和预览底栏的 `barButtons` 都按它渲染。改文案只改这一处。
 - 本机没装完整 Xcode 时，Swift 代码用命令行工具在 macOS SDK 上类型检查（命令见 `ios/README.md`）；必须用 `MacOSX26.5.sdk`，27.x 的 SwiftUI `@State` 是宏、命令行工具缺宏插件。iOS 专有修饰符包在 `PairView.swift` 底部的 `iOSKeyboard` / `iOSInlineTitle` 等扩展里。

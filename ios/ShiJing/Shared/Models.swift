@@ -143,8 +143,6 @@ struct RemoteSettings: Codable, Equatable {
         }
     }
 
-    var modeLabel: String { mode == "symlink" ? "软链接" : "复制" }
-
     /// 当前分辨率对应的预设下标；对不上任何预设时是 presets.count（「自定义」）。
     var presetIndex: Int {
         let presets = minPresets ?? []
