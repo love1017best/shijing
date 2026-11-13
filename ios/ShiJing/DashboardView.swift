@@ -14,6 +14,8 @@ struct DashboardView: View {
     @State private var previewing: Wallpaper?
     /// 「全部壁纸」页；同理用状态推页面，不用放在分组标题里的 NavigationLink（转屏时它被重建，推出去的页面会被弹回来）
     @State private var showAll = false
+    /// 「关于」页：入口在右上角的 ⓘ；签名快到期的通知点进来也走这里
+    @State private var showAbout = false
 
     /// 内容区宽于这个值时分两栏（按实际宽度判断，不按机型写死）
     private static let twoColumnWidth: CGFloat = 680
@@ -24,11 +26,26 @@ struct DashboardView: View {
             .navigationTitle(session.mac.name)
             .iOSInlineTitle()
             .connectionToolbar(session)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAbout = true } label: {
+                        Image(systemName: "info.circle")
+                    }
+                    .accessibilityLabel("关于")
+                }
+            }
             .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 8) }
             .fullScreenCoverCompat(item: $previewing) { w in
                 WallPreview(session: session, startName: w.name)
             }
             .navigationDestination(isPresented: $showAll) { AllWallpapersView(session: session) }
+            .navigationDestination(isPresented: $showAbout) { AboutView(session: session) }
+            // 签名快到期的通知点进来：直接打开「关于」
+            .onChange(of: NotificationRouter.shared.about, initial: true) { _, want in
+                guard want else { return }
+                NotificationRouter.shared.about = false
+                showAbout = true
+            }
             // 小组件点进来：要看的那张（壁纸列表可能还没拉到，拉到了再打开）
             .onChange(of: session.openRequest, initial: true) { openRequested() }
             .onChange(of: session.walls) { openRequested() }
@@ -39,6 +56,7 @@ struct DashboardView: View {
                     previewing = session.walls[2]
                 }
                 if ProcessInfo.processInfo.arguments.contains("-demoAll") { showAll = true }
+                if ProcessInfo.processInfo.arguments.contains("-demoAbout") { showAbout = true }
             }
             #endif
             .alert("操作没有完成", isPresented: Binding(

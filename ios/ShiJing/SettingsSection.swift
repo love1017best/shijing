@@ -74,15 +74,12 @@ struct SettingsPage: View {
             // -demoLibrary 只摆「图库 / 待删除」两组（配 -demoPending 看电脑上排队的删除）
             if ProcessInfo.processInfo.arguments.contains("-demoQueue") {
                 if !session.queued.isEmpty { offlineQueueLink }
-                aboutSection(state)
             } else if ProcessInfo.processInfo.arguments.contains("-demoLibrary") {
                 if state.dirs != nil { libraryLink(state) }
                 pendingQueueSection
-                aboutSection(state)
             } else if ProcessInfo.processInfo.arguments.contains("-demoOfflineCache") {
                 offlineSection
                 if !session.queued.isEmpty { offlineQueueLink }
-                aboutSection(state)
             } else {
                 switch group {
                 case .mac: macContent(state)
@@ -149,7 +146,6 @@ struct SettingsPage: View {
     private func phoneContent(_ state: RemoteState) -> some View {
         if !session.queued.isEmpty { offlineQueueLink }
         offlineSection
-        aboutSection(state)
     }
 
     @ViewBuilder
@@ -380,24 +376,6 @@ struct SettingsPage: View {
             Text("离线")
         } footer: {
             Text("连不上电脑时，概览和壁纸显示的是上次同步的内容：缩略图、横幅和整批 2732 宽的预览图会自动缓存在手机上，受上面的上限限制，换一批后上一批的自动删掉。打开「保存原图」还会把这一批的原文件也存下来（一张几十 MB，同样受上限限制），离线时能看原图、直接存相册或分享；关掉只是不再补齐，已经存下的可以点「清除」删掉。")
-        }
-    }
-
-    /// 关于：两边的版本，版本不一样时提醒一下。
-    private func aboutSection(_ state: RemoteState) -> some View {
-        Section {
-            LabeledContent("电脑上的拾景", value: state.version.isEmpty ? "开发版" : "v" + state.version)
-            LabeledContent(ThisDevice.label, value: AppVersion.text)
-            if let exp = SigningExpiry.text {
-                LabeledContent("签名", value: exp)
-            }
-            LabeledContent("壁纸文件夹", value: state.dest)
-        } header: {
-            Text("关于")
-        } footer: {
-            if !state.version.isEmpty, state.version != AppVersion.short {
-                Text("两边版本不一样，有的功能可能用不了，建议都升到最新。")
-            }
         }
     }
 

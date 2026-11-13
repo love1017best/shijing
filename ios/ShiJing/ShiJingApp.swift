@@ -31,7 +31,8 @@ struct ShiJingApp: App {
 /// 顶层：没配对过任何 Mac 时整屏是「找 Mac / 配对」；配对过之后是三个标签——概览、设置、记录，
 /// 对应电脑上侧边栏的概览 / 设置 / 删除记录（iPad、展开的内屏上系统把标签栏放在顶部，不占侧边）。
 /// 切换、添加、移除 Mac 收在概览的标题菜单里（点顶部的 Mac 名字）——这些只在第一次装的时候用，不值得常驻一个侧栏。
-enum RootTab: Hashable, CaseIterable { case overview, settings, records
+enum RootTab: Hashable {
+    case overview, settings, records
 
     var title: String {
         switch self {
@@ -109,54 +110,12 @@ struct RootView: View {
         }
     }
 
-    /// 三个标签：概览 / 设置 / 记录。
-    /// iPad 上系统顶部标签栏（iOS 26/27）只画文字、没有图标，所以自己画一条带图标的顶栏，
-    /// 把系统栏隐藏掉；iPhone 还是系统的底部标签栏（iOS 18 起用新的 `Tab` API，更稳）。
+    /// 三个标签：概览 / 设置 / 记录。iPhone 是系统底部标签栏，iPad 是系统顶部标签栏。
+    /// iOS 18 起用新的 `Tab` API，iOS 17 退回 `.tabItem`。
     @ViewBuilder
     private func tabs(_ session: RemoteSession) -> some View {
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            VStack(spacing: 0) {
-                padTabBar
-                    .padding(.top, 4)
-                padTabView(session)
-            }
+        tabView(session)
             .id(session.macID)
-        } else {
-            tabView(session)
-                .id(session.macID)
-        }
-    }
-
-    /// iPad 的内容区：用 page 样式，系统不再画标签栏（顶部那条是自己画的），三个页面照样由 TabView 管理，
-    /// 切回来时滚动位置和导航栈都还在。`indexDisplayMode: .never` 去掉底部小圆点。
-    private func padTabView(_ session: RemoteSession) -> some View {
-        TabView(selection: $tab) {
-            overviewStack(session).tag(RootTab.overview)
-            settingsStack(session).tag(RootTab.settings)
-            recordsStack(session).tag(RootTab.records)
-        }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-    }
-
-    /// iPad 顶部自己画的三项：图标 + 文字，选中的那一项高亮。
-    private var padTabBar: some View {
-        HStack(spacing: 6) {
-            ForEach(RootTab.allCases, id: \.self) { t in
-                Button {
-                    tab = t
-                } label: {
-                    Label(t.title, systemImage: t.icon)
-                        .font(.subheadline.weight(tab == t ? .semibold : .regular))
-                        .foregroundStyle(tab == t ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(tab == t ? Color.accentColor.opacity(0.14) : Color.clear, in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 6)
     }
 
     @ViewBuilder
@@ -244,12 +203,14 @@ struct RootView: View {
     }
 }
 
-/// 点开通知时要切到哪个标签（换完 → 概览；签名到期 → 设置）。通知的回调不保证在主线程、也不保证
+/// 点开通知时要切到哪个标签（换完 → 概览；签名到期 → 概览的「关于」）。通知的回调不保证在主线程、也不保证
 /// RootView 已经显示，所以先记在这里，RootView 出现时（initial: true）再消费。
 @Observable @MainActor
 final class NotificationRouter {
     static let shared = NotificationRouter()
     var tab: RootTab?
+    /// 到了概览还要不要再推开「关于」（签名快到期的通知）
+    var about = false
 }
 
 /// 本地通知：换完了、签名快到期。权限在第一次从手机换一批时再问（不一上来就弹）。
@@ -287,6 +248,9 @@ enum Notifications {
             let target = response.notification.request.content.userInfo["target"] as? String
             await MainActor.run {
                 switch target {
+                case "about":
+                    NotificationRouter.shared.tab = .overview
+                    NotificationRouter.shared.about = true
                 case "settings": NotificationRouter.shared.tab = .settings
                 case "overview": NotificationRouter.shared.tab = .overview
                 default: break
