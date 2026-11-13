@@ -89,10 +89,6 @@ struct SettingsPage: View {
             }
         }
         .frame(width: demoWidth, height: demoHeight)
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-            width = size.width
-            height = size.height
-        }
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -107,6 +103,12 @@ struct SettingsPage: View {
         // 三个中文标签放不下，窄屏上会被挤成「电脑上的…」。放这里滚到哪儿都看得到，还能左右滑。
         .safeAreaInset(edge: .top, spacing: 0) {
             if showsPager { groupPicker }
+        }
+        // 量整页（含切换栏）：分不分两栏看的是整页有多大；量切换栏里面那块的话，
+        // Duo 内屏只剩 500 出头，会被当成「太矮」
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+            width = size.width
+            height = size.height
         }
         .toolbar {
             if session.savingSettings {
@@ -168,7 +170,8 @@ struct SettingsPage: View {
     }
 
     /// 宽度够了才分左右两栏（iPad、Duo 内屏），和电脑上的设置页一致；单栏时最宽 680、居中。
-    /// 高度也要够：Duo 内屏扣掉状态栏、导航栏和切换栏之后约 560，手机横放只有 400 出头会挤成一团。
+    /// 高度也要够：Duo 内屏（整页 951×669）够，iPhone 横放只有 390 出头，两栏会挤成一团。
+    /// 量的是整页高度（含切换栏），量切换栏里面那块的话内屏只剩 500 出头，会被当成太矮。
     private var twoColumn: Bool {
         #if DEBUG
         // 截图用：模拟器不好转成横屏，-demoTwoCol 直接按两栏排
@@ -177,7 +180,7 @@ struct SettingsPage: View {
         return width >= twoColMin && height >= twoColMinHeight
     }
     private let twoColMin: CGFloat = 660
-    private let twoColMinHeight: CGFloat = 520
+    private let twoColMinHeight: CGFloat = 500
     private let twoColMax: CGFloat = 1360
 
     /// 当前栏和左右邻居先构建好（滑过去不会空一帧），更远、也从没显示过的先留空。
