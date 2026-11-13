@@ -65,8 +65,9 @@ extension RemoteSession {
         }
         s.wallsRev = "demo"
         s.heroName = s.walls.first?.name // 和真的桌面一样给一张横幅图
-        // 截图用：-demoQueue 在连着的状态下摆出「待补操作」（含待确认删除原图）和概览上的提醒
-        if ProcessInfo.processInfo.arguments.contains("-demoQueue") { s.seedQueuedForDemo() }
+        // 截图用：-demoQueue / -demoQueuePage 在连着的状态下摆出「待补操作」（含待确认删除原图）和概览上的提醒
+        if ProcessInfo.processInfo.arguments.contains("-demoQueue")
+            || ProcessInfo.processInfo.arguments.contains("-demoQueuePage") { s.seedQueuedForDemo() }
         // 截图用：-demo -demoOffline 显示「离线，显示的是上次同步的壁纸」的样子
         if ProcessInfo.processInfo.arguments.contains("-demoOffline") {
             s.connection = .offline("连不上这台 Mac：确认它没有睡眠、拾景开着并打开了「允许手机遥控」，手机和电脑在同一个网络里。")

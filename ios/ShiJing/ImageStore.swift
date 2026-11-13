@@ -93,13 +93,14 @@ final class ImageStore {
         cache.object(forKey: key(session, name, kind) as NSString)
     }
 
-    func load(_ session: RemoteSession, _ name: String, _ kind: ImageKind) async -> PlatformImage? {
+    /// `rev` 不传时按当前这一批（session.wallsRev）；「待补操作」里那些记下时属于上一批的条目要传自己那批的 rev。
+    func load(_ session: RemoteSession, _ name: String, _ kind: ImageKind, rev revOverride: String? = nil) async -> PlatformImage? {
         let k = key(session, name, kind)
         if let img = cache.object(forKey: k as NSString) { return img }
         if let t = inflight[k] { return await t.value }
         let demo = demo
         let offline = session.offline
-        let rev = session.wallsRev ?? ""
+        let rev = revOverride ?? session.wallsRev ?? ""
         let client = try? session.client()
         let t = Task<PlatformImage?, Never> {
             var data: Data?
@@ -578,6 +579,8 @@ struct WallImage: View {
     let wall: Wallpaper
     var kind: ImageKind = .thumb
     var contentMode: ContentMode = .fill
+    /// 传了就用这一批的缓存（「待补操作」里上一批的条目）；不传按当前批次
+    var rev: String?
     @State private var image: PlatformImage?
     /// 切回前台时重试一次（后台时正在下载的那张会被系统掐断，回来不然一直是灰的）
     @State private var retry = 0
@@ -594,10 +597,10 @@ struct WallImage: View {
                 if !session.offline { ProgressView() } // 离线时没有就是没有，别一直转圈
             }
         }
-        .task(id: wall.name + (session.offline ? "|offline" : "|online") + "|\(retry)") {
+        .task(id: wall.name + (session.offline ? "|offline" : "|online") + "|\(rev ?? "")|\(retry)") {
             image = ImageStore.shared.cached(session, wall.name, kind)
             if image == nil {
-                image = await ImageStore.shared.load(session, wall.name, kind)
+                image = await ImageStore.shared.load(session, wall.name, kind, rev: rev)
             }
         }
         .onChange(of: scenePhase) { _, phase in

@@ -53,9 +53,11 @@ struct RootView: View {
                     .tag(RootTab.overview)
                     NavigationStack {
                         #if DEBUG
-                        // 截图用：-demoLibraryPage 直接打开「图库目录」二级页
+                        // 截图用：-demoLibraryPage / -demoQueuePage 直接打开对应的二级页
                         if ProcessInfo.processInfo.arguments.contains("-demoLibraryPage") {
                             LibraryDirsView(session: session)
+                        } else if ProcessInfo.processInfo.arguments.contains("-demoQueuePage") {
+                            QueuedActionsView(session: session)
                         } else {
                             SettingsPage(session: session)
                         }
@@ -81,6 +83,7 @@ struct RootView: View {
             let args = ProcessInfo.processInfo.arguments
             if args.contains("-demoSettings") { tab = .settings }
             if args.contains("-demoLibraryPage") { tab = .settings }
+            if args.contains("-demoQueuePage") { tab = .settings }
             if args.contains("-demoRecords") { tab = .records }
             #endif
         }

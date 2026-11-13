@@ -17,6 +17,8 @@ extension RemoteSession {
         var at = Date()
         var wall: Wallpaper?
         var index: Int?
+        /// 记下时属于哪一批（缩略图 / 大图预览按这个 rev 找缓存；旧队列没有，退回当前批次）
+        var rev: String?
     }
 
     var offline: Bool { connection != .live }
@@ -41,9 +43,9 @@ extension RemoteSession {
         walls.remove(at: 4)
         walls.remove(at: 2)
         queued = [
-            OfflineAction(kind: .remove, name: r.name, source: r.source, wall: r, index: 2),
-            OfflineAction(kind: .exclude, name: e.name, source: e.source, wall: e, index: 4),
-            OfflineAction(kind: .delete, name: d.name, source: d.source, wall: d, index: 6),
+            OfflineAction(kind: .remove, name: r.name, source: r.source, wall: r, index: 2, rev: "demo"),
+            OfflineAction(kind: .exclude, name: e.name, source: e.source, wall: e, index: 4, rev: "demo"),
+            OfflineAction(kind: .delete, name: d.name, source: d.source, wall: d, index: 6, rev: "demo"),
         ]
     }
     #endif
@@ -71,7 +73,8 @@ extension RemoteSession {
     func enqueue(_ kind: OfflineAction.Kind, _ w: Wallpaper) {
         guard !queued.contains(where: { $0.name == w.name && $0.kind == kind }) else { return }
         let index = walls.firstIndex { $0.name == w.name }
-        queued.append(OfflineAction(kind: kind, name: w.name, source: w.source, wall: w, index: index))
+        queued.append(OfflineAction(kind: kind, name: w.name, source: w.source, wall: w,
+                                    index: index, rev: wallsRev))
         saveQueue()
         // 本地先去掉，界面跟着变；连上电脑后再真的移出 / 删除
         walls.removeAll { $0.name == w.name }

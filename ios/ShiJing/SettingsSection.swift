@@ -55,18 +55,15 @@ struct SettingsPage: View {
     @State private var draftW: Int?
     @State private var draftH: Int?
     @State private var resTask: Task<Void, Never>?
-    /// 待补操作里正在确认的「删除原图」
-    @State private var confirmDelete: RemoteSession.OfflineAction?
-    @State private var confirmAllDeletes = false
 
     var body: some View {
         MacPage(session: session, title: "设置") { state in
             #if DEBUG
             // 截图用：-demoOfflineCache 只摆离线这一组（设置页太长，模拟器里不好滚到最下面）；
-            // -demoQueue 只摆「待补操作」这一组（含待确认的删除原图）；
+            // -demoQueue 只摆「待补操作」这一组（点进去是专门的页面）；
             // -demoLibrary 只摆「图库 / 待删除」两组（配 -demoPending 看电脑上排队的删除）
             if ProcessInfo.processInfo.arguments.contains("-demoQueue") {
-                if !session.queued.isEmpty { offlineQueueSection }
+                if !session.queued.isEmpty { offlineQueueLink }
                 aboutSection(state)
             } else if ProcessInfo.processInfo.arguments.contains("-demoLibrary") {
                 if state.dirs != nil { libraryLink(state) }
@@ -74,7 +71,7 @@ struct SettingsPage: View {
                 aboutSection(state)
             } else if ProcessInfo.processInfo.arguments.contains("-demoOfflineCache") {
                 offlineSection
-                if !session.queued.isEmpty { offlineQueueSection }
+                if !session.queued.isEmpty { offlineQueueLink }
                 aboutSection(state)
             } else {
                 settingsContent(state)
@@ -87,27 +84,6 @@ struct SettingsPage: View {
             if session.savingSettings {
                 ToolbarItem(placement: .automatic) { ProgressView() } // 正在把改动发给电脑
             }
-        }
-        .confirmationDialog(
-            "删除这张原图？",
-            isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }),
-            titleVisibility: .visible,
-            presenting: confirmDelete
-        ) { a in
-            Button("删除原图", role: .destructive) { Task { await session.confirmQueuedDelete(a) } }
-            Button("取消", role: .cancel) {}
-        } message: { a in
-            Text("会从图库里删除 \(a.source ?? a.name)，不可撤销，会记进电脑上的删除记录。")
-        }
-        .confirmationDialog(
-            "确认删除 \(session.queuedDeletes.count) 张原图？",
-            isPresented: $confirmAllDeletes,
-            titleVisibility: .visible
-        ) {
-            Button("全部删除", role: .destructive) { Task { await session.confirmAllQueuedDeletes() } }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("逐张从图库里删除，不可撤销。已经不在这一批壁纸里的会跳过。")
         }
     }
 
@@ -136,7 +112,7 @@ struct SettingsPage: View {
             }
         }
         offlineSection
-        if !session.queued.isEmpty { offlineQueueSection }
+        if !session.queued.isEmpty { offlineQueueLink }
         aboutSection(state)
     }
 
@@ -339,64 +315,27 @@ struct SettingsPage: View {
         }
     }
 
-    /// 离线时记下的整理：逐条看得到、可以取消。「移出」「不再选」连上电脑后自动补上；
-    /// 「删除原图」不可撤销，连上后还要在这里逐张（或全部）确认才会删。
-    private var offlineQueueSection: some View {
+    /// 离线时记下的整理：这里只放入口，点开是专门的页面（缩略图预览、逐张确认删除）。
+    private var offlineQueueLink: some View {
+        let n = session.queued.count
         let deletes = session.queuedDeletes.count
         return Section {
-            ForEach(session.queued) { a in
-                HStack(spacing: 12) {
-                    Image(systemName: queueIcon(a.kind))
-                        .foregroundStyle(a.kind == .delete ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(queueLabel(a.kind)).font(.subheadline)
-                            .foregroundStyle(a.kind == .delete ? AnyShapeStyle(Color.red) : AnyShapeStyle(.primary))
-                        Text(a.name).font(.footnote).foregroundStyle(.secondary)
-                            .lineLimit(1).truncationMode(.middle)
-                        Text(a.at, format: .dateTime.month().day().hour().minute())
-                            .font(.caption2).foregroundStyle(.tertiary)
-                    }
-                    Spacer()
-                    if a.kind == .delete {
-                        if session.connection == .live {
-                            Button("确认删除", role: .destructive) { confirmDelete = a }
-                                .buttonStyle(.borderless)
-                                .disabled(session.state?.running == true)
-                        } else {
-                            Text("连上后确认").font(.caption).foregroundStyle(.tertiary)
+            NavigationLink {
+                QueuedActionsView(session: session)
+            } label: {
+                LabeledContent {
+                    Text(deletes > 0 ? "\(n) 项 · 其中 \(deletes) 张等确认删除" : "\(n) 项")
+                } label: {
+                    HStack(spacing: 8) {
+                        if deletes > 0 {
+                            Image(systemName: "trash").foregroundStyle(.red)
                         }
+                        Text("待补操作")
                     }
-                    Button("取消") { session.cancelQueued(a) }
-                        .buttonStyle(.borderless)
                 }
             }
-            if deletes > 0, session.connection == .live {
-                Button("全部确认删除（\(deletes) 张）", role: .destructive) { confirmAllDeletes = true }
-                    .disabled(session.state?.running == true)
-            }
-            if session.queued.count > 1 {
-                Button("全部取消", role: .destructive) { session.cancelAllQueued() }
-            }
-        } header: {
-            Text("待补操作（\(session.queued.count)）")
         } footer: {
-            Text("离线时记下的整理：「移出」「不再选」连上电脑后自动补上；「删除原图」不可撤销，连上后还要在这里逐张（或全部）确认才会删除。取消会把那张放回列表原来的位置。")
-        }
-    }
-
-    private func queueLabel(_ kind: RemoteSession.OfflineAction.Kind) -> String {
-        switch kind {
-        case .remove: "移出"
-        case .exclude: "不再选它"
-        case .delete: "删除原图（待确认）"
-        }
-    }
-
-    private func queueIcon(_ kind: RemoteSession.OfflineAction.Kind) -> String {
-        switch kind {
-        case .remove: "minus.circle"
-        case .exclude: "nosign"
-        case .delete: "trash"
+            Text("离线时记下的整理：「移出」「不再选」连上电脑后自动补上；「删除原图」不可撤销，连上后还要逐张（或全部）确认才会删除。")
         }
     }
 

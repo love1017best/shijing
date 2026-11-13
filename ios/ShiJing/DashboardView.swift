@@ -467,21 +467,18 @@ struct DashboardView: View {
             let n = session.queuedDeletes.count
             let live = session.connection == .live
             Section {
-                Label {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("\(n) 张原图等你确认删除").font(.subheadline.bold())
-                        Text(live ? "在「设置 › 待补操作」里逐张或全部确认后才会删除，取消会把那张放回列表。"
-                                  : "连上电脑后到「设置 › 待补操作」里逐张或全部确认后才会删除。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "trash").foregroundStyle(.red)
-                }
-                if live {
-                    Button {
-                        NotificationRouter.shared.tab = .settings
-                    } label: {
-                        Label("去确认", systemImage: "checkmark.circle")
+                NavigationLink {
+                    QueuedActionsView(session: session)
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(n) 张原图等你确认删除").font(.subheadline.bold())
+                            Text(live ? "点开看缩略图，逐张或全部确认后才会删除；取消会把那张放回列表。"
+                                      : "连上电脑后才能确认删除，点开可以先看记下的是哪几张。")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "trash").foregroundStyle(.red)
                     }
                 }
             }
