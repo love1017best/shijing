@@ -549,6 +549,9 @@ private struct PreviewPage: View {
     @State private var image: PlatformImage?
     /// 加载过了（成功或失败）：失败时给一句明确的话，不再一直转圈
     @State private var tried = false
+    /// 重新加载一次（切到后台再回来时，正在下载的这次会被系统掐断，回来要重试）
+    @State private var retry = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -586,12 +589,16 @@ private struct PreviewPage: View {
                     .padding(.bottom, 12)
             }
         }
-        .task(id: wall.name + (session.offline ? "|offline" : "|online")) {
+        .task(id: wall.name + (session.offline ? "|offline" : "|online") + "|\(retry)") {
             tried = false
             if bigImage == nil {
                 image = await ImageStore.shared.load(session, wall.name, .image)
             }
             tried = true
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // 切回前台：上次正在下载的话可能被系统掐断、落成「读不了这张图」，重试一次
+            if phase == .active, tried, bigImage == nil { retry += 1 }
         }
     }
 

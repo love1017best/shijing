@@ -145,6 +145,16 @@ enum ImageKind: String, CaseIterable {
         case .original: "original"
         }
     }
+
+    /// 有原图缓存时，就按这个宽度在本地缩出来（原图本身不缩，返回 nil）。别为了一张图再联网。
+    var targetWidth: Int? {
+        switch self {
+        case .thumb: 360
+        case .hero: 1600
+        case .image: 2732
+        case .original: nil
+        }
+    }
 }
 
 struct ServerInfo: Codable {

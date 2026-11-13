@@ -321,12 +321,13 @@ private struct OfflineCacheRow: View {
 
     private func refresh() {
         let rev = session.wallsRev ?? ""
+        let names = session.walls.map(\.name)
         Task {
             let (n, c) = await Task.detached(priority: .utility) {
                 // 整个目录减去原图，就是缩略图 / 横幅 / 2732 大图占的（原图在下面单独一行）
                 let originals = rev.isEmpty ? 0 : ImageStore.cachedSize(rev: rev, kind: .original)
                 return (max(0, ImageStore.diskUsage() - originals),
-                        rev.isEmpty ? 0 : ImageStore.cachedCount(rev: rev, kind: .image))
+                        rev.isEmpty ? 0 : ImageStore.viewableCount(rev: rev, names: names))
             }.value
             size = n
             cached = c

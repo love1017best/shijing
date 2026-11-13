@@ -104,14 +104,17 @@ final class ImageStore {
         let t = Task<PlatformImage?, Never> {
             var data: Data?
             var original: URL?
+            var originalWidth = 0
             if demo {
                 data = nil
             } else if let d = await Task.detached(priority: .userInitiated, operation: { Self.readDisk(rev, name, kind) }).value {
                 data = d
-            } else if kind == .image, let f = ImageStore.cachedOriginal(rev: rev, name: name) {
-                // 设置里存过原图、但这一批的大图还没缓存：用原图缩到展示尺寸解码
-                // （按文件读，不整份读进内存；原图整张解码会爆内存）
+            } else if let w = (offline || kind == .image) ? kind.targetWidth : nil,
+                      let f = ImageStore.cachedOriginal(rev: rev, name: name) {
+                // 手机上存过这张的原图：大图不用再下载（离线时缩略图、横幅也拿原图缩）。
+                // 在线时网格的缩略图还是照常下载，一张才几十 KB，从几十 MB 的原图现缩反而拖慢滚动
                 original = f
+                originalWidth = w
             } else if offline {
                 data = nil // 连不上电脑：只认磁盘上缓存过的，别干等网络超时
             } else {
@@ -123,7 +126,7 @@ final class ImageStore {
             }
             return await Task.detached(priority: .userInitiated) {
                 if demo { return Self.demoImage(name, large: kind.isLarge) }
-                if let original { return Self.downsampleFile(original, maxPixel: Self.downsampleWidth) }
+                if let original { return Self.downsampleFile(original, maxPixel: originalWidth) }
                 guard let data else { return nil }
                 return Self.decode(data)
             }.value
@@ -136,9 +139,6 @@ final class ImageStore {
         }
         return img
     }
-
-    /// 大图缓存的目标宽度（和桌面的 remoteImageWidth 一致）。
-    static let downsampleWidth = 2732
 
     // MARK: 磁盘缓存
 
@@ -343,6 +343,8 @@ final class ImageStore {
 
     private nonisolated static func prefetchOne(_ client: APIClient, _ rev: String, _ name: String, _ kind: ImageKind) async -> Int64 {
         if readDisk(rev, name, kind) != nil { return 0 }
+        // 手机上存过这张的原图：大图能本地缩出来，不用再下载（省流量）。缩略图、横幅太小，照常下
+        if kind == .image, cachedOriginal(rev: rev, name: name) != nil { return 0 }
         guard let data = try? await client.imageData(name, kind: kind) else { return 0 }
         if Task.isCancelled { return 0 } // 换批了：这份属于上一批，别写回去
         writeDisk(rev, name, kind, data)
@@ -401,6 +403,19 @@ final class ImageStore {
         let prefix = kind.cachePrefix + "-"
         let items = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
         return items.filter { $0.hasPrefix(prefix) }.count
+    }
+
+    /// 这一批里离线能看到大图的张数：有 2732 宽的预览图或者原图都算（原图能本地缩出来）。
+    nonisolated static func viewableCount(rev: String, names: [String]) -> Int {
+        guard let dir = diskDir, let folder = revFolder(rev) else { return 0 }
+        let path = dir.appending(path: folder, directoryHint: .isDirectory).path
+        let files = Set((try? FileManager.default.contentsOfDirectory(atPath: path)) ?? [])
+        let imagePrefix = ImageKind.image.cachePrefix + "-"
+        let originalPrefix = ImageKind.original.cachePrefix + "-"
+        return names.reduce(0) { n, name in
+            let s = safeName(name)
+            return n + (files.contains(imagePrefix + s) || files.contains(originalPrefix + s) ? 1 : 0)
+        }
     }
 
     /// 清掉这一批的预览图（缩略图、横幅、2732 宽的大图），内存里的一起。
@@ -564,6 +579,9 @@ struct WallImage: View {
     var kind: ImageKind = .thumb
     var contentMode: ContentMode = .fill
     @State private var image: PlatformImage?
+    /// 切回前台时重试一次（后台时正在下载的那张会被系统掐断，回来不然一直是灰的）
+    @State private var retry = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -576,11 +594,14 @@ struct WallImage: View {
                 if !session.offline { ProgressView() } // 离线时没有就是没有，别一直转圈
             }
         }
-        .task(id: wall.name + (session.offline ? "|offline" : "|online")) {
+        .task(id: wall.name + (session.offline ? "|offline" : "|online") + "|\(retry)") {
             image = ImageStore.shared.cached(session, wall.name, kind)
             if image == nil {
                 image = await ImageStore.shared.load(session, wall.name, kind)
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, image == nil { retry += 1 }
         }
     }
 
