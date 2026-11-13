@@ -76,6 +76,7 @@ struct DashboardView: View {
                             .listRowBackground(Color.clear)
                     }
                     signingSection
+                    pendingSection
                     wallsSection(rows: 3)
                     lastRunSection(state)
                     overviewSection(state)
@@ -100,6 +101,7 @@ struct DashboardView: View {
                 List {
                     connectionSection
                     signingSection
+                    pendingSection
                     wallsSection(rows: 3)
                 }
                 // 列表的边距不算安全区（内屏横放时右边有传感器区），自己加上，和顶部卡片对齐
@@ -441,6 +443,24 @@ struct DashboardView: View {
 
     private func overviewSection(_ s: RemoteState) -> some View {
         StatusSection(state: s)
+    }
+
+    /// 图库（NAS）没连上时删的原图没法立刻删，电脑那边排着队：放在横幅下面提醒一下，
+    /// 图库连上后电脑会自动删掉（和电脑概览里的「待删除」条一致）。
+    @ViewBuilder private var pendingSection: some View {
+        if let p = session.state?.pending, p > 0 {
+            Section {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(p) 项删除原图在电脑上排队").font(.subheadline.bold())
+                        Text("图库（NAS）连上电脑后自动删除。想取消的话，在电脑概览的待删除条里可以逐条取消。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "clock").foregroundStyle(.orange)
+                }
+            }
+        }
     }
 
     /// 免费签名快到期（剩不到 2 天）时顶部提醒重新安装。

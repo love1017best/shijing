@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 import UserNotifications
 
@@ -75,6 +76,12 @@ struct RootView: View {
             deliverPendingWall()
         }
         .onChange(of: store.selectedID) { syncSession() }
+        // 点开「换完了」「签名快到期」这些通知：切到对应的标签（通知里带 target）
+        .onChange(of: NotificationRouter.shared.tab, initial: true) { _, target in
+            guard let target else { return }
+            tab = target
+            NotificationRouter.shared.tab = nil
+        }
         .onChange(of: scenePhase) { _, phase in
             #if DEBUG
             if RemoteSession.demoMode != nil { return }
@@ -121,6 +128,14 @@ struct RootView: View {
     }
 }
 
+/// 点开通知时要切到哪个标签（换完 → 概览；签名到期 → 设置）。通知的回调不保证在主线程、也不保证
+/// RootView 已经显示，所以先记在这里，RootView 出现时（initial: true）再消费。
+@Observable @MainActor
+final class NotificationRouter {
+    static let shared = NotificationRouter()
+    var tab: RootTab?
+}
+
 /// 本地通知：换完了、签名快到期。权限在第一次从手机换一批时再问（不一上来就弹）。
 @MainActor
 enum Notifications {
@@ -145,10 +160,22 @@ enum Notifications {
         }
     }
 
-    /// App 在前台时也显示通知横幅（签名到期提醒；换完的通知在前台本来就不发）。
+    /// App 在前台时也显示通知横幅（签名到期提醒；换完的通知在前台本来就不发），
+    /// 点开通知时按 userInfo 里的 target 切标签。
     private final class ForegroundDelegate: NSObject, UNUserNotificationCenterDelegate {
         func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
             [.banner, .sound]
+        }
+
+        func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+            let target = response.notification.request.content.userInfo["target"] as? String
+            await MainActor.run {
+                switch target {
+                case "settings": NotificationRouter.shared.tab = .settings
+                case "overview": NotificationRouter.shared.tab = .overview
+                default: break
+                }
+            }
         }
     }
 }

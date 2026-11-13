@@ -45,6 +45,8 @@ enum RunNotifier {
         }
         c.sound = .default
         c.threadIdentifier = "run"
+        // 点开这条通知时切到概览（看这一批换上了什么）
+        c.userInfo = ["target": "overview"]
         let req = UNNotificationRequest(identifier: "run-\(Int(l.at))", content: c, trigger: nil)
         UNUserNotificationCenter.current().add(req)
     }

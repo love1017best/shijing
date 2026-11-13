@@ -93,10 +93,13 @@ struct APIClient: Sendable {
         _ = try await send(request("POST", "api/pair/start", body: ["device": device]), as: R.self)
     }
 
-    /// 输入配对码，成功时返回令牌和电脑名。
-    func pairFinish(code: String) async throws -> (token: String, name: String) {
+    /// 输入配对码，成功时返回令牌和电脑名。扫码配对时带上自己的设备名（电脑那边的请求是它自己发起的，
+    /// 不知道是哪台手机扫的）。
+    func pairFinish(code: String, device: String? = nil) async throws -> (token: String, name: String) {
         struct R: Decodable { var token: String; var name: String }
-        let r = try await send(request("POST", "api/pair/finish", body: ["code": code]), as: R.self)
+        var body: [String: Any] = ["code": code]
+        if let device, !device.isEmpty { body["device"] = device }
+        let r = try await send(request("POST", "api/pair/finish", body: body), as: R.self)
         return (r.token, r.name)
     }
 

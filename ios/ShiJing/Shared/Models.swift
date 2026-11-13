@@ -41,6 +41,8 @@ struct RemoteState: Codable, Equatable {
     var undoName: String?
     /// 「不再选」名单里有几张
     var excluded: Int?
+    /// 图库没连上时在电脑上排队的删除原图，图库连上后自动执行（旧版桌面端没有）
+    var pending: Int?
 
     var nextAutoDate: Date? { nextAuto.map { Date(timeIntervalSince1970: $0) } }
 }

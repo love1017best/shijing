@@ -5,7 +5,7 @@ struct StatusSection: View {
     let state: RemoteState
 
     var body: some View {
-        Section("状态") {
+        Section {
             LabeledContent("壁纸文件夹", value: state.dest)
             LabeledContent("现在有", value: "\(state.wallpapers) 张")
             LabeledContent("每次换", value: "\(state.settings?.sampleCount ?? state.sampleCount) 张")
@@ -15,6 +15,8 @@ struct StatusSection: View {
                     Text(next, format: .dateTime.month().day().hour().minute())
                 }
             }
+        } header: {
+            Text("状态")
         }
     }
 }

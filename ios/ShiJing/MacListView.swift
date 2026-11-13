@@ -148,6 +148,7 @@ struct NearbySection: View {
     let discovery: Discovery
     @State private var pairing: PairTarget?
     @State private var manual = false
+    @State private var scanning = false
 
     private var unpaired: [Discovery.Found] {
         discovery.found.filter { store.mac(serviceName: $0.name) == nil }
@@ -168,6 +169,7 @@ struct NearbySection: View {
                     Text("正在局域网里找拾景…").foregroundStyle(.secondary)
                 }
             }
+            Button("扫描电脑上的二维码…", systemImage: "qrcode.viewfinder") { scanning = true }
             Button("手动输入地址…", systemImage: "keyboard") { manual = true }
         } header: {
             Text("附近的 Mac")
@@ -175,8 +177,11 @@ struct NearbySection: View {
             if let p = discovery.problem {
                 Text(p)
             } else {
-                Text("电脑上的拾景要打开「设置 › 手机遥控」，手机和电脑连同一个网络。")
+                Text("电脑上的拾景要打开「设置 › 手机遥控」，手机和电脑连同一个网络。找不到时可以在电脑上点「显示二维码」，直接扫一扫。")
             }
+        }
+        .fullScreenCoverCompat(isPresented: $scanning) {
+            QRScanView(store: store)
         }
         .sheet(item: $pairing) { target in
             PairView(target: target, store: store)

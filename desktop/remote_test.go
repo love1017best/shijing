@@ -193,6 +193,55 @@ func TestRemotePairRejectedOnDesktop(t *testing.T) {
 	}
 }
 
+func TestRemotePairByQRCode(t *testing.T) {
+	if len(localIPs()) == 0 {
+		t.Skip("这台机器没有局域网 IPv4 地址")
+	}
+	h := newRemoteHarness(t)
+	click(t, h.tt, "设置")
+	h.tt.SetSize(1040, 1800) // 遥控分组在设置页最下面
+	h.tt.Frame()
+	click(t, h.tt, "显示二维码")
+	h.tt.Frame()
+	if !h.qrOpen {
+		t.Fatalf("点了显示二维码但弹层没打开：%s", h.toast)
+	}
+	if !strings.HasPrefix(h.qrURL, "shijing://pair?") || !strings.Contains(h.qrURL, "c="+h.qrCode) {
+		t.Fatalf("二维码里的地址 = %q", h.qrURL)
+	}
+	if _, ok := h.tt.Access("配对二维码"); !ok {
+		t.Fatal("弹层里没有二维码")
+	}
+	// 扫码发起的配对不用在电脑上再确认：不该同时弹出「请求遥控」那个配对码弹层
+	if _, _, ok := h.remote.currentPair(); ok || h.pairOpen {
+		t.Fatal("扫码配对不该再弹配对码确认框")
+	}
+	pin, ok := h.remote.qrPair()
+	if !ok {
+		t.Fatal("没有正在进行的扫码配对")
+	}
+	status, data := h.do(t, "POST", "/api/pair/finish", "", map[string]string{"code": pin, "device": "扫描的手机"})
+	if status != 200 {
+		t.Fatalf("pair/finish = %d %v", status, data)
+	}
+	h.tt.Frame()
+	if h.qrOpen {
+		t.Fatal("配对成功后二维码弹层应该收起")
+	}
+	found := false
+	for _, d := range h.remote.deviceList() {
+		if d.Name == "扫描的手机" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("配对后设备列表里没有这台手机")
+	}
+	if tok, _ := data["token"].(string); tok == "" {
+		t.Fatalf("配对结果 = %v", data)
+	}
+}
+
 func TestRemoteRunWithoutDeletingAndStop(t *testing.T) {
 	h := newRemoteHarness(t)
 	h.cfg.DeleteDuringFilter = true

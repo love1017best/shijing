@@ -183,6 +183,10 @@ type app struct {
 	remote     *remoteServer // 手机遥控服务，只在设置里打开时监听
 	pairOpen   bool          // 配对码弹层是否显示
 	pairCode   string        // 弹层显示的是哪一个配对码（新的请求来了重新弹出）
+	qrOpen     bool          // 「扫码配对」二维码弹层是否显示
+	qrCode     string        // 二维码里那个配对码（配对成功后收起弹层）
+	qrBitmap   *ui.Bitmap    // 二维码图
+	qrURL      string        // 二维码里的地址（shijing://pair?…）
 
 	pendMu    sync.Mutex
 	pendLog   []string
@@ -386,7 +390,7 @@ func (a *app) startRunWith(o runOpts) {
 				a.lastGood = &sum
 			}
 			a.saveUIState()
-			a.wallsGen++ // 壁纸文件夹换了一批，重新读缩略图
+			a.wallsGen++       // 壁纸文件夹换了一批，重新读缩略图
 			a.loadWallpapers() // 不等下一帧：桌面窗口关着时 view 不重画（手机靠这次重读拿到新列表）
 			switch {
 			case err == nil:

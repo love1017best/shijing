@@ -33,6 +33,8 @@ extension RemoteSession {
                                            deleteDuringFilter: true, preferUnseen: true, refreshWallpaper: true)
         s.state?.undoName = running ? nil : "风景-京都-0012.jpg"
         s.state?.excluded = 12
+        // 截图用：-demoPending 摆出「图库没连上，删除原图在电脑上排队」的样子
+        if ProcessInfo.processInfo.arguments.contains("-demoPending") { s.state?.pending = 2 }
         s.connection = .live
         let places = ["冰岛", "阿尔卑斯", "京都", "黄石", "新西兰", "巴塔哥尼亚", "挪威", "托斯卡纳", "大理", "落基山"]
         s.walls = (0..<300).map { i in

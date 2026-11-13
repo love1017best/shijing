@@ -37,6 +37,8 @@ enum SigningExpiry {
         c.title = "拾景明天就打不开了"
         c.body = "免费签名 7 天到期（\(date.formatted(.dateTime.month().day().hour().minute()))）。连上电脑重新安装一次就能续上。"
         c.sound = .default
+        // 点开这条通知时切到设置（「关于」里能看到签名日期和重装的说明）
+        c.userInfo = ["target": "settings"]
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
         center.add(UNNotificationRequest(identifier: "signing-expiry", content: c,
                                          trigger: UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)))

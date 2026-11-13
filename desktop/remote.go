@@ -57,6 +57,7 @@ type pairRequest struct {
 	code    string
 	expires time.Time
 	fails   int
+	qr      bool // 电脑上显示二维码发起的（手机扫码直接提交，不用在电脑上点确认）
 }
 
 type remoteServer struct {
@@ -67,19 +68,21 @@ type remoteServer struct {
 	advertise func(name string, port int, txt []string) (stop func())
 	listen    func() (net.Listener, error)
 
-	mu        sync.Mutex
-	enabled   bool // 上一次 setEnabled 的值，只在变化时开关服务
-	devices   []remoteDevice
-	online    map[string]int // 设备名 → 正连着的事件流个数
-	pair      *pairRequest
-	state     []byte
-	subs      map[chan struct{}]struct{}
-	srv       *http.Server
-	port      int
-	listenErr string
-	stopAd    func()
-	walls     wallsSnapshot // 壁纸列表（remotewalls.go），主线程发布
-	decodeSem chan struct{} // 限制同时解码的大图张数
+	mu      sync.Mutex
+	enabled bool // 上一次 setEnabled 的值，只在变化时开关服务
+	devices []remoteDevice
+	online  map[string]int // 设备名 → 正连着的事件流个数
+	pair    *pairRequest
+	// pairedCode 是最近一次配对成功的 code：电脑上显示二维码的弹层靠它收起
+	pairedCode string
+	state      []byte
+	subs       map[chan struct{}]struct{}
+	srv        *http.Server
+	port       int
+	listenErr  string
+	stopAd     func()
+	walls      wallsSnapshot // 壁纸列表（remotewalls.go），主线程发布
+	decodeSem  chan struct{} // 限制同时解码的大图张数
 }
 
 func newRemoteServer(a *app, file string) *remoteServer {
@@ -219,14 +222,45 @@ func (rs *remoteServer) deviceFor(r *http.Request) string {
 
 // ── 配对 ──────────────────────────────────────────────────────────────────
 
-// currentPair 是正在等桌面这边看的配对请求（过期的不算）。
+// currentPair 是正在等桌面这边看的配对请求（过期的不算）。扫码发起的不算：那一种是电脑主动开的，不用再确认。
 func (rs *remoteServer) currentPair() (device, code string, ok bool) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	if p := rs.pair; p != nil && time.Now().Before(p.expires) {
+	if p := rs.pair; p != nil && !p.qr && time.Now().Before(p.expires) {
 		return p.device, p.code, true
 	}
 	return "", "", false
+}
+
+// qrPair 是电脑上显示二维码的那个配对码（过期的不算）。
+func (rs *remoteServer) qrPair() (code string, ok bool) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if p := rs.pair; p != nil && p.qr && time.Now().Before(p.expires) {
+		return p.code, true
+	}
+	return "", false
+}
+
+// startPair 建一个配对请求。qr 为 true 时是电脑上显示二维码发起的。
+func (rs *remoteServer) startPair(device string, qr bool) pairRequest {
+	rs.mu.Lock()
+	rs.pair = &pairRequest{device: device, code: randomCode(), expires: time.Now().Add(pairCodeTTL), qr: qr}
+	p := *rs.pair
+	rs.mu.Unlock()
+	time.AfterFunc(pairCodeTTL+time.Second, rs.redraw) // 过期后画一帧让弹层消失
+	return p
+}
+
+// takePaired 判断 code 这次配对是不是刚成功（每次成功只回答一次，弹层据此收起）。
+func (rs *remoteServer) takePaired(code string) bool {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if code != "" && rs.pairedCode == code {
+		rs.pairedCode = ""
+		return true
+	}
+	return false
 }
 
 // cancelPair 取消正在进行的配对（桌面上点了「拒绝」）。
@@ -355,29 +389,33 @@ func (rs *remoteServer) handlePairStart(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "请求格式不对")
 		return
 	}
-	dev := strings.TrimSpace(body.Device)
-	if dev == "" {
-		dev = "iPhone"
-	}
-	if r := []rune(dev); len(r) > 40 {
-		dev = string(r[:40])
-	}
-	rs.mu.Lock()
-	rs.pair = &pairRequest{device: dev, code: randomCode(), expires: time.Now().Add(pairCodeTTL)}
-	rs.mu.Unlock()
-	// 弹出配对码；过期后再画一帧让弹层消失
+	rs.startPair(sanitizeDevice(body.Device), false)
+	// 弹出配对码
 	rs.a.update(func() {
 		if rs.a.showWindow != nil {
 			rs.a.showWindow()
 		}
 	})
-	time.AfterFunc(pairCodeTTL+time.Second, rs.redraw)
 	writeJSON(w, http.StatusOK, map[string]any{"expires_in": int(pairCodeTTL.Seconds())})
+}
+
+// sanitizeDevice 是手机上来的设备名：空的用 iPhone，太长截断。
+func sanitizeDevice(dev string) string {
+	dev = strings.TrimSpace(dev)
+	if dev == "" {
+		return "iPhone"
+	}
+	if r := []rune(dev); len(r) > 40 {
+		dev = string(r[:40])
+	}
+	return dev
 }
 
 func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Code string `json:"code"`
+		// Device 只在扫码配对时带：二维码里的请求是电脑发起的，手机报上自己的名字
+		Device string `json:"device"`
 	}
 	if err := readBody(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "请求格式不对")
@@ -403,16 +441,20 @@ func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusForbidden, msg)
 		return
 	}
+	name := p.device
+	if d := strings.TrimSpace(body.Device); d != "" {
+		name = sanitizeDevice(d)
+	}
 	tok := randomToken()
 	// 同名的手机重新配对时替换掉旧的那条，免得越积越多
-	rs.devices = slices.DeleteFunc(rs.devices, func(d remoteDevice) bool { return d.Name == p.device })
-	rs.devices = append(rs.devices, remoteDevice{Name: p.device, TokenHash: hashToken(tok), PairedAt: time.Now()})
+	rs.devices = slices.DeleteFunc(rs.devices, func(d remoteDevice) bool { return d.Name == name })
+	rs.devices = append(rs.devices, remoteDevice{Name: name, TokenHash: hashToken(tok), PairedAt: time.Now()})
 	devs := slices.Clone(rs.devices)
-	dev := p.device
+	rs.pairedCode = p.code
 	rs.pair = nil
 	rs.mu.Unlock()
 	rs.saveDevices(devs)
-	rs.a.update(func() { rs.a.toast = fmt.Sprintf("已和「%s」配对", dev) })
+	rs.a.update(func() { rs.a.toast = fmt.Sprintf("已和「%s」配对", name) })
 	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "name": rs.host})
 }
 

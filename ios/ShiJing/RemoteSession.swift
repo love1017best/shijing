@@ -388,9 +388,27 @@ final class RemoteSession {
     }
 
     /// 移出壁纸文件夹；exclude 时以后的采样也跳过这张原图。成功返回 true。
+    /// refresh 为 false 时先不在本地重新拉列表（多选批量整理时最后只拉一次）。
     @discardableResult
-    func removeWallpaper(_ w: Wallpaper, exclude: Bool) async -> Bool {
-        await wallAct(w, kind: exclude ? .exclude : .remove) { try await $0.removeWallpaper(w.name, exclude: exclude) }
+    func removeWallpaper(_ w: Wallpaper, exclude: Bool, refresh: Bool = true) async -> Bool {
+        await wallAct(w, kind: exclude ? .exclude : .remove, refresh: refresh) { try await $0.removeWallpaper(w.name, exclude: exclude) }
+    }
+
+    /// 一次整理多张（「全部壁纸」页多选）：逐张调接口，失败就停（错误已经弹出来了），最后只重新拉一次列表。
+    /// 成功返回处理了几张。
+    @discardableResult
+    func removeWallpapers(_ items: [Wallpaper], exclude: Bool) async -> Int {
+        guard !items.isEmpty else { return 0 }
+        var done = 0
+        for w in items {
+            if Task.isCancelled { break }
+            guard await removeWallpaper(w, exclude: exclude, refresh: false) else { break }
+            done += 1
+        }
+        // 离线时记的都是队列里的操作，不用（也拉不到）列表
+        if !offline { await refreshWalls() }
+        if done > 0 { Task { await refreshRecordsCache() } }
+        return done
     }
 
     /// 删除图库里的原图（界面上已经二次确认过）。离线时不能排队（不可撤销，等连上再做），
@@ -401,10 +419,16 @@ final class RemoteSession {
             actionError = "连不上电脑时不能删除原图（不可撤销）。可以先移出或者「不再选它」，连上电脑后自动补上。"
             return false
         }
-        return await wallAct(w, kind: .remove) { try await $0.deleteOriginal(w.name) }
+        let before = state?.pending ?? 0
+        let ok = await wallAct(w, kind: .remove) { try await $0.deleteOriginal(w.name) }
+        // 图库没连上：电脑把这次删除排队了，别让手机上看起来像已经删掉
+        if ok, (state?.pending ?? 0) > before {
+            showNotice("图库没连上，这次删除已排队")
+        }
+        return ok
     }
 
-    private func wallAct(_ w: Wallpaper, kind: OfflineAction.Kind, _ op: (APIClient) async throws -> RemoteState) async -> Bool {
+    private func wallAct(_ w: Wallpaper, kind: OfflineAction.Kind, refresh: Bool = true, _ op: (APIClient) async throws -> RemoteState) async -> Bool {
         acting = w.name
         defer { acting = nil }
         #if DEBUG
@@ -422,7 +446,7 @@ final class RemoteSession {
             // 先在本地去掉，不用等重新拉列表
             walls.removeAll { $0.name == w.name }
             remember(wallsChanged: true)
-            await refreshWalls()
+            if refresh { await refreshWalls() }
             // 删除记录 / 不再选名单变了：顺手更新手机上存的那份，断了也能看
             Task { await refreshRecordsCache() }
             return true
