@@ -1,4 +1,10 @@
 import SwiftUI
+import UIKit
+
+/// 这台设备（iPhone / iPad）：设置页的分类名和「关于」里用它，平板上别写成「手机」。
+enum ThisDevice {
+    static var label: String { "这台 " + UIDevice.current.localizedModel }
+}
 
 /// 概览里的「状态」：只读，和电脑概览顶部的摘要条对应（壁纸文件夹、张数、图库、下次自动换）。改设置去「设置」页。
 struct StatusSection: View {
@@ -44,8 +50,9 @@ struct MacPage<Content: View>: View {
     }
 }
 
-/// 「设置」页：电脑上常调的几项在手机上直接改（改完电脑上的设置页同步变，和在电脑上改一样自动保存）。
-/// 分组和电脑上的设置页一致：采样、筛选、自动换壁纸、系统，最后是关于。旧版桌面端不推 settings，就只读显示。
+/// 「设置」页：分两类——「电脑上的拾景」（改的是电脑，改完电脑上的设置页同步变、自动保存）
+/// 和「这台手机」（离线缓存、待补操作这些手机自己的东西）。顶部用分段控件切换，选过哪一类会记住。
+/// 旧版桌面端不推 settings，电脑那一类就只读显示。
 struct SettingsPage: View {
     let session: RemoteSession
     /// 每次张数的草稿：步进器连点时先改这里，停手 0.8 秒再发给电脑
@@ -55,6 +62,9 @@ struct SettingsPage: View {
     @State private var draftW: Int?
     @State private var draftH: Int?
     @State private var resTask: Task<Void, Never>?
+    /// 设置分两类：mac = 电脑上的拾景（遥控改的），phone = 这台手机（离线缓存等）
+    @AppStorage("settingsGroup") private var groupRaw = "mac"
+    private var group: SettingsGroup { SettingsGroup(rawValue: groupRaw) ?? .mac }
 
     var body: some View {
         MacPage(session: session, title: "设置") { state in
@@ -74,21 +84,38 @@ struct SettingsPage: View {
                 if !session.queued.isEmpty { offlineQueueLink }
                 aboutSection(state)
             } else {
-                settingsContent(state)
+                switch group {
+                case .mac: macContent(state)
+                case .phone: phoneContent(state)
+                }
             }
             #else
-            settingsContent(state)
+            switch group {
+            case .mac: macContent(state)
+            case .phone: phoneContent(state)
+            }
             #endif
         }
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // 两类切换固定在导航栏中间，滚到哪儿都看得到
+            ToolbarItem(placement: .principal) {
+                Picker("设置分类", selection: $groupRaw) {
+                    Text("电脑上的拾景").tag(SettingsGroup.mac.rawValue)
+                    Text(ThisDevice.label).tag(SettingsGroup.phone.rawValue)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 320)
+            }
             if session.savingSettings {
                 ToolbarItem(placement: .automatic) { ProgressView() } // 正在把改动发给电脑
             }
         }
     }
 
+    /// 电脑上的拾景：遥控改的都是电脑上的设置和状态。
     @ViewBuilder
-    private func settingsContent(_ state: RemoteState) -> some View {
+    private func macContent(_ state: RemoteState) -> some View {
         if session.connection != .live {
             Section {
                 Label {
@@ -111,8 +138,17 @@ struct SettingsPage: View {
                 Text("电脑上的拾景版本较旧，要改设置请在电脑上改。")
             }
         }
-        offlineSection
+        if state.dirs != nil {
+            libraryLink(state)
+        }
+        pendingQueueSection
+    }
+
+    /// 这台手机：离线缓存、离线时记下的待补操作，还有两边的版本。
+    @ViewBuilder
+    private func phoneContent(_ state: RemoteState) -> some View {
         if !session.queued.isEmpty { offlineQueueLink }
+        offlineSection
         aboutSection(state)
     }
 
@@ -197,10 +233,6 @@ struct SettingsPage: View {
         } footer: {
             Text("换完一批后重启 macOS 的壁纸服务，不然系统会继续轮换已经删掉的旧图。图库目录的添加和移除、归档位置等在电脑上改。")
         }
-        if state.dirs != nil {
-            libraryLink(state)
-        }
-        pendingQueueSection
     }
 
     /// 画质要求：预设菜单 + 自定义时两个步进器（改动攒 0.6 秒再发给电脑）。
@@ -355,7 +387,7 @@ struct SettingsPage: View {
     private func aboutSection(_ state: RemoteState) -> some View {
         Section {
             LabeledContent("电脑上的拾景", value: state.version.isEmpty ? "开发版" : "v" + state.version)
-            LabeledContent("这台手机上", value: AppVersion.text)
+            LabeledContent(ThisDevice.label, value: AppVersion.text)
             if let exp = SigningExpiry.text {
                 LabeledContent("签名", value: exp)
             }
@@ -402,6 +434,11 @@ struct SettingsPage: View {
             draftH = nil
         }
     }
+}
+
+/// 设置页顶部的两类：电脑上的拾景（遥控改的）/ 这台手机（离线缓存等）。
+enum SettingsGroup: String {
+    case mac, phone
 }
 
 /// 「图库目录」二级页面：只读列表（类型、路径、挂载状态、上次扫描到的张数），可以重新检查挂载。
