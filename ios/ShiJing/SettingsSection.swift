@@ -603,13 +603,11 @@ enum AppVersion {
     static var text: String { short.isEmpty ? "开发版" : "v" + short }
 }
 
-/// 离线缓存：这一批的预览图和（可选）图库里的原文件都存到手机上，两类共用「缓存上限」。
-/// 分开列清楚各自多少张、占多少、可以单独清除；上限只有一个，到了就不再往后存。
-/// 这些都是手机本地的设置（UserDefaults），不用连电脑也能改。
+/// 离线缓存：这一批壁纸（网格、大图，开了「保存原图」再加上图库里的原文件）存到手机上。
+/// 一个队列、一个上限：超过「缓存上限」就不再往后存。这些都是手机本地的设置，不用连电脑也能改。
 private struct OfflineCacheSection: View {
     let session: RemoteSession
     @State private var used: Int64?
-    @State private var previewSize: Int64?
     @State private var originalSize: Int64?
     @State private var originalCount = 0
     @State private var viewable = 0
@@ -622,49 +620,46 @@ private struct OfflineCacheSection: View {
     var body: some View {
         Section {
             Group {
-                LabeledContent("预览图") {
-                    HStack(spacing: 12) {
-                        Text(previewSize.map(bytes) ?? "正在统计…").foregroundStyle(.secondary)
-                        Button("清除") {
-                            store.clearPreviews(rev: session.wallsRev)
+                LabeledContent("离线可看") {
+                    Text(total > 0 ? "\(viewable) / \(total) 张" : "—").foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    if store.prefetching { ProgressView().controlSize(.small) }
+                    Text(statusText).foregroundStyle(.secondary)
+                    Spacer()
+                    if store.prefetching {
+                        Button("暂停") {
+                            store.pausePrefetch()
                             refresh()
                         }
-                        .disabled((previewSize ?? 0) == 0)
+                    } else {
+                        Button("补齐") {
+                            store.prefetch(session)
+                            refresh()
+                        }
+                        .disabled(session.offline || session.walls.isEmpty || (viewable >= total && !store.prefetchHitLimit))
                     }
                 }
-                previewStatus
 
                 Toggle("保存原图", isOn: $keepOriginals)
                     .onChange(of: keepOriginals) { _, on in
                         guard on else {
-                            store.pauseOriginals() // 关掉就不再往下补，已经存下的不动
+                            // 关掉就不再往下存原图（已经存下的留着）。队列是在开始前排好的，
+                            // 这里先暂停；再点「补齐」重排一遍就不带原图了
+                            if store.prefetching { store.pausePrefetch() }
                             refresh()
                             return
                         }
                         guard !session.offline, !session.walls.isEmpty else { return }
-                        store.prefetchOriginals(session)
+                        store.prefetch(session) // 已经存下的会跳过，接着往下存原图
                         refresh()
                     }
 
-                // 开关关掉后已经存下的原图还留在手机上，也要能看见、能单独清掉，否则「已用」对不上
-                if keepOriginals || (originalSize ?? 0) > 0 {
+                // 开关关掉后已经存下的原图还在手机上，也要能看见
+                if keepOriginals || originalCount > 0 {
                     LabeledContent("原图") {
-                        HStack(spacing: 12) {
-                            Text(detail(originalCount, originalSize)).foregroundStyle(.secondary)
-                            Button("清除") {
-                                store.clearOriginals(rev: session.wallsRev)
-                                refresh()
-                            }
-                            .disabled(originalCount == 0)
-                        }
-                    }
-                    if keepOriginals {
-                        originalStatus
-                    } else {
-                        HStack {
-                            Text("「保存原图」已关掉，已经存下的还留着").foregroundStyle(.secondary)
-                            Spacer()
-                        }
+                        Text(detail(originalCount, originalSize)).foregroundStyle(.secondary)
                     }
                 }
 
@@ -673,8 +668,7 @@ private struct OfflineCacheSection: View {
                 }
                 .onChange(of: limitGB) { _, _ in
                     guard !session.offline, !session.walls.isEmpty else { refresh(); return }
-                    store.prefetchAll(session)
-                    if keepOriginals { store.prefetchOriginals(session) } // 上限调大了，原图也接着补
+                    if !store.prefetching { store.prefetch(session) } // 上限调大了，接着往下存
                     refresh()
                 }
 
@@ -682,7 +676,11 @@ private struct OfflineCacheSection: View {
                     HStack {
                         Text("已用 \(bytes(used)) / \(limitGB) GB")
                         Spacer()
-                        Text("离线可看 \(viewable) / \(total) 张").foregroundStyle(.secondary)
+                        Button("清除") {
+                            store.clear()
+                            refresh()
+                        }
+                        .disabled((used ?? 0) == 0)
                     }
                     ProgressView(value: fraction)
                 }
@@ -693,77 +691,18 @@ private struct OfflineCacheSection: View {
                 // 存的过程中不用每张都数一遍文件，隔一阵更新一次
                 if store.prefetchDone % 20 == 0 { refresh() }
             }
-            .onChange(of: store.originaling) { _, running in if !running { refresh() } }
-            .onChange(of: store.originalDone) { _, _ in if store.originalDone % 5 == 0 { refresh() } }
         } header: {
             Text("离线")
         } footer: {
-            Text("连不上电脑时，概览和壁纸显示的是上次同步的内容，换一批后上一批的自动删掉。预览图是缩过的，离线看网格和大图用；打开「保存原图」会把图库里的原文件也存下来，离线时能存到相册、分享原图。两类共用「缓存上限」，到了就不再往后存。")
+            Text("连不上电脑时，概览和壁纸显示的是上次同步的内容，换一批后不在这批里的图会删掉。打开「保存原图」会把图库里的原文件也存下来，离线时能存到相册、分享原图。到了「缓存上限」就不再往后存。")
         }
     }
 
-    /// 预览图的缓存状态：正在存 / 到上限 / 暂停 / 还没存完 / 全部存好了。
-    @ViewBuilder
-    private var previewStatus: some View {
-        HStack {
-            if store.prefetching {
-                ProgressView().controlSize(.small)
-                Text("正在缓存 \(store.prefetchDone) / \(store.prefetchTotal)").foregroundStyle(.secondary)
-                Spacer()
-                Button("暂停") {
-                    store.pausePrefetch()
-                    refresh()
-                }
-            } else {
-                Text(previewStateText).foregroundStyle(.secondary)
-                Spacer()
-                Button("补齐缓存") {
-                    store.prefetchAll(session)
-                    refresh()
-                }
-                .disabled(session.offline || session.walls.isEmpty || (viewable >= total && !store.prefetchHitLimit))
-            }
-        }
-    }
-
-    private var previewStateText: String {
-        if store.prefetchHitLimit {
-            return "已到上限，\(max(0, store.prefetchTotal - store.prefetchDone)) 张没缓存"
-        }
+    private var statusText: String {
+        if store.prefetching { return "正在缓存 \(store.prefetchDone) / \(store.prefetchTotal)" }
+        if store.prefetchHitLimit { return "已到上限，剩下的没存" }
         if store.prefetchPaused { return "已暂停" }
-        // 有原图的也能离线看，不算「没存完」
         if viewable < total { return "还没存完" }
-        return "全部存好了"
-    }
-
-    /// 原图的状态：和预览图一样，只是叫「补齐」。
-    @ViewBuilder
-    private var originalStatus: some View {
-        HStack {
-            if store.originaling {
-                ProgressView().controlSize(.small)
-                Text("正在存 \(store.originalDone) / \(store.originalTotal)").foregroundStyle(.secondary)
-                Spacer()
-                Button("暂停") {
-                    store.pauseOriginals()
-                    refresh()
-                }
-            } else {
-                Text(originalStateText).foregroundStyle(.secondary)
-                Spacer()
-                Button("补齐原图") {
-                    store.prefetchOriginals(session)
-                    refresh()
-                }
-                .disabled(session.offline || session.walls.isEmpty || (originalCount >= total && !store.originalHitLimit))
-            }
-        }
-    }
-
-    private var originalStateText: String {
-        if store.originalHitLimit { return "已到上限，剩下的没存" }
-        if store.originalPaused { return "已暂停" }
-        if originalCount < total { return "还没补齐" }
         return "全部存好了"
     }
 
@@ -783,21 +722,15 @@ private struct OfflineCacheSection: View {
     }
 
     private func refresh() {
-        let rev = session.wallsRev ?? ""
         let names = session.walls.map(\.name)
         Task {
-            let (all, preview, originals, views, origs) = await Task.detached(priority: .utility) {
-                // 整个目录减去原图，就是缩略图 / 横幅 / 大图占的（原图单独一行）
-                let all = ImageStore.diskUsage()
-                let originals = rev.isEmpty ? 0 : ImageStore.cachedSize(rev: rev, kind: .original)
-                return (all,
-                        max(0, all - originals),
-                        originals,
-                        rev.isEmpty ? 0 : ImageStore.viewableCount(rev: rev, names: names),
-                        rev.isEmpty ? 0 : ImageStore.cachedCount(rev: rev, kind: .original))
+            let (all, originals, views, origs) = await Task.detached(priority: .utility) {
+                (ImageStore.diskUsage(),
+                 ImageStore.cachedSize(kind: .original),
+                 ImageStore.viewableCount(names: names),
+                 ImageStore.cachedCount(kind: .original))
             }.value
             used = all
-            previewSize = preview
             originalSize = originals
             viewable = views
             originalCount = origs

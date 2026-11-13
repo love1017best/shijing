@@ -122,7 +122,7 @@ struct QueuedActionsView: View {
     }
 
     private func thumb(_ a: RemoteSession.OfflineAction) -> some View {
-        WallImage(session: session, wall: a.asWallpaper, kind: .thumb, rev: a.rev)
+        WallImage(session: session, wall: a.asWallpaper, kind: .thumb)
             .frame(width: 56, height: 56)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(alignment: .bottomTrailing) {
@@ -193,12 +193,12 @@ private struct QueuedPreviewSheet: View {
             }
         }
         .task {
-            if let big = await ImageStore.shared.load(session, action.name, .image, rev: action.rev) {
+            if let big = await ImageStore.shared.load(session, action.name, .image) {
                 image = big
             } else if let t = ImageStore.shared.cached(session, action.name, .thumb) {
                 image = t
             } else {
-                image = await ImageStore.shared.load(session, action.name, .thumb, rev: action.rev)
+                image = await ImageStore.shared.load(session, action.name, .thumb)
             }
             failed = image == nil
         }

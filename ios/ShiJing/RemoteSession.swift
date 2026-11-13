@@ -46,8 +46,6 @@ final class RemoteSession {
     private var networkDown = false
     /// 上次把快照写到磁盘的时间（运行中状态更新很密，最多 5 秒写一次）
     private var lastSnapshotSave = Date.distantPast
-    /// 已经清理过磁盘缓存的批次（同一批只清一次，见 refreshWalls）
-    private var groomedRev: String?
     /// 有一轮壁纸列表正在拉：状态推得很密时别每次推送都再发一个请求
     private var refreshingWalls = false
     /// 离线时点的「移出 / 不再选」，连上电脑后自动补上（存在 UserDefaults 里，按 Mac 分开）
@@ -197,16 +195,11 @@ final class RemoteSession {
                         if !queued.isEmpty { Task { await flushOfflineActions() } }
                         Task {
                             if s.wallsRev != wallsRev {
-                                // 换了一批：refreshWalls 里先收拾掉上一批的缓存，再按新批次预取
+                                // 换了一批：refreshWalls 里先收拾缓存，再按新的列表补齐
                                 await refreshWalls()
-                            } else {
+                            } else if !ImageStore.shared.prefetching {
                                 // 还是同一批：上一次没缓存完的接着补（已经存下的会跳过）
-                                if !ImageStore.shared.prefetching {
-                                    ImageStore.shared.prefetchAll(self)
-                                }
-                                if ImageStore.originalsEnabled, !ImageStore.shared.originaling {
-                                    ImageStore.shared.prefetchOriginals(self)
-                                }
+                                ImageStore.shared.prefetch(self)
                             }
                         }
                         // 记录页的三份数据也存一份，下次断了还能看
@@ -381,7 +374,7 @@ final class RemoteSession {
     /// 离线时用手机上存着的那份原图（设置 › 离线 › 保存原图），没存过就只能等连上电脑。
     func saveOriginal(_ w: Wallpaper) async {
         let live = connection == .live
-        let cached = ImageStore.cachedOriginal(rev: wallsRev ?? "", name: w.name)
+        let cached = ImageStore.cachedOriginal(name: w.name)
         guard live || cached != nil else {
             actionError = "连不上电脑，这张原图也没存在手机上。可以在「设置 › 离线」打开「保存原图」并补齐，或者连上电脑再存。"
             return
@@ -448,23 +441,16 @@ final class RemoteSession {
             heroName = list.hero
             remember(wallsChanged: true)
             if changed {
-                // 换了一批：旧那批的缓存任务先停掉（下载中的不会再写回旧目录），
-                // 上一批留在手机上的图（预览图和原图）由下面的 groom 整个删掉，要的话再按新批次补
+                // 换了一批：下载中的先停掉，别让属于上一批的图写进来
                 ImageStore.shared.stopForNewBatch()
             }
-            // 不属于这一批的缓存目录删掉；同一批里换过前缀的旧文件（比如以前 2048 宽的大图）也一起清。
-            // 每次连上都跑一遍（按批次记着，同一批只跑一次），升级后不用等下一次换批
-            if groomedRev != list.rev {
-                groomedRev = list.rev
-                let rev = list.rev
-                let names = list.items.map(\.name)
-                // 删 / 搬文件，别在主线程做。要等它做完再开始预取：预取按「磁盘现在占了多少」算上限，
-                // 上一批还没删掉的话会被一起算进去，新一批没存几张就以为到上限了
-                await Task.detached(priority: .utility) { ImageStore.groom(keepRev: rev, names: names) }.value
-            }
+            // 删掉不在这批里的缓存（按文件名认，同一张图换了批还在），也顺手清掉升级前的旧文件。
+            // 每次拉到新列表都跑一遍。要等它删完再开始补齐：补齐按「磁盘现在占了多少」算上限，
+            // 没删掉的会被一起算进去，新一批没存几张就以为到上限了
+            let names = list.items.map(\.name)
+            await Task.detached(priority: .utility) { ImageStore.keepOnly(names: names) }.value
             if changed {
-                ImageStore.shared.prefetchAll(self) // 这一批的缩略图和预览图存到磁盘，离线也能看
-                if ImageStore.originalsEnabled { ImageStore.shared.prefetchOriginals(self) } // 开了「保存原图」的接着存原图
+                ImageStore.shared.prefetch(self) // 这一批存到磁盘，离线也能看
             }
             return true
         } catch {

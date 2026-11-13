@@ -65,7 +65,7 @@ extension WallActionKind {
     func isEnabled(_ session: RemoteSession, _ w: Wallpaper) -> Bool {
         if self == .save {
             if session.saving != nil { return false }
-            return !session.offline || ImageStore.cachedOriginal(rev: session.wallsRev ?? "", name: w.name) != nil
+            return !session.offline || ImageStore.cachedOriginal(name: w.name) != nil
         }
         return session.acting == nil && session.state?.running != true
     }
@@ -519,7 +519,7 @@ struct ShareOriginalButton: View {
 
     /// 手机上存过这张的原图（离线时唯一能用的那份）
     private var cached: URL? {
-        ImageStore.cachedOriginal(rev: session.wallsRev ?? "", name: wall.name)
+        ImageStore.cachedOriginal(name: wall.name)
     }
 
     var body: some View {
