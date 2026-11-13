@@ -390,12 +390,15 @@ struct AllWallpapersView: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: folder == nil ? "folder" : "folder.fill")
-                Text(folder ?? "全部目录").lineLimit(1)
+                // 目录名长的时候，Menu 的标签第一帧会按旧宽度量、先被截掉一截，
+                // 下一帧才撑开：让它永远取文字本身的宽度，别被压
+                Text(folder ?? "全部目录").lineLimit(1).fixedSize(horizontal: true, vertical: false)
                 Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
             }
             .font(.subheadline)
             .padding(.horizontal, 10).padding(.vertical, 5)
             .background(.thinMaterial, in: Capsule())
+            .transaction { $0.animation = nil } // 换目录时别做宽度动画
         }
         .buttonStyle(.plain)
         .disabled(session.walls.isEmpty)
