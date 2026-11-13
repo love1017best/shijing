@@ -65,11 +65,11 @@ struct RunControl: ControlWidget {
 // MARK: - 长按「编辑小组件」里的选项
 
 enum RotateInterval: Int, AppEnum {
-    case m5 = 300, m15 = 900, m30 = 1800, h1 = 3600, h3 = 10800, h6 = 21600, h12 = 43200, d1 = 86400
+    case m1 = 60, m5 = 300, m15 = 900, m30 = 1800, h1 = 3600, h3 = 10800, h6 = 21600, h12 = 43200, d1 = 86400
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "换图间隔"
     static let caseDisplayRepresentations: [RotateInterval: DisplayRepresentation] = [
-        .m5: "5 分钟", .m15: "15 分钟", .m30: "30 分钟", .h1: "1 小时",
+        .m1: "1 分钟", .m5: "5 分钟", .m15: "15 分钟", .m30: "30 分钟", .h1: "1 小时",
         .h3: "3 小时", .h6: "6 小时", .h12: "12 小时", .d1: "1 天",
     ]
 }
@@ -137,8 +137,10 @@ enum TimelineMaker {
     /// 所以整条时间线自己限时：状态和列表各 6 秒，设图最多几张，到点没下到的图就留空（显示渐变），状态照常给。
     private static let budget: TimeInterval = 20
     private static let fastTimeout: TimeInterval = 6
-    /// 一次时间线最多新下几张图：第一次添加小组件时一张缓存都没有，排 12 张不该下 12 次
-    private static let maxNewDownloads = 6
+    /// 一次时间线最多新下几张图：第一次添加小组件时一张缓存都没有，排 60 张不该下 60 次
+    private static let maxNewDownloads = 8
+    /// 本地缓存池尽量留住多少张图：1 分钟间隔排 60 条，池子有这么多就够轮一大阵不出重样
+    private static let poolTarget = 48
 
     static func make(_ context: TimelineProviderContext, interval: RotateInterval, photo: Bool, preview: Bool) async -> Timeline<Entry> {
         let now = Date()
@@ -183,15 +185,16 @@ enum TimelineMaker {
         // 2. 这段时间里依次显示哪几张：按「第几个间隔」挑，同一个间隔里重新取时间线还是同一张
         let step = TimeInterval(interval.rawValue)
         let running = snap.state.running && !photo
-        let count = preview || running ? 1 : min(12, max(2, Int((2 * 3600 / step).rounded(.up))))
+        // 一次排多久：1、5 分钟这种短间隔排 1 小时（1 分钟就是 60 条，之后靠系统再刷新接着排），其余排 2 小时；最多 60 条
+        let horizon: TimeInterval = step <= 300 ? 3600 : 7200
+        let count = preview || running ? 1 : min(60, max(2, Int((horizon / step).rounded(.up))))
         let slot0 = Int(now.timeIntervalSince1970 / step)
-        var names = snap.list?.items.map(\.name) ?? []
-        if client == nil {
-            // 离线：只在已经下过的图里轮
-            let px = pixels(context)
-            names = names.filter { WidgetCache.hasImage(key, $0, px) }
-        }
         let px = pixels(context)
+        let allNames = snap.list?.items.map(\.name) ?? []
+        // 手机（小组件自己的缓存目录）里已经存下来的图优先：轮换主要在这些图里转，1 分钟一换也不用等网络。
+        // 离线时只有这一份；在线时算「本地缓存池」，池子还小就在后面用剩下的时间慢慢补。
+        let cachedNames = allNames.filter { WidgetCache.hasImage(key, $0, px) }
+        let names = cachedNames.isEmpty ? (client == nil ? [] : allNames) : cachedNames
         var entries: [Entry] = []
         var newDownloads = 0
         for i in 0..<count {
@@ -209,6 +212,15 @@ enum TimelineMaker {
                 e.imageFile = await image(key, name, px, client: canDownload ? client : nil, hasHero: snap.list?.hero != nil, deadline: deadline)
             }
             entries.append(e)
+        }
+
+        // 2.1 缓存池子还小的时候，用剩下的时间再存几张进来：池子越大，短间隔轮换的选择越多
+        if client != nil, cachedNames.count < poolTarget {
+            for name in allNames where !WidgetCache.hasImage(key, name, px) {
+                guard newDownloads < maxNewDownloads, Date() < deadline else { break }
+                newDownloads += 1
+                _ = await image(key, name, px, client: client, hasHero: snap.list?.hero != nil, deadline: deadline)
+            }
         }
 
         // 3. 什么时候再取：离线一刻钟后重试；运行中一分钟；功能小组件最多半小时刷一次状态；壁纸小组件轮完或 6 小时
