@@ -387,6 +387,7 @@ func (a *app) startRunWith(o runOpts) {
 			}
 			a.saveUIState()
 			a.wallsGen++ // 壁纸文件夹换了一批，重新读缩略图
+			a.loadWallpapers() // 不等下一帧：桌面窗口关着时 view 不重画（手机靠这次重读拿到新列表）
 			switch {
 			case err == nil:
 				a.toast = fmt.Sprintf("已换上 %d 张新壁纸", sum.Copy.Copied)

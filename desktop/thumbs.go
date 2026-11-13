@@ -177,11 +177,15 @@ func shrink(img image.Image, width int) image.Image {
 }
 
 // loadWallpapers 在后台重新读取壁纸文件夹，读完在主线程上更新界面。
+// 换完一批后由 app.go 直接调用，不等下一帧 view——窗口关着时 view 不重画，
+// 光靠它会一直显示上一批，手机那边（walls_rev 来自这里）也跟着不更新。
 func (a *app) loadWallpapers() {
 	if a.scanWallpapers == nil || a.walls.loading {
 		return
 	}
 	dir := core.ExpandUser(a.cfg.DestDir)
+	gen := a.wallsGen
+	a.wallsLoadedGen = gen
 	a.walls.loading = true
 	go func() {
 		s := a.scanWallpapers(dir)
@@ -192,8 +196,8 @@ func (a *app) loadWallpapers() {
 				w.hero = ui.NewBitmap(s.hero)
 			}
 			a.walls = w
-			// 加载期间改了壁纸文件夹：按新路径再读一次
-			if core.ExpandUser(a.cfg.DestDir) != dir {
+			// 加载期间改了壁纸文件夹、或者又跑完一批：按最新的再读一次
+			if core.ExpandUser(a.cfg.DestDir) != dir || a.wallsGen != gen {
 				a.loadWallpapers()
 			}
 		})

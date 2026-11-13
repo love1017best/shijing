@@ -18,7 +18,6 @@ func (a *app) view(c *ui.Context) {
 	}
 	if a.scanWallpapers != nil && !a.walls.loading &&
 		(a.walls.dir != core.ExpandUser(a.cfg.DestDir) || a.wallsGen != a.wallsLoadedGen) {
-		a.wallsLoadedGen = a.wallsGen
 		a.loadWallpapers()
 	}
 	// 「删除不合格原图」被重新打开：恢复运行前的确认

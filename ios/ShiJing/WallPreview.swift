@@ -43,6 +43,8 @@ struct WallPreview: View {
     @State private var bottomBarTop: CGFloat?
     @State private var jumping = false
     @State private var jumpText = ""
+    /// 当前这张的模糊底：图片没铺满屏幕时（竖屏看横图）显示在上下留白里，顶栏底栏浮在它上面
+    @State private var backdrop: PlatformImage?
     @Environment(\.dismiss) private var dismiss
 
     private static let pageGap: CGFloat = 16
@@ -81,7 +83,19 @@ struct WallPreview: View {
         GeometryReader { geo in
             let size = geo.size
             ZStack {
-                Color.black.opacity(1 - dragProgress * 0.85)
+                Color.black
+                if let backdrop {
+                    Image(platformImage: backdrop)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: size.width, height: size.height)
+                        .blur(radius: 40)
+                        .overlay(Color.black.opacity(0.45))
+                        .clipped()
+                        .opacity(1 - dragProgress)
+                } else {
+                    Color.black.opacity(1 - dragProgress * 0.85)
+                }
                 pages(size)
                     .scaleEffect(1 - dragProgress * 0.25)
                     .offset(y: max(dragY, 0))
@@ -142,6 +156,14 @@ struct WallPreview: View {
         .sensoryFeedback(.success, trigger: session.walls.count) { old, new in new < old }
         // 关掉预览：记住操作列表是开着还是收着，下次打开还是这个样子
         .onDisappear { UserDefaults.standard.set(panel, forKey: Self.panelOpenKey) }
+        .task(id: current) {
+            let store = ImageStore.shared
+            if let img = store.cached(session, current, .thumb) {
+                backdrop = img
+            } else {
+                backdrop = await store.load(session, current, .thumb)
+            }
+        }
     }
 
     // MARK: 翻页
@@ -447,17 +469,19 @@ struct WallPreview: View {
                         }
                         .buttonStyle(.bordered)
                         HStack(spacing: 6) { actionButtons(w) }.buttonStyle(.bordered).controlSize(.small)
-                        HStack(spacing: 0) { actionButtons(w, toolbar: true) }
+                        HStack(spacing: 6) { actionButtons(w, toolbar: true) }
                             .buttonStyle(.borderless)
                             .labelStyle(ToolbarLabelStyle())
                     }
                 }
+                // 不再占满整条底栏：一块浮在图上的毛玻璃（和 X 的底部操作条一样），缩略图条在它上面露着图
+                .padding(14)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, ignoresSafeAreaEdges: [.bottom, .horizontal])
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { bottomBarTop = $0 }
     }
 
@@ -491,6 +515,12 @@ struct WallPreview: View {
                     Label(kind == .save && session.saving == w.name ? "正在下载…" : kind.barTitle,
                           systemImage: kind.icon)
                         .actionLabel(toolbar)
+                        .background {
+                            // 工具栏式没有系统给的按钮底（borderless），自己补一块半透明的，浮在图上才看得清
+                            if toolbar {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.ultraThinMaterial)
+                            }
+                        }
                 }
                 .disabled(!kind.isEnabled(session))
                 .accessibilityHint(kind.hint)
@@ -648,6 +678,7 @@ private struct FilmStrip: View {
                     WallImage(session: session, wall: w)
                         .frame(width: Self.thumb.width, height: Self.thumb.height)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .shadow(color: .black.opacity(0.35), radius: 3, y: 1) // 直接浮在图上，给一点阴影
                         .overlay {
                             if w.name == current {
                                 RoundedRectangle(cornerRadius: 4).strokeBorder(.white, lineWidth: 2)
