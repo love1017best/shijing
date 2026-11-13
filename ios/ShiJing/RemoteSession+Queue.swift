@@ -144,7 +144,8 @@ extension RemoteSession {
                     }
                     if !excluded, let src = act.source, !src.isEmpty {
                         // 这一批已经换掉了（或者刚才是只能移出）：至少把原图记进名单，和批次无关
-                        _ = try await client().addExcluded([src])
+                        let list = try await client().addExcluded([src])
+                        state?.excluded = list.count // 概览上的名单张数别停在旧值
                         excluded = true
                     }
                     if moved || excluded {

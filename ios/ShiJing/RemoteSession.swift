@@ -157,8 +157,15 @@ final class RemoteSession {
         while !Task.isCancelled {
             if state == nil { connection = .connecting }
             do {
+                var firstEvent = true
                 for try await s in try client().events() {
                     let wasLive = connection == .live
+                    if firstEvent {
+                        firstEvent = false
+                        // 事件流（重新）连上了：回前台之前可能有一次没补完的离线操作，先补上
+                        // （只认第一帧：电脑在换壁纸时补不成的留着，等换完一批那一路再触发）
+                        if !queued.isEmpty { Task { await flushOfflineActions() } }
+                    }
                     RunNotifier.observe(new: s, mac: mac.name)
                     if state?.running == true, !s.running {
                         WidgetReload.all()
