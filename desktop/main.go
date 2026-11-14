@@ -115,9 +115,10 @@ func main() {
 			BackgroundColor: "light-dark(#f6f6f8, #1e1e1e)",
 			Content:         ui.View(a.view),
 		})
-		a.showWindow = func() { win.Show() }
+		a.showWindow = func() { a.showMain(win) }
 		setupBackground(a, win)
 		setupMenu(a, win)
+		setupTray(a)
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

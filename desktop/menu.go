@@ -7,7 +7,7 @@ import "github.com/egoist/mygo"
 func setupMenu(a *app, win *mygo.Window) {
 	do := func(fn func()) func(*mygo.MenuItem, *mygo.Window) {
 		return func(*mygo.MenuItem, *mygo.Window) {
-			win.Show()
+			a.showMain(win)
 			a.update(fn)
 		}
 	}

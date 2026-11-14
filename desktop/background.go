@@ -9,11 +9,12 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// setupBackground 让窗口关闭后应用继续在后台运行（macOS 的习惯）：
-//   - 红色关闭按钮只隐藏窗口，界面状态和正在跑的任务都保留；
-//   - 点 Dock 图标重新显示窗口；
+// setupBackground 让窗口关闭后应用继续在后台运行（macOS 菜单栏应用的习惯）：
+//   - 红色关闭按钮 / ⌘W 只隐藏窗口，Dock 图标一起隐藏，应用只留在菜单栏里；
+//     界面状态和正在跑的任务都保留（菜单栏图标见 tray.go）；
+//   - 从菜单栏「打开主界面」或 Dock 图标恢复窗口和 Dock 图标；
 //   - Cmd+Q / 菜单退出才真正退出，任务进行中会先确认；
-//   - 运行中 Dock 角标显示「…」，窗口隐藏期间跑完会显示 ✓ 或 !，跳一下 Dock 图标，
+//   - 运行中 Dock 角标显示「…」，窗口隐藏期间跑完会跳一下 Dock 图标，
 //     并发一条系统通知（点通知回到窗口）。
 //
 // 所有监听器都在主线程执行，和 view 读写 a.running 不会冲突。
@@ -26,12 +27,12 @@ func setupBackground(a *app, win *mygo.Window) {
 			return
 		}
 		e.PreventDefault()
-		win.Hide()
+		a.hideMain(win)
 	})
 
 	mygo.App.OnActivate(func(hasVisibleWindows bool) {
 		if !hasVisibleWindows {
-			win.Show()
+			a.showMain(win)
 		}
 	})
 	win.OnShow(func() {
@@ -43,7 +44,7 @@ func setupBackground(a *app, win *mygo.Window) {
 	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
 		if a.running && !confirmedQuit {
 			e.PreventDefault()
-			win.Show()
+			a.showMain(win)
 			go func() {
 				res, err := mygo.Dialog.Message(mygo.MessageOptions{
 					Parent:             win,
@@ -83,11 +84,24 @@ func setupBackground(a *app, win *mygo.Window) {
 			mygo.App.Dock.Bounce(false)
 			if title, body := a.runNotice(); title != "" && mygo.NotificationsSupported() {
 				n := mygo.NewNotification(mygo.NotificationOptions{ID: "run-done", Title: title, Body: body})
-				n.OnClick(func() { win.Show() })
+				n.OnClick(func() { a.showMain(win) })
 				go func() { _ = n.Show() }() // 第一次会请求通知权限，可能阻塞
 			}
 		}
 	}
+}
+
+// hideMain 是关窗后台运行：隐藏窗口，Dock 图标也收起来，只留菜单栏的图标。
+func (a *app) hideMain(win *mygo.Window) {
+	win.Hide()
+	mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
+}
+
+// showMain 叫出主界面：把 Dock 图标和菜单栏的应用菜单恢复回来，窗口显示并切到前台。
+func (a *app) showMain(win *mygo.Window) {
+	mygo.App.SetActivationPolicy(mygo.ActivationPolicyRegular)
+	win.Show()
+	mygo.App.Focus()
 }
 
 // runNotice 是窗口隐藏期间跑完时的通知文字。

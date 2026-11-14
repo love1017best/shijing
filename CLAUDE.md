@@ -58,7 +58,8 @@
 - 设置改动是**自动保存**的：每次 view 构建末尾 `autosave()` 拿 `buildConfig()` 和上次写盘的值做 `reflect.DeepEqual`，变了才写。新增配置字段时只要进 `core.Config` 就自动生效。
 - 概览页的步骤条/进度条/结果卡片靠 `core.Reporter.Progress` 和 `RunPipeline` 返回的 `core.Summary`；改流程时记得同步上报，`TestRunPipelineEndToEnd` 会检查四个阶段都报到了。
 - 界面状态只能在主线程改：后台 goroutine（目录选择框、流程运行）一律通过 `app.update`（= `Window.Update`）回到主线程。日志是攒批刷新的（80ms 一次），复制几百张图时不会每行触发一次重绘。
-- 关窗不退出（`background.go`）：`win.OnClose` 里 `PreventDefault` + `Hide`，Dock 点击走 `App.OnActivate` 重新 `Show`。真正退出时 `App.Quit()` 也会经过 `OnClose`，所以 `OnBeforeQuit` 里要先置 `quitting = true` 放行，否则 Cmd+Q 会被吞掉变成"只隐藏"；任务运行中 Cmd+Q 先弹窗确认。Dock 角标由 `app.onRunState` 钩子驱动（测试里为 nil）。
+- 关窗不退出（`background.go`）：`win.OnClose` 里 `PreventDefault` + `hideMain`（隐藏窗口，并把激活策略切成 `ActivationPolicyAccessory`，Dock 图标一起消失，只留菜单栏的图标）。**叫出窗口一律走 `showMain`**（切回 regular、`Show`、`Focus`），它调 `SetActivationPolicy` 是运行时可变的。真正退出时 `App.Quit()` 也会经过 `OnClose`，所以 `OnBeforeQuit` 里要先置 `quitting = true` 放行，否则 Cmd+Q 会被吞掉变成"只隐藏"；任务运行中 Cmd+Q 先弹窗确认。Dock 角标由 `app.onRunState` 钩子驱动（测试里为 nil）。
+- 菜单栏图标（`tray.go`）：`setupTray` 用 `mygo.NewTray` 建一个模板图标（Lucide「图片」，`ui.SVG.Image(32,32)` 画成黑色 + 透明 PNG）。**不给 TrayOptions 设常驻菜单**，`OnClick` / `OnRightClick` 里现建 `trayItems()` 再 `SetMenu` + `PopUpMenu`，弹完 `defer SetMenu(nil)`——这样菜单里的状态（图库连上没有、上次换了几张、运行进度）每次点开都是新的，不用另外同步。菜单里「换一批壁纸」在要删原图时先 `showWindow`（确认框在窗口上），其余情况后台直接跑。
 - `resolvePath()` 必须像 Python 的 `Path.resolve(strict=False)` 那样解析"存在的那部分前缀"：macOS 上 `/var` → `/private/var`，只对完整路径 `EvalSymlinks` 的话，不存在的文件会退回未解析的路径，SMB→NFS 换算就会因前缀不匹配而静默失效（测试里踩过）。
 - 与 Python 版的细微差异（都是有意的）：`filter_sources` 用解析后的路径比较（Python 版拿未解析的 source 去比解析后的集合，路径含软链接时会漏过滤）；重复添加同一个目录会被拒绝（列表用路径当 key）；删除失败只记日志继续，不像 Python 版直接抛异常中断。
 - 界面测试用 `ui.NewTester` 无窗口跑；按标签找输入框要用 `AccessByRole`（`Access(...)` 会先命中 Field 的标签文字），文本框是 `RoleTextField`，`NumberInput` 在无障碍树里是 `RoleGroup`。
@@ -95,7 +96,7 @@
 - 读状态的请求读主线程发布的快照（`publishRemote`：每帧 view 末尾、以及 `main.go` 里包了一层的 `a.update` 之后），不等主线程；要改状态的（运行、停止）走 `remoteServer.onMain`，**它在 fn 之后先 `publishRemote` 再放行**，否则响应里带的是旧快照（踩过）。
 - 遥控运行前在后台重新 `probeMount` 一遍图库目录：桌面的挂载状态只在启动 / 导入配置时查，NAS 后挂上的话 `canRun` 一直是 false。
 - 遥控运行不弹桌面的删除确认框（Mac 前面可能没人），由手机先确认，`/api/run {"delete": false}` 时这次 `noDelete`，不改设置。日志里记一行「📱 由「xx」遥控运行」。
-- 配对：`/api/pair/start` 生成 6 位码在桌面弹层显示（`pairModal`，按 `pairCode` 判断是不是新请求，点拒绝后不会被下一帧重新打开），2 分钟有效、输错 5 次作废；令牌只存 SHA-256（`remote_devices.json`，0600）。同名手机重新配对会替换旧记录。
+- 配对：`/api/pair/start` 生成 6 位码在桌面弹层显示（`pairModal`，按 `pairCode` 判断是不是新请求，点拒绝后不会被下一帧重新打开），2 分钟有效、输错 5 次作废；令牌只存 SHA-256（`remote_devices.json`，0600）。**认手机按固定标识不按名字**（v0.3.173）：手机第一次配对时生成 UUID（`PairView.deviceID`，存在 UserDefaults），`/api/pair/start` 和 `/api/pair/finish` 的 `id` 字段都带上；桌面按 `id` 替换「同一台手机重新配对」的记录，名字被别的手机占了就加序号（「iPhone 2」）。以前只按名字替换，两台手机默认名都是「iPhone」，后配的会把先配的令牌顶掉、先配的那台报错。旧版手机端不带 `id`，仍按名字认。
 - iOS 端在 `ios/`（SwiftUI，iOS 17+，XcodeGen 的 `project.yml` 生成工程）。用户没有付费开发者账号：免费签名 7 天过期、没有 APNs 推送；不上架。版本号和桌面端同步，见「版本号规则」。
 - 本机装了 Xcode（`/Applications/Xcode-27.2.0.app`，2026-11-11），但 `xcode-select` 仍指向命令行工具（切换要用户输密码）：命令行里用 `DEVELOPER_DIR=/Applications/Xcode-27.2.0.app/Contents/Developer` 前缀跑 `xcodebuild` / `xcrun`。模拟器 MCP 工具只认 `xcode-select`，没切换前用不了，用 `xcrun simctl` 装、启动、截图代替。
 - 真机安装：团队 ID 在 gitignore 的 `ios/ShiJing/Local.xcconfig`（由 `Signing.xcconfig` 的 `#include?` 引用），**不要写进 `project.yml` 或提交的工程文件**——仓库公开。用户 Xcode 里选 Team 后工程文件会出现 `DEVELOPMENT_TEAM`，挪到 Local.xcconfig 再 `xcodegen`。构建 `-destination 'generic/platform=iOS' -allowProvisioningUpdates`，`xcrun devicectl device install app` / `process launch` 装到手机（命令见 `ios/README.md`）。免费签名 7 天过期，过期了重新构建安装即可。
