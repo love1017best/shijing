@@ -27,29 +27,6 @@ struct StatusSection: View {
     }
 }
 
-/// 设置页和记录页共用的外壳：还没拿到状态时显示连接中 / 连不上，拿到了再显示内容（列表收窄到适合阅读的宽度）。
-struct MacPage<Content: View>: View {
-    let session: RemoteSession
-    let title: String
-    @ViewBuilder let content: (RemoteState) -> Content
-
-    var body: some View {
-        Group {
-            if let state = session.state {
-                List { content(state) }
-                    // 内屏、iPad 上别拉得太宽（和电脑上设置页的单栏最宽一样的思路）
-                    .contentWidthCap(max: 680)
-            } else {
-                ConnectionFallback(session: session)
-            }
-        }
-        // 收窄后两侧和底部露出的底色要和列表自己的一样，否则一块灰、一条白（见 SettingsPage 同名修饰）
-        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
-        .navigationTitle(title)
-        .connectionToolbar(session)
-    }
-}
-
 /// 「设置」页：分两类——「电脑上的拾景」（改的是电脑，改完电脑上的设置页同步变、自动保存）
 /// 和「这台手机」（离线缓存、待补操作这些手机自己的东西）。顶部用分段控件切换，选过哪一类会记住。
 /// 旧版桌面端不推 settings，电脑那一类就只读显示。
@@ -776,6 +753,9 @@ private struct OfflineCacheSection: View {
                 // 存的过程中不用每张都数一遍文件，隔一阵更新一次
                 if store.prefetchDone % 20 == 0 { refresh() }
             }
+            .onChange(of: store.prefetchOriginalDone) { _, _ in
+                if store.prefetchOriginalDone % 20 == 0 { refresh() }
+            }
         } header: {
             Text("离线")
         } footer: {
@@ -784,7 +764,13 @@ private struct OfflineCacheSection: View {
     }
 
     private var statusText: String {
-        if store.prefetching { return "正在缓存 \(store.prefetchDone) / \(store.prefetchTotal)" }
+        if store.prefetching {
+            // 大图存完再存原图，两段各按「这一批多少张」算，别把两个数加起来（400 张的批次写 800 会让人以为存多了）
+            if store.prefetchDone < store.prefetchTotal {
+                return "正在缓存大图 \(store.prefetchDone) / \(store.prefetchTotal) 张"
+            }
+            return "正在缓存原图 \(store.prefetchOriginalDone) / \(store.prefetchTotal) 张"
+        }
         if store.prefetchHitLimit { return "已到上限，剩下的没存" }
         if store.prefetchPaused { return "已暂停" }
         if viewable < total { return "还没存完" }

@@ -33,8 +33,12 @@ final class ImageStore {
 
     // 后台缓存的状态（设置页显示）
     private(set) var prefetching = false
+    /// 这一批已经存下来的大图张数（也就是「离线可看」的张数）
     private(set) var prefetchDone = 0
+    /// 这一批的总张数（大图和原图各算这么多，不翻倍——用户按「一批多少张」理解）
     private(set) var prefetchTotal = 0
+    /// 原图存了多少张（开了「保存原图」才有）
+    private(set) var prefetchOriginalDone = 0
     /// 这一轮因为到了上限提前停了
     private(set) var prefetchHitLimit = false
     /// 用户手动暂停了
@@ -148,9 +152,10 @@ final class ImageStore {
         prefetchHitLimit = false
         let names = session.walls.map(\.name)
         let wantOriginals = Self.originalsEnabled
-        // 进度按壁纸算：大图一张算一次，开了原图再翻一倍（缩略图和横幅很小，不算）
-        prefetchTotal = names.count * (wantOriginals ? 2 : 1)
+        // 进度按壁纸算：这一批多少张就是多少（缩略图、横幅很小，不算；大图和原图各走一遍这个数）
+        prefetchTotal = names.count
         prefetchDone = 0
+        prefetchOriginalDone = 0
         prefetching = true
         task = Task {
             // 先等还在跑的删缓存做完，再量磁盘：不然「已用」把马上要删的文件也算进去
@@ -180,8 +185,9 @@ final class ImageStore {
                         if g == gen { prefetching = false }
                         return
                     }
-                    // 进度按壁纸算：大图、原图各算一次，缩略图和横幅不算
-                    if kind == .image || kind == .original { prefetchDone += 1 }
+                    // 进度按壁纸算：大图、原图各数各的，缩略图和横幅不算
+                    if kind == .image { prefetchDone += 1 }
+                    if kind == .original { prefetchOriginalDone += 1 }
                     used += bytes
                     if used >= limit, next < queue.count {
                         // 到了上限：手上这几张存完就停，后面的不存了
@@ -308,6 +314,7 @@ final class ImageStore {
         prefetchHitLimit = false
         prefetchDone = 0
         prefetchTotal = 0
+        prefetchOriginalDone = 0
         cache.removeAllObjects()
         let prev = clearTask
         clearTask = Task.detached(priority: .utility) {

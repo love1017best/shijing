@@ -1,54 +1,110 @@
 import SwiftUI
 
-/// 「记录」页：运行日志、删除记录、不再选名单（电脑上分别在日志区、「删除记录」页、图库页）。
+/// 「记录」页的三栏（电脑上分别在日志区、「删除记录」页、图库页）。
+enum RecordsGroup: String, CaseIterable {
+    case log, deletions, excluded
+
+    var title: String {
+        switch self {
+        case .log: "运行日志"
+        case .deletions: "删除记录"
+        case .excluded: "不再选"
+        }
+    }
+}
+
+/// 「记录」页：运行日志、删除记录、不再选名单。和设置页一样用一条分段控件切三栏（左右滑也能切），
+/// 选过哪一栏会记住——原来是指向三个二级页的菜单，用户觉得没必要多这一层（v0.3.171）。
 struct RecordsPage: View {
     let session: RemoteSession
-    #if DEBUG
-    /// 截图用：-demoLog / -demoDeletions / -demoExcluded 直接打开对应的子页（模拟器里点不动时用）
-    @State private var demoPage: String? = {
-        let a = ProcessInfo.processInfo.arguments
-        for k in ["Log", "Deletions", "Excluded"] where a.contains("-demo" + k) { return k.lowercased() }
-        return nil
-    }()
-    #endif
+    @AppStorage("recordsGroup") private var groupRaw = RecordsGroup.log.rawValue
+    /// 显示过的栏：没显示过的不构建、也不发请求（三页各有各的）
+    @State private var seenGroups: Set<String> = []
 
     var body: some View {
-        MacPage(session: session, title: "记录") { state in
-            if state.settings != nil { // 第 3 期的接口，旧版桌面端没有
-                Section {
-                    NavigationLink { LogView(session: session) } label: {
-                        Label("运行日志", systemImage: "text.alignleft")
-                    }
-                    NavigationLink { DeletionsView(session: session) } label: {
-                        Label("删除记录", systemImage: "trash")
-                    }
-                    NavigationLink { ExcludedView(session: session) } label: {
-                        LabeledContent {
-                            Text("\(state.excluded ?? 0) 张")
-                        } label: {
-                            Label("不再选的图片", systemImage: "nosign")
+        Group {
+            if let state = session.state {
+                if state.settings != nil { // 第 3 期的接口，旧版桌面端没有
+                    pager
+                } else {
+                    List {
+                        Section {
+                            Text("电脑上的拾景版本较旧，升级后才能看到记录。")
+                                .foregroundStyle(.secondary)
                         }
                     }
+                    .contentWidthCap(max: 680)
                 }
             } else {
-                Section {
-                    Text("电脑上的拾景版本较旧，升级后才能看到记录。")
-                        .foregroundStyle(.secondary)
-                }
+                ConnectionFallback(session: session)
             }
         }
-        #if DEBUG
-        .navigationDestination(isPresented: Binding(
-            get: { demoPage != nil },
-            set: { if !$0 { demoPage = nil } }
-        )) {
-            switch demoPage {
-            case "log": LogView(session: session)
-            case "deletions": DeletionsView(session: session)
-            default: ExcludedView(session: session)
+        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+        .navigationTitle("记录")
+        .navigationBarTitleDisplayMode(.inline)
+        // 切换栏放在导航栏下面一条整宽的栏里，和设置页同一个做法：导航栏中间放不下三个中文标签
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if showsPager { picker }
+        }
+        .connectionToolbar(session)
+        .onAppear {
+            #if DEBUG
+            // 截图用：-demoLog / -demoDeletions / -demoExcluded 直接打开那一栏
+            let args = ProcessInfo.processInfo.arguments
+            for g in RecordsGroup.allCases where args.contains("-demo" + g.rawValue.capitalized) {
+                groupRaw = g.rawValue
+            }
+            #endif
+        }
+    }
+
+    private var showsPager: Bool {
+        guard let state = session.state else { return false }
+        return state.settings != nil
+    }
+
+    private var picker: some View {
+        Picker("记录分类", selection: $groupRaw) {
+            ForEach(RecordsGroup.allCases, id: \.rawValue) { g in
+                Text(g.title).tag(g.rawValue)
             }
         }
-        #endif
+        .pickerStyle(.segmented)
+        .frame(maxWidth: 680)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+    }
+
+    /// 三栏并排，左右滑也能切换（分段控件和翻页用同一个 selection）。
+    private var pager: some View {
+        TabView(selection: $groupRaw) {
+            page(.log) { LogView(session: session) }
+            page(.deletions) { DeletionsView(session: session) }
+            page(.excluded) { ExcludedView(session: session) }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .onChange(of: groupRaw) { _, new in seenGroups.insert(new) }
+    }
+
+    /// 当前栏和左右邻居先构建好（滑过去不会空一帧），更远的、也从没显示过的先留空。
+    private var builtGroups: Set<String> {
+        var s = seenGroups
+        if let i = RecordsGroup.allCases.firstIndex(where: { $0.rawValue == groupRaw }) {
+            s.insert(groupRaw)
+            if i > 0 { s.insert(RecordsGroup.allCases[i - 1].rawValue) }
+            if i + 1 < RecordsGroup.allCases.count { s.insert(RecordsGroup.allCases[i + 1].rawValue) }
+        }
+        return s
+    }
+
+    private func page<Content: View>(_ g: RecordsGroup, @ViewBuilder content: () -> Content) -> some View {
+        Group {
+            if builtGroups.contains(g.rawValue) { content() }
+        }
+        .contentWidthCap(max: 680)
+        .tag(g.rawValue)
     }
 }
 
@@ -182,8 +238,6 @@ struct LogView: View {
                 ProgressView()
             }
         }
-        .navigationTitle("运行日志")
-        .iOSInlineTitle()
         .task(id: "\(session.state?.running ?? false)|\(session.offline)") {
             repeat {
                 await load()
@@ -293,8 +347,6 @@ struct DeletionsView: View {
                 ProgressView()
             }
         }
-        .navigationTitle(list.map { "删除记录（\($0.total)）" } ?? "删除记录")
-        .iOSInlineTitle()
         // 连上 / 断开、以及电脑换完一批（last.at 变了）都重新取一次
         .task(id: "\(session.offline)|\(session.state?.last?.at ?? 0)") { await load() }
         .refreshable { await load() }
@@ -426,9 +478,16 @@ struct ExcludedView: View {
                                  ? "离线时只能查看，连上电脑后再恢复。"
                                  : "恢复后，以后换一批时这些原图又可能被选上。左滑一张可以单独恢复。")
                         }
-                    }
-                    .toolbar {
-                        if !session.offline { Button("全部恢复") { confirmAll = true } }
+                        // 「全部恢复」放在列表末尾：原来在导航栏右下角，三栏并排后 tab 页的 toolbar
+                        // 会叠到别的栏上，放在这里也更容易看见
+                        Section {
+                            Button {
+                                confirmAll = true
+                            } label: {
+                                Label("全部恢复", systemImage: "arrow.uturn.backward")
+                            }
+                            .disabled(session.offline)
+                        }
                     }
                 }
             } else if let error {
@@ -437,8 +496,6 @@ struct ExcludedView: View {
                 ProgressView()
             }
         }
-        .navigationTitle(items.map { "不再选（\($0.count)）" } ?? "不再选")
-        .iOSInlineTitle()
         .confirmationDialog("恢复全部 \(items?.count ?? 0) 张？", isPresented: $confirmAll, titleVisibility: .visible) {
             Button("全部恢复") { Task { await restore(nil) } }
             Button("取消", role: .cancel) {}

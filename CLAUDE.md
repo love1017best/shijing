@@ -12,55 +12,26 @@
 - `imageutil.go` — 格式/分辨率判断、`walk`（`os.walk` 语义）、并发工具
 - `pipeline.go` — 编排：筛选 → 采样复制 → 刷新系统壁纸；GUI（`app.go`）和命令行（`cmd/wallpaper`）都调它
 
-**Python 版已于 2026-11 从仓库删除**，不再维护，改功能不需要考虑 Python；本仓库（`love1017best/shijing`）从 v0.2.106 起用一个全新的初始提交开始，不含以前的历史；Python 版的完整代码和之前的提交在旧的私有仓库 `love1017best/wallpaper-toolkit` 里（tag `python-final`），本地克隆里也留有 `legacy-main` 分支，`git show python-final:image_sorter.py` 之类可以直接看。Python 时期的删除日志、增量状态和双击启动壳 `壁纸工具.app` 也都已删除。下面坑 1–10 是 Python 时期踩出来的，提到的 `image_sorter.py`、`clean_directory()` 等指旧仓库里的旧实现，Go 版里都有对应处理和测试（名字换成了 Go 风格，如 `dirMtime`、`clearDirectoryContents`、`sampleBalanced`），坑本身仍然成立。Go 版刻意没有迁移的只有几个单独跑脚本时的命令行参数：`image_sorter.py --reset-state`（替代：删状态文件）、`image_copyer.py --ratio` / `--no-format-check` / `--log`。
+**Python 版已于 2026-11 从仓库删除**，不再维护，改功能不需要考虑 Python；Go 版里都有对应的处理和测试。旧代码和之前的提交在私有仓库 `love1017best/wallpaper-toolkit`（tag `python-final`，本地有 `legacy-main` 分支）。下面第 1–3 条是 Python 时期踩出来的，结论对 Go 版仍然成立。
 
 ## 踩过的坑（重要，别重新踩一遍）
 
-### 1. `/Volumes/Media0` 是 SMB 网络挂载，协议层面天生不支持硬链接
-`mount | grep Media0` 确认是 `smbfs`。在这个卷上 `os.link()` 会直接报 `[Errno 45] Operation not supported`，不是代码 bug，是 macOS SMB 客户端的限制。**永远不要假设 `/Volumes/Media0` 下能创建硬链接**，要么走软链接兜底，要么换协议（见第 4 点）。
+### 1. 网络卷（SMB/NFS）上的链接、复制和删除
+- `/Volumes/Media0` 是 SMB（`mount | grep Media0` 确认是 `smbfs`），协议层面不支持硬链接，`os.link()` 报 `[Errno 45] Operation not supported`——不是代码 bug。**永远不要假设 `/Volumes/Media0` 下能建硬链接**。
+- macOS 通过 SMB 建的软链接是苹果私有编码，Windows 读不了。
+- 硬链接要求两端在**同一个挂载点**（同一 `st_dev`），跨挂载点一定失败，跟数据是否相同无关。这台机器 SMB 在 `/Volumes/Media0`、NFS 在 `/Volumes/nfs/Media0`（同一份数据，NFS 挂载点内部实测能建硬链接）：只有建归档链接这一步用 `translateSourceForArchive` 把源路径从 `ArchiveSMBRoot` 换成 `ArchiveNFSRoot`，扫描和复制仍只走 SMB 路径。归档默认关闭（`archive_enabled`），硬链接优先、不支持时降级软链接。
+- NAS 同步来的文件常带 `SF_ARCHIVED` 等 superuser-only flags，还原元数据会 `PermissionError`，但**文件内容已经复制成功**——元数据失败不能当成复制失败。
+- 网络卷 / 被 Finder 打开的目录不能「删掉目录本身再重建」（`Resource busy`），清空只删内容（`clearDirectoryContents`）。
+- 换一批的顺序是扫描 → 采样 → 确认选出了图才清空壁纸目录；找不到图就报错、目标目录原样保留（NAS 没挂上时别把壁纸目录清空）。
 
-### 2. macOS 在 SMB 上创建的软链接，Windows 读不了
-macOS 通过 SMB 创建的符号链接用的是苹果私有的 SMB 扩展编码，只有 macOS 的 SMB 客户端能解析。如果归档文件夹要给 Windows 远程当壁纸素材源用，Windows 端会完全读不出来（不是权限问题，是编码不兼容）。
+### 2. 增量筛选：目录 mtime 和判断规则
+- 「目录有没有变」不能看目录自身裸的 `st_mtime`：macOS 的 AppleDouble 影子文件（`._xxx.jpg`）、NAS 的 `@eaDir` 等索引目录会推高目录 mtime，图片其实没变，SMB 默认还把这些藏起来（Finder 里完全看不出来）。`dirMtime` 只统计「有意义文件」的 mtime，噪声目录不下钻、不计入。
+- 最小宽高（`thresholds`）或判断规则（`verdictRules`）变了要整体失效重扫，否则以前判过的目录会被一直跳过、新规则永远不生效。
 
-### 3. 网络卷/被 Finder 打开的目录，`shutil.rmtree()` 会报 `Errno 16 Resource busy`
-`clean_directory()`（`rmtree` 整个目录再 `mkdir` 重建）在本地磁盘上没问题，但对着一个正被 Finder 窗口打开着、或位于网络卷上的目录做「删除目录本身再重建」，删除 `rmdir` 这一步经常会 `Resource busy`。
-**解法**：`image_copyer.py` 里的 `clear_directory_contents()` 只清空目录内容、不删除目录本身（`iterdir()` 逐个删），归档目录用这个而不是 `clean_directory()`。如果哪天要对网络卷上的目录做"清空重建"，优先用这个模式。
+### 3. 平衡采样要先打乱叶子文件夹
+`sampleBalanced` 第一轮「每个叶子文件夹优先选 1 张」如果按遍历顺序、凑够数就停，叶子文件夹比采样数多时永远是同一批被选中，重跑多少次都一样。第一轮前必须打乱顺序（Go 版已做）。
 
-### 4. `shutil.copy2()` 会因为 `SF_ARCHIVED` 等 flags 假性报错
-NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）等 `st_flags`。`copy2` 内部 `copyfile` 成功后还会调用 `copystat` 还原这些 flags，非 root 进程设置这类 flag 会抛 `PermissionError`——**此时文件内容其实已经复制成功**，只是元数据还原失败。如果直接把这个异常当作"复制失败"处理（比如 `continue` 跳过后续步骤），会产生大量假阳性失败。
-**解法**：拆成 `shutil.copyfile()` + 单独 try/except 包住的 `shutil.copystat()`，metadata 失败只 `pass`，不影响主流程判定。
-
-### 5. 硬链接要求两端在**同一个本地挂载点**，不能跨协议/跨挂载点连
-即使 SMB 和 NFS 挂载的是 NAS 上同一份物理数据，`os.link(a, b)` 里 `a` 在 SMB 挂载点、`b` 在 NFS 挂载点也一定失败——OS 层面它们是两个不同的 mount（不同 st_dev），跟数据是否相同无关。
-这台机器上：SMB 挂载在 `/Volumes/Media0`，NFS 挂载在 `/Volumes/nfs/Media0`（同一份数据，`ls` 对比过内容一致，且已用 `os.link` 实测在 NFS 挂载点内部可以正常建硬链接）。
-`image_copyer.py` 里 `archive_smb_root` / `archive_nfs_root` 这对参数就是干这个的：采样/扫描/真复制全程仍然只走 `sources` 里配置的 SMB 路径不变，只有创建归档链接这一步，把源文件路径的 `archive_smb_root` 前缀换算成 `archive_nfs_root` 再做硬链接（`translate_source_for_archive()`），这样链接和源文件才落在同一个 NFS 挂载点下。
-
-### 6. 归档功能优先级：硬链接 > 软链接兜底，且默认关闭
-`archive_enabled` 默认 `false`，不影响任何已有行为。开启后每张选中的图片，除了真复制/软链接到 `dest_dir` 外，还会在归档目录下额外建一份链接（优先硬链接，不支持时自动降级软链接），归档目录默认是「源目录自身上级路径 / `_WallpaperArchive` 子文件夹」，可用 `archive_dir_override` 整体覆盖，或用 `archive_smb_root`/`archive_nfs_root` 做跨挂载点换算（见第 5 点）。
-
-### 7. 增量筛选的"缓存"曾经被 AppleDouble 影子文件/NAS 索引缓存目录污染
-`image_sorter.py` 的增量模式靠 `get_dir_mtime()` 判断目录有没有变化。旧实现直接拿目录本身裸的 `os.stat().st_mtime` 当信号，但 macOS 在非原生文件系统（网络共享/NFS/exFAT）上访问文件时会偷偷生成隐藏的 AppleDouble 影子文件（`._xxx.jpg`），Synology/QNAP 等 NAS 的缩略图/索引服务也会在媒体文件夹里建 `@eaDir` 之类的缓存目录——这些噪声文件/目录的增删会推高所在目录自身的 `mtime`，但图片内容其实根本没变，导致明明没动过的文件夹被反复整个重新扫描（实测过：文件夹里真实图片的 mtime 仍是几个月前，但目录自身 mtime 却是"刚刚"，SMB 默认还会把这些 `._`/`@eaDir` 从目录列表里隐藏掉，所以从 Finder/SMB 完全看不出问题在哪，只有换到 NFS 挂载点才能看到这些隐藏文件）。
-**解法**：`get_dir_mtime()` 不再用目录自身裸的 `st_mtime`，改成只统计"有意义的文件"本身的 mtime（用 `_IGNORED_NAMES` 集合 + `._` 前缀过滤掉已知噪声），递归子目录时同样跳过这些噪声目录，不下钻、不计入。这样一来，AppleDouble/索引缓存的增删完全不影响判断，但新增/修改真实图片仍然会被正确识别为"变化"。
-
-### 8. 叶子文件夹数量 > 采样数量时，`sample_images_balanced()` 曾经永远覆盖同一批文件夹
-`image_copyer.py` 里平衡采样第一轮"每个叶子文件夹优先选1张"，遍历的是 `list(grouped_images.keys())`——这个顺序来自 `os.walk()` 遍历顺序，对同一份目录结构是稳定不变的。旧实现没有打乱这个顺序，第一轮循环一旦凑够 `total_needed` 就 `break`，导致：当叶子文件夹总数多于采样数量时，排在遍历顺序前面的那些文件夹永远会被选中一次，排在后面的文件夹永远选不到——不管重跑多少次都是完全一样的那一批（实测过：同一份目录结构下连续调用/跨进程调用，覆盖到的文件夹集合 md5 哈希完全一致）。`random.choice` 只负责"选中的文件夹里挑哪张图"，不影响"选中哪些文件夹"，所以这不是靠多跑几次就能自然规避的。
-**解法**：在第一轮循环前 `random.shuffle(leaf_folders)`。修复后验证：连续 4 次独立进程调用，覆盖到的文件夹集合互不相同；累计并集覆盖率随运行次数增加而上升（本机 415 个叶子文件夹、采样 300 的配置下，4 次跑完就能覆盖全部 415 个）。
-
-### 9. 一轮优化小结（都已实测验证，不只是猜测）
-- `image_copyer.py`：`find_image_files()` + `find_images_by_leaf_folder()` 合并成 `scan_images()` 一次遍历同时产出两种视图。之前 `balance_first` 模式下这两个函数各自完整 `os.walk` 一遍相同的源目录（`filter_sources` 里的图片还要被 PIL 打开检查分辨率两次），实测单独跑一遍在冷/热缓存下花 2~10 秒不等，跑两遍纯属白白多付一次这个代价。
-- `image_copyer.py`：`run_copy()` 里算"叶子文件夹覆盖率"的 `covered_folders`，之前是对每张选中的图片都拿 `is_relative_to()` 逐个比对所有 leaf key（O(选中数×叶子数)）；实际上按 `scan_images()` 的构造方式，`src_path.parent` 必然就是它所属的叶子文件夹本身，直接 `{src_path.parent for _, src_path in selected_images}` 就是答案，验证过零误差。
-- `image_sorter.py`：`save_dir_state()` 之前会对每个刚处理过的目录**重新调用一次** `get_dir_mtime()`，而这个值在扫描阶段其实已经算过——对网络卷来说等于重新递归 stat 一遍该目录下所有文件。现在扫描时顺手把 mtime 存进 `dir_mtimes` 字典，保存状态时直接复用。同时把"事后用 `os.path.commonpath`/`startswith` 反推某个 `root` 属于哪个 `source`"的重复逻辑去掉了——扫描本来就是按 `source` 嵌套 `os.walk` 走的，直接在遍历时归类即可，不需要事后反推（也顺带消除了反推失败时静默丢失该目录输出的理论风险）。
-- 用过 `.resolve()` 单独计时确认：`Path.resolve()` 在这几个挂载点上快到可以忽略（300 次调用 <10ms），所以没有为归档路径换算加缓存——加了反而是无意义的复杂度。
-- `gui.py`/`run.py`：「清除壁纸缓存」这个勾选框之前是个摆设——`_build_cfg()` 从来没读过它的值，`run_pipeline()` 里清缓存那一步也没检查任何开关，只要 `wallpaper_cache_path` 非空就无条件清。现在补了 `clear_wallpaper_cache` 字段，勾选框真正生效了；顺手把清缓存路径展开从 `.replace('~', ...)` 换成正规的 `os.path.expanduser()`。
-
-### 10. 第二轮审查修掉的几个"出事后果比较重"的问题
-- `run_copy()` 以前先清空 `dest_dir` 再扫描源目录——NAS 没挂载/网络抖动时扫描不到图片，壁纸目录白白被清空。现在顺序是：扫描 → 采样 → 确认选出图片后才清空 dest/归档目录并复制；找不到图片会抛 `CopyError`（不再在库代码里 `sys.exit`），目标目录原样保留。
-- `image_sorter.py` 的增量缓存现在会在 state 里记录 `thresholds`（最小宽高）；阈值与上次不同就整体失效重扫，否则调严分辨率后没变化的目录会被一直跳过、新阈值对老图片永远不生效。
-- 筛选实际删除文件时会往 `.image_sorter_deleted.log`（已 gitignore）追加一行（时间/阈值/路径）——删的是 NAS 上的原图，不可撤销，至少要能事后核对。
-- GUI 的默认值统一引用 `run.DEFAULTS`（以前 GUI/CLI 各写一份，「清除壁纸缓存」勾选框失效就是这种漂移导致的）；配置文件缺失时用默认值初始化；数字框被清空时弹窗提示而不是抛 `TclError`。
-- 杂项：`process_image.sh` 改用 `python3`；README 的 Python 版本要求改为 3.10+（代码用了 `str | Path` 注解）；清掉未使用的 import 和死代码（`get_image_info` 等），pyflakes 现在是干净的（没装，用 `pip install --target /tmp/pf pyflakes` 临时跑）。
-
-### 11. 拾景（`desktop/`）特有的注意点
+### 4. 拾景（`desktop/`）特有的注意点
 - 依赖 MyGo v0.8.x（0.x 阶段，小版本升级可能改 API）。升级前读 `desktop/.agents/skills/mygo-maintenance/SKILL.md`，用 `go tool mygo migrate-ui .` 预览迁移；改完跑 `go tool mygo vet .` 和 `CGO_ENABLED=0 go test ./...`。
 - 配置、增量状态、删除日志、窗口位置都在 `~/Library/Application Support/拾景/`，不是仓库目录（`.app` 位置不固定，不能像 Python 版那样相对脚本目录找文件）。状态文件故意不和 Python 版共享。改名前叫「壁纸工具」，`main.go` 启动时会用 `core.MigrateDataDir` 把旧目录搬过来（新目录已存在就不动）。以后再改 `appName` 也要照此迁移，否则用户配置会"丢"。
 - 窗口用 `TitleBarHiddenInset` + `VibrancySidebar`：侧边栏顶部和内容区顶部各留了一条 `DragWindow()` 的拖拽区，侧边栏背景透明才能透出毛玻璃（`c.Vibrancy()` 为 false 时退回纯色）。配色和通用组件（`panel`/`group`/`settingRow`/`sceneArt` 插画）集中在 `theme.go`。强调色是橙色（用户定的，v0.3.11 起：浅色 #E45C00、深色 #E56900），改的话 iOS 的 `Assets.xcassets/AccentColor` 要一起改；应用图标（`desktop/resources/icon.png` 和 iOS 的 `AppIcon.png`）v0.3.12 起也是橙色日落，是用 `desktop/scripts/recolor_icon.py` 从原来的紫色图标换算的；`make_icon.py` 是更早的画法，和现在的图标对不上。横幅插画（`sceneArt`）的颜色取自图标、用同一套换算。
@@ -95,7 +66,7 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - README 截图（`docs/screenshots/`）由 `desktop/screenshots_test.go` 用无窗口 Tester 渲染：程序画的示意风景图当壁纸、演示用的目录和日志，2 倍缩放后再画上圆角和红绿灯。**不要用真实壁纸/真实 NAS 路径截图**。界面改了就设 `SHOTS_DIR` 重跑一遍。
 - `mygo build` 生成的 dmg 文件名是应用名的拼音（`shi-jing-*.dmg`），这是正常的。
 
-### 12. 慢的根源是 SMB 往返延迟，不是计算量；拾景对 NAS 的 I/O 已并发化
+### 5. 慢的根源是 SMB 往返延迟，不是计算量；拾景对 NAS 的 I/O 已并发化
 2026-11 实测（只读剖析：模拟筛选、复制到临时目录、不归档；约 2.9 万个文件、475 个图片目录，`sample_count` 400 ≈ 6.2 GB）：
 
 | 阶段 | 串行（冷缓存） | 并发后 |
@@ -112,14 +83,14 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 后台算 mtime 的 worker 不调 `Reporter.Stop`（调用方的 Stop 不一定并发安全，测试里就是裸变量），停止时由主循环置内部的 `abandon` 标志。
 - 已归档的 Python 版没有做并发化。
 
-### 13. 「清除壁纸缓存」从来没生效过；文件夹轮换要靠重启 WallpaperAgent
+### 6. 「清除壁纸缓存」从来没生效过；文件夹轮换要靠重启 WallpaperAgent
 2026-11-09 实测（macOS 27.2，系统设置里壁纸选 `~/Pictures/Wallpapers0` 文件夹、每分钟随机切换）：
 - 以前删的是 `~/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/com.apple.wallpaper.caches/extension-com.apple.wallpaper.extension.image`。这个容器目录受系统保护，读都读不了（Permission denied），`os.RemoveAll` 失败，但旧代码忽略了错误，日志照样写「已清除」——目录 mtime 一直早于运行时间，证明从没删掉过。
 - 壁纸设置存在 `~/Library/Application Support/com.apple.wallpaper/Store/Index.plist`，里面只记了 `{'type': 'imageFolder', 'url': ...}`，没有文件列表；轮换由 `WallpaperImageExtension` 进程自己读文件夹。换一批之后用 `lsof -Fn -p <pid>` 看它打开的文件：3 个屏幕里 2 个停在已经被删掉的旧图上，「每分钟」设置下 2 分多钟都没动；`killall WallpaperAgent` 后 launchd 立刻重新拉起 agent 和扩展，几秒内打开的全是新一批的图。
 - 所以现在流程最后一步是 `core.RefreshWallpaper`（`killall WallpaperAgent`），配置 JSON 键仍叫 `clear_wallpaper_cache` 兼容老配置，`wallpaper_cache_path` 已删除。测试里 `TestMain` 把它换成空函数，**别让测试真的重启壁纸服务**。
 - 查 lsof 的坑：lsof 输出里中文路径是 `\xe7..` 转义的，要先 `codecs.escape_decode` 再判断文件是否存在；这台机器的 `ls` 是 eza，`ls -i` 输出格式不同，别拿它比 inode。
 
-### 14. 手机遥控（iOS 端，v0.3.6 起）
+### 7. 手机遥控（iOS 端，v0.3.6 起）
 - 桌面端 `desktop/remote.go`：设置里打开 `remote_enabled` 才监听（默认端口 52819，被占用时随机），Bonjour 用系统的 `dns-sd -R` 广播 `_shijing._tcp`（走 mDNSResponder，比纯 Go 的 mDNS 库可靠）。dns-sd 外面包了一层 `sh … & read _; kill`，拾景的 stdin 管道一断（包括崩溃）它就退出；退出应用时 `OnBeforeQuit` 里也会 `remote.stop()`。
 - 读状态的请求读主线程发布的快照（`publishRemote`：每帧 view 末尾、以及 `main.go` 里包了一层的 `a.update` 之后），不等主线程；要改状态的（运行、停止）走 `remoteServer.onMain`，**它在 fn 之后先 `publishRemote` 再放行**，否则响应里带的是旧快照（踩过）。
 - 遥控运行前在后台重新 `probeMount` 一遍图库目录：桌面的挂载状态只在启动 / 导入配置时查，NAS 后挂上的话 `canRun` 一直是 false。
@@ -144,19 +115,23 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - **整个 App 的悬浮块走 `Glass.swift`**（v0.3.159）：`glassBackground(in:)` / `glassBackground(in:tint:)`，iOS 26 上是系统的液态玻璃（`glassEffect`，可 `interactive`），更早的系统退回 `.ultraThinMaterial`。浮在图片 / 内容上的块（预览按钮和文件名、缩略图条、提示气泡、多选操作条、筛选胶囊、横幅卡、扫码页）都用它，**别再各写一份 `.background(.ultraThinMaterial, …)`**。深色图上用 `tint:` 压一下，浅色玻璃在暗图上会发灰。`ShareOriginalButton` 的 `glass: true` 就是预览底栏那一颗圆形（`size` 跟关闭按钮一起收窄）。
 - 手机什么时候能看到新一批（v0.3.122 修）：换完一批后桌面端要**立刻**重读壁纸文件夹，不能只等下一帧 `view()`——窗口关着时 view 不重画（`main.go` 的 update 包装就是为这个），`wallsGen++` 后没人调用 `loadWallpapers`，`walls_rev` 一直不变，手机（列表、横幅、小组件）就停在上一批，直到重新打开桌面窗口。现在 `startRun` 结束的 `a.update` 里直接 `a.loadWallpapers()`，`wallsLoadedGen` 的推进也挪进了 `loadWallpapers`，读完再检查 `wallsGen` / 目录有没有又变（`wallsreload_test.go` 用「只执行主线程更新、不渲染」模拟隐藏的窗口）。
 - iOS 的开发语言必须是 `zh-Hans`（`project.yml` 的 `developmentLanguage`）：App 没有中文本地化时 `Locale.current` 会退回英文，日期、系统按钮都显示成英文（踩过）。
-- **离线模式**（v0.3.110 起，第 2、3 批）：手机连不上 Mac 时显示上次同步的样子。`OfflineStore.swift` 把最后一份 `RemoteState` + 壁纸列表 + 横幅图名按 Mac 存到 Application Support/拾景/offline，`RemoteSession` 开机先读它（`snapshotAt` 非空 = 显示的是快照，界面标「离线 · X 前同步」），连上后每次状态更新覆盖（5 秒最多写一次，壁纸列表变了立刻写）。图片也存磁盘（`ImageStore`）：一个目录 Application Support/拾景/images/，每张壁纸按文件名存几份（`thumb-` 360 宽、`hero-` 1600、`image2732-` 2732、`original-` 原文件），**不分批次、不分 Mac**；连上时后台队列依次存缩略图 → 横幅 → 整批大图 →（开了「保存原图」）原图（`prefetch`，3 路并发，已存下的跳过）；壁纸列表一变就 `keepOnly(names:)` 删掉不在这批里的文件——同一张图换了批还在，不用重下。缓存有上限（UserDefaults 的 `offlineCacheLimitGB`，默认 10 GB，设置页可改 1–50），到上限就停、已有的不删；设置页「离线」显示占用和进度，可以暂停 / 补齐 / 清除。每次从断线变回 live 也重新 `prefetch` 一遍（没存完的接着补）。**离线时的操作**：「移出」「不再选」「删除原图」都记在 `RemoteSession.queued`（UserDefaults 的 `offlineActions.<Mac 的 id>`，按 Mac 分开，每条还存下那张 `Wallpaper` 和原来的位置），本地先把那张从 `walls` 去掉；连接变回 live 时 `flushOfflineActions` 逐条补「移出」「不再选」——「不再选」走新加的 `POST /api/excluded/add`（只需要原图路径，和那一批还在不在无关，桌面端会去重并记一行日志），「移出」如果那张壁纸已经不在当前这一批就算过期；网络又断了的话剩下的留到下次。**「删除原图」不自动补**（v0.3.129 起；v0.3.111–v0.3.128 是离线直接禁用）：不可撤销，连上后在「待补操作」页（`QueuedActionsView.swift`）里逐张「确认删除」或「全部确认删除」才执行（`confirmQueuedDelete` 先 force 拉一次电脑上现在的列表，还在这一批才调 `POST /api/wallpapers/{name}/delete`；那一批已经换掉的算过期、原图没删，提示去电脑上删——接口只能按壁纸名删）。**「待补操作」是单独一页，带缩略图预览**（v0.3.130 起）：设置页和概览横幅下面都只是入口（设置里一行「待补操作 N 项」，概览里「N 张原图等你确认删除」一行），点开都是 `QueuedActionsView`——每条显示缩略图（点开看大图）、文件名、原图路径、时间，「删除原图」红字逐条确认，「移出」「不再选」列在「连上电脑后自动补上」一组，底部可以全部取消。队列条目还留着记下时的 `rev`（`OfflineAction.rev`，现在只是存档字段，找缩略图按文件名来；那张图已经被清掉就显示占位图标）。`cancelQueued` / `cancelAllQueued` 取消后按存下的下标放回列表；离线时 `session.undoName` 取队列里最近一条「移出」，`undoRemove` 直接取消、不用连电脑。「存到相册」「分享原图」下载的是电脑上的原文件（不是缓存的预览图），离线时也要一并禁用（v0.3.117 补上，以前只禁用了删除；v0.3.125 起设置里存过那张的原图时离线也能存 / 分享）。截图验证用 `-demo -demoOffline`：它会把演示图写进磁盘缓存再从磁盘读，`demo` 置 false，真的走一遍离线读图路径；`-demoSettings -demoOfflineCache` 直接摆出「离线」和「待补操作」入口（设置页太长，模拟器里滚不到最下面），`-demoQueuePage` 直接打开「待补操作」页（配 `-demo` 或 `-demoOffline` 看两种状态）。离线时 `ImageStore.load` 只读磁盘、不发请求（发了要干等超时），大图没缓存但缩略图在就先垫缩略图并提示「显示的是缩略图」，都没有才显示「这张还没缓存」。
-- **原图缓存**（v0.3.125 起）：设置 › 离线里的「保存原图」（`cacheOriginals`，默认关）。打开后后台队列在预览图之后接着存这一批的原文件（图库里那一份），离线时「存到相册」「分享原图」用手机上那份（没存过才禁用）；大图预览的 `.image` 没命中时先看原图，用 ImageIO 按 `ImageKind.targetWidth` 缩着解码（`downsampleFile`，按文件读、整张原图解码会爆内存），**不联网**。离线时缩略图、横幅也拿原图缩；在线时缩略图照常下载（一张几十 KB，从几十 MB 的原图现缩反而拖慢网格）。开关关掉不会删已经存下的，设置页照常显示张数和大小。大图宽度 2732（桌面 `remoteImageWidth`，覆盖 iPhone Duo 内屏），`ImageKind.cachePrefix` 里带宽度，改了前缀旧缓存自然失效。截图用 `-demo -demoOffline -demoSettings -demoOfflineCache`，demo 会在 `seedDiskCache` 里种一半原图，能看到「原图 N / 300 张 · 大小」和「已用 X / 上限」。
-- 缓存逻辑（v0.3.153 收敛过，别再往复杂里做）：**一个目录、一个队列、一个上限**。
-  - 目录是平的：`images/<前缀>-<文件名>`，没有批次目录。`keepOnly(names:)` 在每次拉到新列表时跑，删掉名字不在这批里的文件；同一张图换了批文件名不变，缓存留着接着用。所以**不要**再按 `walls_rev` 分目录、也不要再写跨目录搬文件的逻辑。
-  - 队列只有一个（`ImageStore.prefetch`）：缩略图 → 横幅 → 整批大图 →（开关开着）原图，3 路并发，`used` 从整目录大小起算，超过上限就停（`prefetchHitLimit`）。别再拆成两个任务各算各的额度——v0.3.152 之前那样做过，两边从头算，加起来能超上限将近一倍。
-  - 清除（`ImageStore.clear(_:)`）删文件是后台任务（`clearTask`），`prefetch` 量磁盘之前先 `await` 它，否则点完「清除」马上点「补齐」，量到的是还没删掉的那份，一上来就以为到上限。
+- **离线缓存**（v0.3.110 起，v0.3.153 收敛过，别再往复杂里做）：**一个目录、一个队列、一个上限**。
+  - 目录是平的：`images/<前缀>-<文件名>`（`thumb-` 360 宽、`hero-` 1600、`image2732-` 大图、`original-` 原图），**不分批次、不分 Mac**。`keepOnly(names:)` 每次拉到新列表时删掉不在这批里的文件；同一张图换了批文件名不变、缓存接着用。别再按 `walls_rev` 分目录，也别写跨目录搬文件的逻辑。
+  - 队列只有一个（`ImageStore.prefetch`）：缩略图 → 横幅 → 整批大图 →（开了「保存原图」）原图，3 路并发、已存下的跳过，`used` 从整目录大小起算、超过上限就停（`prefetchHitLimit`）。别再拆成两个任务各算额度——两边都从头算，加起来能超上限近一倍。`prefetchGen` 代际号判「这轮是不是已被新一轮顶掉」，旧的收尾不会把新的 `prefetching` 置回 false。
+  - 清除（`ImageStore.clear(_:)`）删文件是后台任务（`clearTask`），`prefetch` 量磁盘之前先 `await` 它，否则点完「清除」马上点「补齐」会一上来就以为到上限。
+  - 上限是 UserDefaults 的 `offlineCacheLimitGB`（默认 10 GB，设置页 1–50），到上限就停、已有的不删。图片缓存目录排除出 iCloud / 电脑备份。
+  - 进度按**这一批的张数**算，不翻倍（v0.3.171 修：以前 `prefetchTotal = 张数 × 2`，400 张显示成「199 / 800」）。大图、原图各有一个完成计数（`prefetchDone` / `prefetchOriginalDone`），`prefetchTotal` 是这批的张数，先显示「正在缓存大图 N / M 张」、大图存完再显示「正在缓存原图 N / M 张」。
   - 设置页「离线」就六行：离线可看 N / M 张、状态 + 补齐 / 暂停、保存原图开关、（有原图时）原图张数和大小、缓存上限、已用 + 清除。别再拆回「预览图 / 原图」两套进度条和两套暂停按钮。
-  - `OfflineStore.loadRecord` 是 async（读盘在后台、解码留主线程，避开泛型跨任务的 Sendable 要求）：删除记录几百条时别卡住打开页面。
+  - 状态快照和记录缓存都由 `OfflineStore` 存（快照带 `wallsRev`，旧文件没有时回退 `state.wallsRev`；记录是 `records-<id>-<log|deletions|excluded>.json`，带同步时间）。写盘都排在同一条串行 `writeQueue` 上，`clear` 也排进去，免得排队的旧快照把删掉的文件写回来；`loadRecord` 是 async（读盘在后台、解码留主线程）。快照每 5 秒最多写一次，壁纸列表变了立刻写。
+  - 离线时 `ImageStore.load` 只读磁盘、不发请求（发了要干等超时）：大图没缓存但缩略图在就先垫缩略图并提示「显示的是缩略图」，都没有才显示「这张还没缓存」。
+  - 「保存原图」（`cacheOriginals`，默认关）：打开后队列在预览图之后存这一批的原文件（图库里那一份）；离线时「存到相册」「分享原图」用手机上那份（没存过才禁用），大图预览 `.image` 没命中时看原图，用 ImageIO 按 `ImageKind.targetWidth` 缩着解码（`downsampleFile`，整张原图解码会爆内存），**不联网**。离线时缩略图、横幅也拿原图缩；在线时缩略图照常下载（从几十 MB 的原图现缩反而拖慢网格）。开关关掉不删已存的，设置页照常显示张数和大小。大图宽度 2732（桌面 `remoteImageWidth`，覆盖 Duo 内屏），`ImageKind.cachePrefix` 带宽度，改前缀旧缓存自然失效。
+  - **离线时的操作**：「移出」「不再选」「删除原图」记在 `RemoteSession.queued`（UserDefaults 的 `offlineActions.<Mac 的 id>`，按 Mac 分开，每条存下那张 `Wallpaper`、原位置和记下时的 `rev`），本地先把那张从 `walls` 去掉；连回 live 时 `flushOfflineActions` 逐条补「移出」「不再选」——**逐条消费**：取走第一条就 `saveQueue`，失败了再 `insert(at: 0)` 放回（别回到「遍历快照 + 批量删」，期间用户取消掉一条会被误补）。判断「那张还在不在这一批」必须先用 `refreshWalls(force: true)` 拉电脑上现在的列表（离线记下时已从本地列表去掉）；还在的「不再选」走 `removeWallpaper(exclude: true)`（只加名单不移出的话电脑上文件夹里还留着），已经换掉的退回 `POST /api/excluded/add` 按原图路径补。桌面 409 按消息区分：「正在换壁纸」不是过期、留在队列里（换完一批 SSE 那一路会再补一次），「已经不在壁纸文件夹里」才算过期。「取消」对两种操作都要把那张放回列表；移除一台 Mac 也要清掉它没补上的队列（`clearQueue`）。
+  - **「删除原图」不自动补**：不可撤销，连上后在「待补操作」页（`QueuedActionsView.swift`；设置页一行「待补操作 N 项」和概览横幅下面都只是入口）逐张「确认删除」或「全部确认删除」（`confirmQueuedDelete` 先 force 拉一次列表，还在这一批才调 `POST /api/wallpapers/{name}/delete`；换掉的算过期、原图没删，提示去电脑上删——接口只能按壁纸名删）。每条显示缩略图（点开看大图）、文件名、原图路径、时间，「移出」「不再选」列在「连上电脑后自动补上」一组，底部能全部取消；取消后按存下的下标放回列表。离线时 `session.undoName` 取队列里最近一条「移出」，`undoRemove` 直接取消、不用连电脑。
+- **记录页也是三栏切换**（v0.3.171 起，和设置页同一套）：`RecordsPage` 顶上一条 `safeAreaInset` 分段控件（运行日志 / 删除记录 / 不再选），下面 `.tabViewStyle(.page(indexDisplayMode: .never))` 的 TabView，`@AppStorage("recordsGroup")` 记住选过哪栏。以前是外层一个 List、三个 NavigationLink 进二级页——外屏竖放时靠上的行会被右上角竖排状态栏压住，而且多一层没必要。三个子页不再各自设 `navigationTitle`，标题只有最外层那个「记录」。`ExcludedView` 的「全部恢复」原来在工具栏，改成列表末尾一个 Section（工具栏在外屏上位置太挤）。截图用 `-demoLog` / `-demoDeletions` / `-demoExcluded` 直接打开那一栏。
 - **记录页离线也能看**（v0.3.115 起，第 7 批）：`OfflineStore` 多了 `saveRecord` / `loadRecord`（泛型 `Cached<T>`，按 Mac 存 `records-<id>-<log|deletions|excluded>.json`，带同步时间，`clear(id)` 一起删），`RemoteSession.refreshRecordsCache()` 在连接变回 live、每换完一批、以及移出 / 删除 / 不再选成功后各存一份。`LogView` / `DeletionsView` / `ExcludedView` 在线照旧请求，失败或离线时读缓存并在顶部标「离线 · X 前同步，下面是手机上存的副本」；都没有时提示「连上电脑后会自动存一份」。离线时「不再选」只能看（恢复要改电脑上的名单），设置页顶部说明「现在连不上电脑，设置只能查看」，概览的「换一批」说明和「停止」按钮也按离线禁用。截图用 `-demo -demoOffline -demoRecords` 加 `-demoLog` / `-demoDeletions` / `-demoExcluded` 直接打开子页（模拟器的触摸注入经常失效，别指望点得进去）；demo 会在 `-demoOffline` 时往这三份缓存里写演示数据。
 - **删除记录按天折叠、按类型筛**（v0.3.142 加了折叠和分段控件，v0.3.143 改成多选胶囊标签，桌面端同步跟上）：`DeletionsView` 最上面一行是两个胶囊标签（`chip`，`@State kinds: Set<Kind>`，**空着 = 全部**，两个都选也等于全部——用户要的是标签而不是分段控件，别改回 `Segmented`），判断依据只有记录里的 `reason` —— 等于 `core.ReasonManual`（「手动删除」）的算手动删的，其余（包括没有原因的旧日志）都算筛选删的，和 `core.CountDeletions` 一致。张数在标签里（旧版桌面端不推 `filter` / `manual` 就按已拿到的记录数），含义写在分组下面的 footer 里。每天的标题点了收合，`collapsedDays` 记着、默认全展开；**箭头是自己画的**——`Section(isExpanded:)` 在 insetGrouped 列表里不显示箭头，看不出能折，所以用 Section header 里放 Button + chevron 控制，内容按 `if open` 决定放不放。桌面端 `desktop/deletedview.go` 是同一套：`a.delFilter` / `a.delManual` / `a.delClosed`（`app.go`），胶囊标签和日期标题都用 `ui.ToggleBase` 自己画样子（`delTypeChip` 复用），测试 `deletedview_test.go`。
 - 手机上删记录页的「记录」是**全量**给的：`GET /api/deletions` 以前截到最近 300 条，手机在另一台机器上没法去翻日志文件，页面上的张数（617 条却写着「只显示最近 300 条」）对不上，用户要求去掉这个限制。桌面端自己的页面仍然只列 `deletedShown`（500）条，更早的在日志文件里，底部有提示。
 - **连接状态跟着系统网络走**（v0.3.116）：以前只靠 SSE 报错才知道断了，飞行模式 / 关 Wi‑Fi 后 socket 可能挂很久，界面上一直是绿的。`RemoteSession` 现在用 `NWPathMonitor`：系统网络变成不满足时立刻置 `.offline("手机没有连上网络。")` 并取消事件流任务，恢复正常后再 `start()`（后台 `paused` 时不自己重连，回前台再说，`.unpaired` 不会被网络状态盖掉）；demo 模式不启动监听。注意飞行模式开着但 Wi‑Fi 还连着时仍然显示已连接——那时候 Mac 真的连得上，是对的。
-- **补离线操作的几个坑**（v0.3.118）：`flushOfflineActions` 不能拿手机上的 `walls` 判断「那张还在不在这一批」——离线记下时已经把它从本地列表去掉了，必须先用 `refreshWalls(force: true)` 拉电脑上现在的列表。还在这一批的「不再选」照在线的做法走 `removeWallpaper(exclude: true)`（只加名单不移出的话，电脑那边文件夹里还留着）；已经换掉的才退回 `POST /api/excluded/add` 按原图路径补。桌面返回 409 时看消息：「正在换壁纸」不是过期，要留在队列里（换完一批时 SSE 那一路会再补一次），「已经不在壁纸文件夹里」才算过期。「取消」对两种操作都要把那张放回列表（两种在离线时都从列表去掉了），移除一台 Mac 也要清掉它没补上的队列（`RemoteSession.clearQueue`）。图片缓存目录要排除出 iCloud / 电脑备份（10 GB 的图不该进备份）。
 - 装到手机的是 **Release**（v0.3.106 起，`install-ios-device.sh` 带 `-configuration Release`，产物在 `ios/build/Build/Products/Release-iphoneos/`）：`project.yml` 里 Release 剥符号（`STRIP_INSTALLED_PRODUCT` + `DEPLOYMENT_POSTPROCESSING`），App 还排除了 `WidgetViews.swift`（只给 Debug 的 `-demoWidgets` 用）。包从 Debug 的 6.3 MB 降到 2.1 MB，小组件进程也省内存。`-demo*` 启动参数都包在 `#if DEBUG` 里，只在模拟器的 Debug 构建里有；Release 里 App 用到 `WidgetViews` 里的类型会编不过，要么包进 `#if DEBUG`，要么挪进 `Shared/`。
 - **iPad 的顶栏用系统自己的**（v0.3.131 一度自己画过带图标的 `padTabBar`，v0.3.132 用户要求改回）：iPadOS 26/27 的系统顶部标签栏只画文字、没有图标，`.toolbar(.hidden, for: .tabBar)` 也藏不掉它——这是系统行为，**别再尝试补图标或自己画顶栏**，用户觉得原来的更好。iPhone 是系统底部标签栏，iOS 18 起走 `Tab(title, systemImage:value:)`，iOS 17 退回 `.tabItem`；`RootTab` 的 `title` / `icon` 两种都用得到。
 - iOS 端没有侧栏（v0.3.21 起，用户嫌宽屏上占地方、连 Mac 只有第一次装时用）：一台都没配对时整屏是 `SetupView`（附近的 Mac + 手动输入地址）；配对过之后是三个标签（v0.3.105 起，对应桌面侧边栏）：概览（`DashboardView`，只放状态和操作，设置只读摘要在「状态」分组）、设置（`SettingsPage`，分组和桌面设置页一致）、记录（`RecordsPage`）。用户嫌设置堆在首页，别再把可改的设置放回概览。切换 / 添加 / 管理 Mac 在概览的标题菜单里（`macTitleMenu`，点顶部 Mac 名字）；这个菜单只放设备相关的操作，版本号别塞进去（以前在菜单里当过一行禁用按钮，用户觉得混在设备列表里很奇怪）。**「关于」是设置页的第三栏**（v0.3.132 一度独立成页、入口在概览右上角，用户觉得首页放它奇怪，v0.3.133 改回设置里的第三栏）：内容是两边版本、这台手机 / 平板的签名到期；以前混在设置页最下面，用户觉得怪。壁纸文件夹路径**不放**关于里（和电脑端「设置 › 输出」重复）。小组件深链会切回概览标签。截图用启动参数 `-demoSettings` / `-demoRecords` / `-demoAbout` 直接打开对应页面。「附近的 Mac」只在有界面显示它时才用 Bonjour 搜索（`Discovery.want(名字, 开关)`）：首次配对页和「添加其他 Mac」弹层。
@@ -164,7 +139,6 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - 界面文案（v0.3.133 用户要求清理过一次）：平实、具体，直接说这里是干什么的。不写预告 / 总结腔，不用「其实」「真正」「正是」这类凑语气的词，也不用「只是……」「才……」这种防御性说法（取消、离线这类行为写清楚结果就行）。实现细节和黑话不进界面：不写「NAS」「2732 宽」「硬链接 / 跨挂载点换算」，必要的地方用「图库」「原图」「连接」。功能上的区分不能省：「移出」只动壁纸文件夹，「删除原图」才动图库；不可撤销的操作要写明。
 - 代码整理（v0.3.121 起，行为不变，之后的改动顺着这个结构来）：
   - 文件按职责拆开：`RemoteSession.swift` 只剩连接、状态、设置、壁纸操作；离线队列在 `RemoteSession+Queue.swift`，演示数据在 `RemoteSessionDemo.swift`（`#if DEBUG`）；记录页三页和共用的取数逻辑在 `RecordsPage.swift`；连接异常的整页占位 `ConnectionFallback` 和「非 live 才显示的徽标」`connectionToolbar` 在 `ConnectionUI.swift`。跨文件要改 `RemoteSession` 的状态，属性得是 `internal(set)`（`private(set)` 在别的文件里写不了）。
-  - 离线队列 `flushOfflineActions` 是**逐条消费**：取走第一条就 `saveQueue`，失败了再 `insert(at: 0)` 放回。别回到「遍历快照 + 批量删」，那期间用户取消掉一条会被误补。桌面返回 409 时按消息区分：「正在换壁纸」放回队列下次再补，「已经不在壁纸文件夹里」才算过期。
   - 离线快照 `OfflineStore.Snapshot` 除了状态和壁纸列表还存了 `wallsRev`（壁纸属于哪一批）。旧文件没有这个字段时回退到 `state.wallsRev`。
   - 预览翻页的三页（`PageSlot`）按**文件名**做身份，同一张图翻页时不会整个重建；双击和单击用 `ExclusiveGesture`（双击不再顺带触发隐藏工具栏）；双指缩放结束后 `axis = nil` 复位，否则下一段拖拽会沿用缩放时的判定。
   - `ImageStore` 内存缓存的 key 只用 macID + 文件名 + 尺寸，不碰 `session.client()`。`MacStore.token(for:)` 读一次钥匙串就缓存在内存里（配对 / 取消配对时更新），`client()` 才能随便调——每张图加载都查一次钥匙串会卡主线程。`prefetchAll` 用代际号（`prefetchGen`）判「这轮是不是已经被新一轮顶掉」，旧的收尾不会把新的 `prefetching` 置回 false。删目录、算占用这类磁盘操作放 `Task.detached`，不占主线程。
@@ -191,7 +165,7 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
   - 给列表加 `padding` / `frame` 会把滚动条一起挪到内容边上；`contentMargins(…, for: .scrollContent)` 只收窄内容，滚动条留在列表右边，和系统设置一致。
   - 滚动条落在**内容区**的右边缘（Duo 内屏 861pt），不是屏幕最右边：右边那 84pt 是系统浮动标签栏的安全区。试过 `padding(.trailing, -窗口安全区)` 把列表推到安全区下面，原生列表的滚动条也没跟着过去，已经去掉；别再加。
   - **不做左右两栏**（v0.3.161，用户定的）：v0.3.155–v0.3.160 试过宽屏分两栏（两个并排 List），但每个 List 各有各的滚动条，左栏那条落在屏幕中间、贴着右栏内容，原生列表也没法让滚动条跑到整页最右边。现在「电脑上的拾景」是一个列表（顺序：离线提示 → 输出 / 采样 / 画质 / 归档 → 筛选 / 自动换 / 系统 → 图库入口 → 待删除），内容最宽 680 居中，和系统设置一样。`macLeftSections` / `macRightSections` 这两个函数名是那会儿留下的，现在只是上下接在一起。
-  - **整页底色要铺满**（v0.3.160）：收窄只解决内容宽度，底色还得分页容器自己画——`SettingsPage` 和 `MacPage` 各加了一层 `.background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())`。加在 `NavigationStack` / `TabView` 上不管用（右侧浮动标签栏那条安全区和底部还是白的，列表一块灰、旁边一条白，Duo 内屏上像贴上去的），加在页面根视图上 `ignoresSafeArea` 才能盖住那块。
+  - **整页底色要铺满**（v0.3.160）：收窄只解决内容宽度，底色还得分页容器自己画——`SettingsPage` 和 `RecordsPage` 各加了一层 `.background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())`。加在 `NavigationStack` / `TabView` 上不管用（右侧浮动标签栏那条安全区和底部还是白的，列表一块灰、旁边一条白，Duo 内屏上像贴上去的），加在页面根视图上 `ignoresSafeArea` 才能盖住那块。
 - 小组件（`ios/ShiJingWidget`，bundle id `….ios.widget`）和快捷指令（`Shared/Intents.swift`）读不到 App 的 UserDefaults：**免费签名没有 App Groups，但钥匙串共享能用**（2026-11-11 真机签名验证过）。令牌和 `CurrentMac` 存在共享组里，组名带团队前缀，靠 Info.plist 的 `ShiJingKeychainGroup = $(AppIdentifierPrefix)…` 在构建时展开；模拟器没签名时退回默认组。旧版本存在默认组里的令牌读到时自动挪进共享组。`MacStore` 选中的 Mac 变了就写 `CurrentMac`。
 - 换完发通知没有推送可用：App 进后台时如果正在换，用 `beginBackgroundTask` 多连 ~30 秒；小组件运行中按分钟刷新。两边经 `RunNotifier` 共用钥匙串里「通知过的那次 `last.at`」，第一次只记不发，结束超过 15 分钟的不发。通知权限在第一次从手机换一批时才问。
 - 签名到期：`SigningExpiry` 读 `embedded.mobileprovision` 的 `ExpirationDate`；模拟器里用启动参数 `-demoExpiring` 假装 36 小时后到期，看提醒横幅。
@@ -201,13 +175,13 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
 - `release.sh --version X.Y.Z` 直接发成指定版本（v0.3.100 就是这样发的），只在用户要求某个版本号时用。
 - 两边 JSON 对接验证过的方法：写个临时的 Go 测试用 `newRemoteHarness` 起服务并把地址和令牌写到文件，再用 `swiftc Models.swift APIClient.swift main.swift` 编一个命令行客户端去连。时间字段一律用 Unix 秒（Go 的 RFC3339 纳秒精度 Swift 解析不稳）。
 
-### 15. 横竖屏要按 EXIF 方向判断（v0.3.18）
+### 8. 横竖屏要按 EXIF 方向判断（v0.3.18）
 不少照片是「像素横着存 + EXIF Orientation 标记转 90°」：像素 6240×4160，系统壁纸、Finder、预览里显示的却是 4160×6240 的竖图（例：`[织梦映像]NO.098 …/0163.jpg`，Orientation=8）。以前 `ImageVerdict` 只看 `image.DecodeConfig` 的像素宽高，这种竖图被当成横屏选进壁纸。现在先用 `core/orientation.go` 的 `exifOrientation`（纯 Go，只读 JPEG 的 APP1 / TIFF 的 IFD0）读方向，5–8 时宽高互换再判断。2026-11 只读统计：全库 27464 张里有 287 张因此从合格变成竖屏。
 - `sips -g orientation` 对这张图报 `<nil>`，但 PIL 的 `getexif()[274]` 是 8——**查方向别信 sips**，用 PIL 或 `exifOrientation`。
 - 「仅采样目录」采样时走同一个 `ImageVerdict`（`scanImages` → `checkResolutions`）。「筛选并采样目录」只有真删时才干净：只模拟、定时自动换、手机「只模拟」都不删原图，以前不合格的图留在图库里、采样时又不查，竖图照样会被选进壁纸（增量模式还会把目录记成查过、以后一直跳过）。现在筛选把「不合格但没删」的图记进增量状态的 `rejected`（按目录），跳过的目录也带上，经 `SortResult.Remaining` → `CopyOptions.Rejected` 在采样时排除。`TestSimulatedFilterNeverSamplesRejected` 盖住了这条。
 - 判断逻辑改了要把 `sorter.go` 的 `verdictRules` 加 1：它记在增量状态的 `thresholds.rules` 里，不一样就整体重扫，否则以前判过、之后没动过的目录会一直被跳过，新规则永远不生效。
 
-### 16. 图库（NAS）不在时的整理：删除原图排队（v0.3.109）
+### 9. 图库（NAS）不在时的整理：删除原图排队（v0.3.109）
 壁纸文件夹在本地，图库没挂上时看图、移出、⌘Z 撤销、不再选（`config.json` 的 `excluded`）都照常能用，只有「删除原图」要动网络卷。所以桌面端没有「离线模式」这个开关，只是把这一件事改成了队列（`desktop/pending.go` + `desktop/core/pending.go`，数据目录的 `pending_deletes.json`）。
 
 - **`os.Remove` 在卷没挂上时返回的也是 ENOENT**，跟「文件本来就不在」分不出来。旧代码把这种情况当成删掉了、还照写删除日志——这是真 bug。现在先看挂载状态（`sourceUnmounted`），再看**文件所在目录**还在不在（`dirMissing`），都不行才排队；只有 `os.IsPermission` 才弹错误。以后动删除相关的代码要注意这一点。
