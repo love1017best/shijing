@@ -37,6 +37,8 @@ struct WallPreview: View {
     @State private var flipped = false
 
     @State private var screenMidX: CGFloat?
+    /// 整页的尺寸（判断宽屏横放用，见 sideColumn）
+    @State private var screenSize = CGSize.zero
     /// 顶栏下沿、底栏上沿（全局坐标）：竖屏完整显示时图片放在两者之间，不被底栏挡住
     @State private var topBarBottom: CGFloat = 0
     /// 窗口的安全区：整页 `ignoresSafeArea` 铺满之后，页面里量到的安全区是 0，所以从窗口上取。
@@ -83,6 +85,14 @@ struct WallPreview: View {
     private var dragProgress: CGFloat { min(max(dragY, 0) / 400, 1) }
     private var zoomed: Bool { scale > 1.01 }
 
+    /// 宽屏横放（Duo 内屏、iPad）时，按钮照系统相册收到右边一列；竖屏和普通 iPhone 横放（高度不够，
+    /// 一列七个按钮要五百多 pt）还是底部一排。按屏幕形状判断，不按机型。
+    private var sideColumn: Bool {
+        screenSize.width > screenSize.height && screenSize.height >= 560
+    }
+    /// 右下角那一列占的宽度：整理操作 78 + 和缩略图条的间隔
+    private static let sideSlot: CGFloat = 78 + 16
+
     var body: some View {
         ZStack(alignment: .top) {
         GeometryReader { geo in
@@ -107,6 +117,7 @@ struct WallPreview: View {
             }
             .frame(width: size.width, height: size.height)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).midX } action: { screenMidX = $0 }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { if $0 != screenSize { screenSize = $0 } }
             .contentShape(Rectangle())
             // 双击和单击要互斥：分开挂两个 onTapGesture 的话，双击的第一下会先触发一次单击，
             // 切「铺满 / 完整」时顶栏底栏也跟着闪一下。
@@ -127,10 +138,13 @@ struct WallPreview: View {
             VStack(spacing: 0) {
                 topBar
                 Spacer()
-                if let wall { bottomBar(wall) }
+                if let wall { bottomBar(wall, trailingSlot: sideColumn ? Self.sideSlot : 0) }
             }
             // 底部让开小横条（整页铺满了，安全区得自己留）
             .padding(.bottom, max(24, windowSafe.bottom + 12))
+            // 宽屏横放：关闭 / 分享 / 撤销和四个整理操作收到右边一列（照系统相册）
+            .overlay(alignment: .topTrailing) { if sideColumn, let wall { sideTopButtons(wall) } }
+            .overlay(alignment: .bottomTrailing) { if sideColumn, let wall { sideActions(wall) } }
             .opacity(axis == .dismiss ? 0 : 1)
             .ignoresSafeArea(.keyboard) // 输入编号时底栏别被键盘顶上去
             .transition(.opacity)
@@ -144,7 +158,8 @@ struct WallPreview: View {
         .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 60) }
         .presentationBackground(.clear)
         .preferredColorScheme(.dark)
-        .statusBarHiddenCompat(!chrome || axis == .dismiss)
+        // 横屏时状态栏在右上角，正好和那一列按钮打架（系统相册横屏也不显示状态栏）
+        .statusBarHiddenCompat(!chrome || axis == .dismiss || sideColumn)
         .deleteOriginalDialog(session: session, wall: $confirmDelete)
         .alert("跳到第几张", isPresented: $jumping) {
             TextField("1–\(walls.count)", text: $jumpText).iOSKeyboard(.numberPad)
@@ -389,16 +404,11 @@ struct WallPreview: View {
 
     // MARK: 顶栏、底栏
 
-    /// 顶栏：左边撤销移出，编号在正中。关闭和分享挪到了底部，和四个整理操作一起常驻。
+    /// 顶栏：撤销移出（竖屏在左边）、编号在正中。宽屏横放时撤销和关闭、分享一起收到右边（见 sideTopButtons）。
     private var topBar: some View {
         HStack(spacing: 10) {
-            if let undo = session.undoName {
-                circleButton("arrow.uturn.backward", label: "撤销移出 \(undo)") {
-                    Task {
-                        if let n = await session.undoRemove(), walls.contains(where: { $0.name == n }) { go(to: n) }
-                    }
-                }
-                .disabled(session.acting != nil || session.state?.running == true)
+            if !sideColumn, let undo = session.undoName {
+                undoButton(undo)
             }
             Spacer()
         }
@@ -427,6 +437,36 @@ struct WallPreview: View {
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { topBarBottom = $0 }
     }
 
+    private func undoButton(_ name: String) -> some View {
+        circleButton("arrow.uturn.backward", label: "撤销移出 \(name)") {
+            Task {
+                if let n = await session.undoRemove(), walls.contains(where: { $0.name == n }) { go(to: n) }
+            }
+        }
+        .disabled(session.acting != nil || session.state?.running == true)
+    }
+
+    /// 宽屏横放时右上角那一小列：撤销、分享、关闭（照系统相册右上角的返回 / 分享 / 更多）。
+    private func sideTopButtons(_ w: Wallpaper) -> some View {
+        VStack(spacing: 12) {
+            if let undo = session.undoName { undoButton(undo) }
+            ShareOriginalButton(session: session, wall: w, glass: true, size: 44)
+            circleButton("xmark", label: "关闭") { dismiss() }
+        }
+        .padding(.trailing, 20)
+        .padding(.top, max(windowSafe.top + 8, 28))
+    }
+
+    /// 宽屏横放时右下角那一列：四个整理操作竖着排（照系统相册右下角的心形 / 信息 / 调节 / 删除）。
+    private func sideActions(_ w: Wallpaper) -> some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            actionButtons(w, width: 78)
+        }
+        .padding(.trailing, 20)
+        // overlay 是对整个底栏（含底部留白）对齐的，这里得自己让开小横条
+        .padding(.bottom, max(24, windowSafe.bottom + 12))
+    }
+
     /// 圆形的玻璃按钮（关闭、撤销、分享）。
     private func circleButton(_ icon: String, label: String, size: CGFloat = 44,
                               action: @escaping () -> Void) -> some View {
@@ -440,7 +480,8 @@ struct WallPreview: View {
         .accessibilityLabel(label)
     }
 
-    private func bottomBar(_ w: Wallpaper) -> some View {
+    /// `trailingSlot`：宽屏横放时右边那一列占的宽度，缩略图条让开它（照系统相册，条到按钮左边为止）。
+    private func bottomBar(_ w: Wallpaper, trailingSlot: CGFloat = 0) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             // 把手：上滑 / 点它显示、收起文件名（VoiceOver 用户没法靠滑动）
             Button {
@@ -453,7 +494,8 @@ struct WallPreview: View {
             .buttonStyle(.plain)
             .accessibilityLabel(showsInfo ? "收起文件名" : "显示文件名")
 
-            FilmStrip(session: session, current: current, screenMidX: screenMidX) { go(to: $0) }
+            // 宽屏横放时这条不再占满整行（右边让给按钮列），当前那张就对齐这条自己的正中
+            FilmStrip(session: session, current: current, screenMidX: sideColumn ? nil : screenMidX) { go(to: $0) }
                 .padding(.horizontal, -20) // 缩略图条撑满整行
 
             if showsInfo {
@@ -473,9 +515,9 @@ struct WallPreview: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
 
-            actionBar(w)
+            if !sideColumn { actionBar(w) } // 宽屏横放时这一排挪到右边一列去了
         }
-        .padding(.horizontal, 20).padding(.top, 14)
+        .padding(.horizontal, 20).padding(.trailing, trailingSlot).padding(.top, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { bottomBarTop = $0 }
     }
