@@ -108,8 +108,10 @@ struct WallPreview: View {
         screenSize.height < 700 && screenSize.width >= 420
     }
 
-    /// 侧列放不下常规尺寸时的小一号（普通 iPhone 横放只有 400 出头高）。
-    private var tightColumn: Bool { sideColumn && screenSize.height < 520 }
+    /// 侧列放不下常规尺寸时的小一号。门槛按「整列（含撤销）放不放得下」算：常规尺寸整列约 44×4 + 48 + 8×4 ≈ 316，
+    /// 加上离边距的一点留白，屏幕高 380 以下的才需要缩（iPhone SE 横放 375）；Duo 外屏横放 466、
+    /// iPhone 15 Pro 横放 402 都用常规寸（v0.3.166：以前按 520 分，Duo 外屏横放被当成小屏，按钮 38 比系统相册小一号）。
+    private var tightColumn: Bool { sideColumn && screenSize.height < 380 }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -496,14 +498,20 @@ struct WallPreview: View {
     /// 那一竖列（照系统相册）：撤销、关闭、分享各自一颗，中间一列整理操作，最下面删除。
     /// 放摄像头那一侧（见 columnOnRight）。竖放时整列垂直居中，避开右上角竖排的状态栏
     /// （Duo 外屏竖放时那排时间和 Wi‑Fi 竖着排在右边，一直画到 150pt 左右）；横放时状态栏在顶部横排，
-    /// 整列跟着贴顶，起点和编号胶囊、状态栏同一行（模拟器上对着系统相册量的：顶边约 28）。
-    /// 普通 iPhone 横放只有 400 出头高，整列用小一号（圆钮 38、胶囊里 42、间距 6）。
+    /// 整列跟着贴顶，起点和编号胶囊、状态栏同一行。
+    /// **横放时还要避开前置摄像头**（v0.3.166）：整页 `ignoresSafeArea` 铺满，系统不会替我们让开，
+    /// 摄像头在左上角时关闭按钮正好压在挖孔上、点不到。摄像头在这一侧的上半部分时，
+    /// 整列从它的下沿（+8）开始；在下半部分（右下角）时不冲突，照常贴顶。
+    /// 普通 iPhone 横放屏幕高 380 以下时才用小一号（圆钮 38、胶囊里 42、间距 6）。
     private func sideButtons(_ w: Wallpaper) -> some View {
         let tight = tightColumn
         let landscape = screenSize.width > screenSize.height
         let button: CGFloat = tight ? 38 : 44
         let pill: CGFloat = tight ? 42 : 48
-        let topInset: CGFloat = landscape ? max(windowSafe.top + 8, 28) : 0
+        let camNearTop = cameraFrame != .zero && cameraFrame.midY < screenSize.height / 2
+        let topInset: CGFloat = landscape
+            ? (camNearTop ? max(cameraFrame.maxY + 8, 28) : max(windowSafe.top + 8, 28))
+            : 0
         return VStack(spacing: tight ? 6 : 8) {
             if let undo = session.undoName { undoButton(undo, size: button) }
             circleButton("xmark", label: "关闭", size: button) { dismiss() }
