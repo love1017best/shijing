@@ -44,6 +44,11 @@ struct WallPreview: View {
     @State private var screenMidX: CGFloat?
     /// 整页的尺寸（判断宽屏横放用，见 sideColumn）
     @State private var screenSize = CGSize.zero
+    /// 前置摄像头（被占用的那块玻璃）在页面里的位置：iPhone Duo 外屏竖放时在右上，横放时跟着设备转到左边或右边。
+    /// 右边那一列按钮就放在这同一侧，和摄像头、状态栏对齐（`reservedRegions(kind: .occlusion)`，iOS 27.1 起）
+    @State private var cameraFrame: CGRect = CGRect(x: 0, y: 0, width: 0, height: 0)
+    /// 按钮列放右边还是左边（见 cameraFrame）
+    @State private var columnOnRight = true
     /// 顶栏下沿、底栏上沿（全局坐标）：竖屏完整显示时图片放在两者之间，不被底栏挡住
     @State private var topBarBottom: CGFloat = 0
     /// 窗口的安全区：整页 `ignoresSafeArea` 铺满之后，页面里量到的安全区是 0，所以从窗口上取。
@@ -97,8 +102,10 @@ struct WallPreview: View {
     /// 右边一竖列（照系统相册）：Duo 内屏横放、外屏横放和竖放都是这样（外屏系统报的是 regular 尺寸类，
     /// 但系统相册在它上面照样用右侧一列）。只有高度够的宽屏才用顶部一排（iPad、Duo 内屏竖放），
     /// 所以按高度分：约 700 以下收成一列。按屏幕形状判断，不按机型。
+    /// 宽度门槛取 420：真机 Duo 外屏量到 457×678、模拟器是 466×678，普通 iPhone 竖屏只有 402 宽
+    /// 且高都 ≥ 700，420 两边都不卡（v0.3.165 踩过：先前写 460，真机差 3pt 落空，外屏还是底部一排）。
     private var sideColumn: Bool {
-        screenSize.height < 700 && screenSize.width >= 460
+        screenSize.height < 700 && screenSize.width >= 420
     }
 
     /// 侧列放不下常规尺寸时的小一号（普通 iPhone 横放只有 400 出头高）。
@@ -129,6 +136,17 @@ struct WallPreview: View {
             .frame(width: size.width, height: size.height)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).midX } action: { screenMidX = $0 }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { if $0 != screenSize { screenSize = $0 } }
+            // 前置摄像头在哪一侧（iPhone Duo 外屏的挖孔，横放时跟着设备换边）
+            .onGeometryChange(for: CGRect.self) { proxy in
+                if #available(iOS 27.1, *) {
+                    return proxy.reservedRegions(kind: .occlusion).first?.frame ?? .zero
+                }
+                return .zero
+            } action: { f in
+                if f != cameraFrame { cameraFrame = f }
+                let onRight = cameraFrame == .zero || cameraFrame.midX > screenSize.width / 2
+                if onRight != columnOnRight { columnOnRight = onRight }
+            }
             .contentShape(Rectangle())
             // 双击和单击要互斥：分开挂两个 onTapGesture 的话，双击的第一下会先触发一次单击，
             // 切「铺满 / 完整」时顶栏底栏也跟着闪一下。
@@ -153,8 +171,10 @@ struct WallPreview: View {
             }
             // 底部让开小横条（整页铺满了，安全区得自己留）
             .padding(.bottom, max(24, windowSafe.bottom + 12))
-            // 宽屏横放：按钮照系统相册收到右边一竖列
-            .overlay(alignment: .topTrailing) { if sideColumn, let wall { sideButtons(wall) } }
+            // 宽屏横放：按钮照系统相册收到一竖列，放在前置摄像头那一侧（和状态栏对齐）
+            .overlay(alignment: sideColumn && !columnOnRight ? .topLeading : .topTrailing) {
+                if sideColumn, let wall { sideButtons(wall) }
+            }
             .opacity(axis == .dismiss ? 0 : 1)
             .ignoresSafeArea(.keyboard) // 输入编号时底栏别被键盘顶上去
             .transition(.opacity)
@@ -473,25 +493,27 @@ struct WallPreview: View {
         }
     }
 
-    /// 右边那一竖列（照系统相册）：撤销、关闭、分享各自一颗，中间一列整理操作，最下面删除。
-    /// 整列垂直居中，避开右上角的状态栏（Duo 外屏竖放时那排时间和 Wi‑Fi 竖着排在右边，一直画到 150pt 左右）。
+    /// 那一竖列（照系统相册）：撤销、关闭、分享各自一颗，中间一列整理操作，最下面删除。
+    /// 放摄像头那一侧（见 columnOnRight）。竖放时整列垂直居中，避开右上角竖排的状态栏
+    /// （Duo 外屏竖放时那排时间和 Wi‑Fi 竖着排在右边，一直画到 150pt 左右）；横放时状态栏在顶部横排，
+    /// 整列跟着贴顶，起点和编号胶囊、状态栏同一行（模拟器上对着系统相册量的：顶边约 28）。
     /// 普通 iPhone 横放只有 400 出头高，整列用小一号（圆钮 38、胶囊里 42、间距 6）。
     private func sideButtons(_ w: Wallpaper) -> some View {
         let tight = tightColumn
+        let landscape = screenSize.width > screenSize.height
         let button: CGFloat = tight ? 38 : 44
         let pill: CGFloat = tight ? 42 : 48
-        return VStack {
-            Spacer(minLength: 0)
-            VStack(spacing: tight ? 6 : 8) {
-                if let undo = session.undoName { undoButton(undo, size: button) }
-                circleButton("xmark", label: "关闭", size: button) { dismiss() }
-                ShareOriginalButton(session: session, wall: w, glass: true, size: button)
-                actionPill(w, vertical: true, size: pill)
-                actionCircle(.delete, w, size: button)
-            }
-            Spacer(minLength: 0)
+        let topInset: CGFloat = landscape ? max(windowSafe.top + 8, 28) : 0
+        return VStack(spacing: tight ? 6 : 8) {
+            if let undo = session.undoName { undoButton(undo, size: button) }
+            circleButton("xmark", label: "关闭", size: button) { dismiss() }
+            ShareOriginalButton(session: session, wall: w, glass: true, size: button)
+            actionPill(w, vertical: true, size: pill)
+            actionCircle(.delete, w, size: button)
         }
-        .padding(.trailing, 20)
+        .padding(.top, topInset)
+        .frame(maxHeight: .infinity, alignment: landscape ? .top : .center)
+        .padding(columnOnRight ? .trailing : .leading, 20)
     }
 
     /// 圆形的玻璃按钮（关闭、撤销、分享）。
@@ -554,7 +576,7 @@ struct WallPreview: View {
             // 宽屏横放时右边让开按钮那一列（直接缩窄这条，加 padding 挡不住滚动内容画到屏幕边上），
             // 条按自己的正中（照系统相册）
             FilmStrip(session: session, current: current, screenMidX: sideColumn ? nil : screenMidX,
-                      trailingInset: sideColumn ? 84 : 0) { go(to: $0) }
+                      inset: sideColumn ? 84 : 0, insetOnRight: columnOnRight) { go(to: $0) }
                 .padding(.horizontal, -20)
 
             if showsInfo {
@@ -747,8 +769,9 @@ private struct FilmStrip: View {
     let current: String
     /// 屏幕正中的横坐标（全局坐标）
     let screenMidX: CGFloat?
-    /// 右边让开的宽度（宽屏横放时给按钮那一列腾地方）
-    let trailingInset: CGFloat
+    /// 让开的宽度和方向（右边一列按钮时给那一列腾地方；列在哪侧由摄像头位置决定，见 columnOnRight）
+    let inset: CGFloat
+    let insetOnRight: Bool
     let onSelect: (String) -> Void
     @State private var pos: String?
     /// 正在跟着大图滚动（不是手指拖的），这段时间里滚过的缩略图不算选中
@@ -761,12 +784,13 @@ private struct FilmStrip: View {
         GeometryReader { geo in
             // 当前那张对齐屏幕正中（不是这条自己的正中：内屏侧边有传感器区，这条会让开一块）
             let f = geo.frame(in: .global)
-            let w = max(f.width - trailingInset, 0)
-            let mid = min(max((screenMidX ?? f.midX) - f.minX, Self.thumb.width / 2), max(w - Self.thumb.width / 2, Self.thumb.width / 2))
+            let w = max(f.width - inset, 0)
+            let start = f.minX + (insetOnRight ? 0 : inset)
+            let mid = min(max(((screenMidX ?? f.midX) - start), Self.thumb.width / 2), max(w - Self.thumb.width / 2, Self.thumb.width / 2))
             strip(width: w, mid: mid)
                 .frame(width: w)
                 .clipped() // 水平 ScrollView 不自己裁掉越界的滚动内容，得手动裁到条的宽度
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: insetOnRight ? .leading : .trailing)
         }
         .frame(height: Self.thumb.height + 8)
         .onAppear { pos = current }
