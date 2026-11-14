@@ -79,7 +79,7 @@ func (a *app) openQRPair() {
 		a.toast = "找不到这台 Mac 的局域网地址（没有连 Wi‑Fi 或网线？）"
 		return
 	}
-	p := a.remote.startPair("iPhone", true)
+	p := a.remote.startPair("iPhone", "", true)
 	a.qrURL = fmt.Sprintf("shijing://pair?h=%s&p=%d&c=%s", ips[0], port, p.code)
 	img, err := qrcode.New(a.qrURL, qrcode.Medium)
 	if err != nil {

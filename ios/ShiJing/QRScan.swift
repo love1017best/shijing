@@ -83,7 +83,7 @@ struct QRScanView: View {
         defer { busy = false }
         do {
             let r = try await APIClient(address: target.address, token: nil)
-                .pairFinish(code: target.code, device: PairView.defaultDeviceName)
+                .pairFinish(code: target.code, device: PairView.defaultDeviceName, id: PairView.deviceID)
             store.add(name: r.name, serviceName: nil, address: target.address, token: r.token)
             dismiss()
         } catch APIError.server(_, let msg) {

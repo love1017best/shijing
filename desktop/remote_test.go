@@ -88,7 +88,17 @@ func (h *remoteHarness) do(t *testing.T, method, path, token string, body any) (
 // pair 走一遍配对，返回令牌。
 func (h *remoteHarness) pair(t *testing.T, device string) string {
 	t.Helper()
-	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": device}); code != 200 {
+	return h.pairDevice(t, device, "")
+}
+
+// pairDevice 走一遍配对，带上手机的固定标识（旧的手机端不带）。
+func (h *remoteHarness) pairDevice(t *testing.T, device, id string) string {
+	t.Helper()
+	body := map[string]string{"device": device}
+	if id != "" {
+		body["id"] = id
+	}
+	if code, _ := h.do(t, "POST", "/api/pair/start", "", body); code != 200 {
 		t.Fatalf("pair/start = %d", code)
 	}
 	h.tt.Frame()
@@ -99,7 +109,7 @@ func (h *remoteHarness) pair(t *testing.T, device string) string {
 	if _, ok := h.tt.Access("配对码 " + pin); !ok {
 		t.Fatal("桌面上没有显示配对码")
 	}
-	code, data := h.do(t, "POST", "/api/pair/finish", "", map[string]string{"code": pin})
+	code, data := h.do(t, "POST", "/api/pair/finish", "", pairBody(pin, id))
 	if code != 200 {
 		t.Fatalf("pair/finish = %d %v", code, data)
 	}
@@ -108,6 +118,53 @@ func (h *remoteHarness) pair(t *testing.T, device string) string {
 		t.Fatalf("配对结果 = %v", data)
 	}
 	return tok
+}
+
+func pairBody(code, id string) map[string]string {
+	b := map[string]string{"code": code}
+	if id != "" {
+		b["id"] = id
+	}
+	return b
+}
+
+// 两台都叫「iPhone」的手机要能同时配对：后配的那台不能把先配的令牌顶掉。
+func TestRemoteTwoPhonesWithSameName(t *testing.T) {
+	h := newRemoteHarness(t)
+	first := h.pairDevice(t, "iPhone", "phone-a")
+	second := h.pairDevice(t, "iPhone", "phone-b")
+	if first == second {
+		t.Fatal("两台手机的令牌相同")
+	}
+	if code, _ := h.do(t, "GET", "/api/state", first, nil); code != 200 {
+		t.Fatalf("先配的那台被顶掉了: %d", code)
+	}
+	if code, _ := h.do(t, "GET", "/api/state", second, nil); code != 200 {
+		t.Fatalf("后配的那台连不上: %d", code)
+	}
+	names := []string{}
+	for _, d := range h.remote.deviceList() {
+		names = append(names, d.Name)
+	}
+	if strings.Join(names, ",") != "iPhone,iPhone 2" {
+		t.Fatalf("配对的手机 = %v", names)
+	}
+
+	// 同一台手机重新配对（名字改成「小明的 iPhone」）只留一条，令牌换新
+	again := h.pairDevice(t, "小明的 iPhone", "phone-a")
+	if code, _ := h.do(t, "GET", "/api/state", again, nil); code != 200 {
+		t.Fatalf("重新配对后的令牌不可用: %d", code)
+	}
+	if code, _ := h.do(t, "GET", "/api/state", first, nil); code != 401 {
+		t.Fatalf("重新配对后旧令牌还能用: %d", code)
+	}
+	names = names[:0]
+	for _, d := range h.remote.deviceList() {
+		names = append(names, d.Name)
+	}
+	if strings.Join(names, ",") != "iPhone 2,小明的 iPhone" {
+		t.Fatalf("重新配对后配对的手机 = %v", names)
+	}
 }
 
 func TestRemoteDisabledByDefault(t *testing.T) {

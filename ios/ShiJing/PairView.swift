@@ -31,6 +31,16 @@ struct PairView: View {
         #endif
     }
 
+    /// 这台设备的固定标识（第一次用时生成）：每台手机默认名字都叫「iPhone」，
+    /// 电脑靠它认出「同一台重新配对」，两台手机才不会互相顶掉。
+    static var deviceID: String {
+        let key = "deviceID"
+        if let s = UserDefaults.standard.string(forKey: key), !s.isEmpty { return s }
+        let s = UUID().uuidString
+        UserDefaults.standard.set(s, forKey: key)
+        return s
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -99,7 +109,7 @@ struct PairView: View {
         error = nil
         do {
             let addr = try await resolveAddress()
-            try await APIClient(address: addr, token: nil).pairStart(device: device.trimmingCharacters(in: .whitespaces))
+            try await APIClient(address: addr, token: nil).pairStart(device: device.trimmingCharacters(in: .whitespaces), id: Self.deviceID)
             requested = true
             code = ""
             codeFocused = true
@@ -114,7 +124,7 @@ struct PairView: View {
         defer { working = false }
         error = nil
         do {
-            let r = try await APIClient(address: addr, token: nil).pairFinish(code: code)
+            let r = try await APIClient(address: addr, token: nil).pairFinish(code: code, id: Self.deviceID)
             store.add(name: r.name, serviceName: target.serviceName, address: addr, token: r.token)
             dismiss()
         } catch APIError.server(let status, let msg) {

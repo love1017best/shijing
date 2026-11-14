@@ -46,7 +46,10 @@ const (
 
 // remoteDevice 是一台配对过的手机。
 type remoteDevice struct {
-	Name      string    `json:"name"`
+	Name string `json:"name"`
+	// ID 是手机首次配对时生成的固定标识：靠它认出「同一台手机重新配对」。
+	// 手机默认名字都叫「iPhone」，只按名字认会让两台手机互相顶掉（旧版手机端没有这个字段）。
+	ID        string    `json:"id,omitempty"`
 	TokenHash string    `json:"token_sha256"`
 	PairedAt  time.Time `json:"paired_at"`
 }
@@ -54,6 +57,7 @@ type remoteDevice struct {
 // pairRequest 是正在进行的配对：桌面上显示 code，手机要在过期前输对。
 type pairRequest struct {
 	device  string
+	id      string
 	code    string
 	expires time.Time
 	fails   int
@@ -242,10 +246,10 @@ func (rs *remoteServer) qrPair() (code string, ok bool) {
 	return "", false
 }
 
-// startPair 建一个配对请求。qr 为 true 时是电脑上显示二维码发起的。
-func (rs *remoteServer) startPair(device string, qr bool) pairRequest {
+// startPair 建一个配对请求。qr 为 true 时是电脑上显示二维码发起的，id 是手机的固定标识。
+func (rs *remoteServer) startPair(device, id string, qr bool) pairRequest {
 	rs.mu.Lock()
-	rs.pair = &pairRequest{device: device, code: randomCode(), expires: time.Now().Add(pairCodeTTL), qr: qr}
+	rs.pair = &pairRequest{device: device, id: id, code: randomCode(), expires: time.Now().Add(pairCodeTTL), qr: qr}
 	p := *rs.pair
 	rs.mu.Unlock()
 	time.AfterFunc(pairCodeTTL+time.Second, rs.redraw) // 过期后画一帧让弹层消失
@@ -386,12 +390,14 @@ func (rs *remoteServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 func (rs *remoteServer) handlePairStart(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Device string `json:"device"`
+		// ID 是手机的固定标识，旧版手机端不带
+		ID string `json:"id"`
 	}
 	if err := readBody(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "请求格式不对")
 		return
 	}
-	rs.startPair(sanitizeDevice(body.Device), false)
+	rs.startPair(sanitizeDevice(body.Device), sanitizeDeviceID(body.ID), false)
 	// 弹出配对码
 	rs.a.update(func() {
 		if rs.a.showWindow != nil {
@@ -413,11 +419,41 @@ func sanitizeDevice(dev string) string {
 	return dev
 }
 
+// sanitizeDeviceID 是手机上来的固定标识：只留常见的 UUID 字符，太长截断。
+func sanitizeDeviceID(id string) string {
+	id = strings.TrimSpace(id)
+	if r := []rune(id); len(r) > 64 {
+		id = string(r[:64])
+	}
+	for _, c := range id {
+		if !(c == '-' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+			return ""
+		}
+	}
+	return id
+}
+
+// uniqueDeviceName 在一台手机要用的名字已经被别的手机占用时加序号：「iPhone」→「iPhone 2」。
+func uniqueDeviceName(devs []remoteDevice, name string) string {
+	taken := func(n string) bool {
+		return slices.ContainsFunc(devs, func(d remoteDevice) bool { return d.Name == n })
+	}
+	if !taken(name) {
+		return name
+	}
+	for i := 2; ; i++ {
+		if n := fmt.Sprintf("%s %d", name, i); !taken(n) {
+			return n
+		}
+	}
+}
+
 func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Code string `json:"code"`
-		// Device 只在扫码配对时带：二维码里的请求是电脑发起的，手机报上自己的名字
+		// Device 和 ID 只在扫码配对时带：二维码里的请求是电脑发起的，手机报上自己的名字和标识
 		Device string `json:"device"`
+		ID     string `json:"id"`
 	}
 	if err := readBody(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "请求格式不对")
@@ -447,10 +483,21 @@ func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request)
 	if d := strings.TrimSpace(body.Device); d != "" {
 		name = sanitizeDevice(d)
 	}
+	id := p.id
+	if d := sanitizeDeviceID(body.ID); d != "" {
+		id = d
+	}
 	tok := randomToken()
-	// 同名的手机重新配对时替换掉旧的那条，免得越积越多
-	rs.devices = slices.DeleteFunc(rs.devices, func(d remoteDevice) bool { return d.Name == name })
-	rs.devices = append(rs.devices, remoteDevice{Name: name, TokenHash: hashToken(tok), PairedAt: time.Now()})
+	// 同一台手机重新配对时替换掉旧的那条，免得越积越多；别的手机名字撞了就加个序号，
+	// 不能按名字替换——两台手机默认名字都叫「iPhone」，后配的会把先配的令牌顶掉。
+	if id != "" {
+		rs.devices = slices.DeleteFunc(rs.devices, func(d remoteDevice) bool { return d.ID == id })
+	} else {
+		// 旧版手机端没有标识，只能按名字认
+		rs.devices = slices.DeleteFunc(rs.devices, func(d remoteDevice) bool { return d.ID == "" && d.Name == name })
+	}
+	name = uniqueDeviceName(rs.devices, name)
+	rs.devices = append(rs.devices, remoteDevice{Name: name, ID: id, TokenHash: hashToken(tok), PairedAt: time.Now()})
 	devs := slices.Clone(rs.devices)
 	rs.pairedCode = p.code
 	rs.pair = nil

@@ -85,18 +85,21 @@ struct APIClient: Sendable {
         try await send(request("GET", "api/info", timeout: 6), as: ServerInfo.self)
     }
 
-    /// 请求配对：电脑上会弹出 6 位配对码。
-    func pairStart(device: String) async throws {
+    /// 请求配对：电脑上会弹出 6 位配对码。id 是这台设备的固定标识（两台都叫「iPhone」时靠它分开）。
+    func pairStart(device: String, id: String? = nil) async throws {
         struct R: Decodable { var expiresIn: Int }
-        _ = try await send(request("POST", "api/pair/start", body: ["device": device]), as: R.self)
+        var body: [String: Any] = ["device": device]
+        if let id, !id.isEmpty { body["id"] = id }
+        _ = try await send(request("POST", "api/pair/start", body: body), as: R.self)
     }
 
-    /// 输入配对码，成功时返回令牌和电脑名。扫码配对时带上自己的设备名（电脑那边的请求是它自己发起的，
-    /// 不知道是哪台手机扫的）。
-    func pairFinish(code: String, device: String? = nil) async throws -> (token: String, name: String) {
+    /// 输入配对码，成功时返回令牌和电脑名。扫码配对时带上自己的设备名和标识（电脑那边的请求是它自己
+    /// 发起的，不知道是哪台手机扫的）。
+    func pairFinish(code: String, device: String? = nil, id: String? = nil) async throws -> (token: String, name: String) {
         struct R: Decodable { var token: String; var name: String }
         var body: [String: Any] = ["code": code]
         if let device, !device.isEmpty { body["device"] = device }
+        if let id, !id.isEmpty { body["id"] = id }
         let r = try await send(request("POST", "api/pair/finish", body: body), as: R.self)
         return (r.token, r.name)
     }
