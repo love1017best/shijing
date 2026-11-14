@@ -3,9 +3,14 @@ import UIKit
 
 /// 大图预览：左右滑翻看壁纸文件夹里的全部图片（首尾相接，和桌面一样），双指缩放，
 /// 底部缩略图条可以拖着快速找图，点顶部编号可以输入编号跳转。
-/// 上下滑分两级（用户要求）：上滑一次拉出操作列表（顶栏和缩略图条都在），再上滑进入全屏（全部藏起来只剩图）；
-/// 全屏下滑回到常态（顶栏和缩略图条回来），列表开着时下滑也是回到常态，常态下滑（图跟着手指）才关闭预览。
-/// 缩略图条不会在收列表的时候莫名其妙消失。操作完停在原位置，看到的就是下一张。
+/// 上下滑分两级（用户要求）：上滑一次显示文件名（顶栏和缩略图条都在），再上滑进入全屏（全部藏起来只剩图）；
+/// 全屏下滑回到常态（顶栏和缩略图条回来），文件名开着时下滑也是回到常态，常态下滑（图跟着手指）才关闭预览。
+/// 缩略图条不会在收文件名的时候莫名其妙消失。操作完停在原位置，看到的就是下一张。
+///
+/// 按钮照各设备的系统相册（v0.3.163，对着 Duo、iPad、iPhone 上的相册截图定的）：只有图标、不带文字。
+/// 宽屏（Duo 内屏、iPad）放在顶部一排——左边关闭、撤销、编号，右边分享和整理操作；宽屏横放（Duo 内屏、
+/// 外屏）时按钮收到右边一竖列，像相册横放那样。普通 iPhone 和 Duo 外屏放不下这一排，还是底部一排：
+/// 左边分享、中间一块玻璃装三个整理操作、右边红色的删除。
 ///
 /// 翻页是自己写的（只摆上一张、当前、下一张三页，跟着手指移动），不用 TabView(.page) / 分页 ScrollView：
 /// 首尾循环、缩放后单指平移、往下拖关闭都要和翻页抢同一个拖动手势，放在一起判断方向最省事。
@@ -15,7 +20,7 @@ struct WallPreview: View {
     @State private var current: String
     @State private var confirmDelete: Wallpaper?
     @State private var chrome = true
-    /// 文件名（和原图路径）：上滑显示，下滑收起。四个整理操作和关闭、分享常驻在底部，不用上滑
+    /// 文件名（和原图路径）：上滑显示，下滑收起。关闭、分享和四个整理操作常驻，不用上滑
     @State private var showsInfo = false
 
     // 拖动：一次拖动开头判断方向，之后不变
@@ -85,13 +90,15 @@ struct WallPreview: View {
     private var dragProgress: CGFloat { min(max(dragY, 0) / 400, 1) }
     private var zoomed: Bool { scale > 1.01 }
 
-    /// 宽屏横放（Duo 内屏、iPad）时，按钮照系统相册收到右边一列；竖屏和普通 iPhone 横放（高度不够，
-    /// 一列七个按钮要五百多 pt）还是底部一排。按屏幕形状判断，不按机型。
+    /// 宽屏（Duo 内屏、iPad）：按钮照系统相册放到顶部一排。普通 iPhone 和 Duo 外屏（466 宽）放不下
+    /// 一排按钮加编号，还是底部一排。
+    private var wide: Bool { screenSize.width >= 640 }
+
+    /// 宽屏横放（Duo 内屏、外屏横放）时，系统相册把按钮收到右边一竖列（iPad 横放是高屏，相册用的还是顶部一排，
+    /// 所以按高度区分：约 700 以下才收成一列）。按屏幕形状判断，不按机型。
     private var sideColumn: Bool {
-        screenSize.width > screenSize.height && screenSize.height >= 560
+        wide && screenSize.width > screenSize.height && screenSize.height < 700
     }
-    /// 右下角那一列占的宽度：整理操作 78 + 和缩略图条的间隔
-    private static let sideSlot: CGFloat = 78 + 16
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -138,13 +145,12 @@ struct WallPreview: View {
             VStack(spacing: 0) {
                 topBar
                 Spacer()
-                if let wall { bottomBar(wall, trailingSlot: sideColumn ? Self.sideSlot : 0) }
+                if let wall { bottomBar(wall) }
             }
             // 底部让开小横条（整页铺满了，安全区得自己留）
             .padding(.bottom, max(24, windowSafe.bottom + 12))
-            // 宽屏横放：关闭 / 分享 / 撤销和四个整理操作收到右边一列（照系统相册）
-            .overlay(alignment: .topTrailing) { if sideColumn, let wall { sideTopButtons(wall) } }
-            .overlay(alignment: .bottomTrailing) { if sideColumn, let wall { sideActions(wall) } }
+            // 宽屏横放：按钮照系统相册收到右边一竖列
+            .overlay(alignment: .topTrailing) { if sideColumn, let wall { sideButtons(wall) } }
             .opacity(axis == .dismiss ? 0 : 1)
             .ignoresSafeArea(.keyboard) // 输入编号时底栏别被键盘顶上去
             .transition(.opacity)
@@ -158,7 +164,7 @@ struct WallPreview: View {
         .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 60) }
         .presentationBackground(.clear)
         .preferredColorScheme(.dark)
-        // 横屏时状态栏在右上角，正好和那一列按钮打架（系统相册横屏也不显示状态栏）
+        // 横屏时状态栏在右上角，正好和右上角那一排按钮打架（系统相册横屏也不显示状态栏）
         .statusBarHiddenCompat(!chrome || axis == .dismiss || sideColumn)
         .deleteOriginalDialog(session: session, wall: $confirmDelete)
         .alert("跳到第几张", isPresented: $jumping) {
@@ -404,30 +410,39 @@ struct WallPreview: View {
 
     // MARK: 顶栏、底栏
 
-    /// 顶栏：撤销移出（竖屏在左边）、编号在正中。宽屏横放时撤销和关闭、分享一起收到右边（见 sideTopButtons）。
+    /// 编号胶囊，点开输入编号跳转。
+    private func numberPill(_ i: Int) -> some View {
+        Button {
+            jumpText = ""
+            jumping = true
+        } label: {
+            Text("\(i + 1) / \(walls.count)")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .glassBackground(in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("第 \(i + 1) 张，共 \(walls.count) 张")
+        .accessibilityHint("输入编号跳转")
+    }
+
+    /// 顶栏。关闭和撤销在左、编号正中（照系统相册的标题）；宽屏照系统相册把分享和整理操作放顶部右边一排；
+    /// 宽屏横放时顶部只剩编号，按钮都收到右边一竖列（见 sideButtons）。
     private var topBar: some View {
-        HStack(spacing: 10) {
-            if !sideColumn, let undo = session.undoName {
-                undoButton(undo)
+        HStack(spacing: 8) {
+            if !sideColumn {
+                circleButton("xmark", label: "关闭") { dismiss() }
+                // 撤销也紧跟在关闭旁边：Duo 外屏的状态栏在右边竖着排，右上角放按钮会和时钟、Wi‑Fi 叠在一起
+                if let undo = session.undoName { undoButton(undo) }
             }
-            Spacer()
+            Spacer(minLength: 8)
+            if wide, !sideColumn, let wall {
+                topActions(wall)
+            }
         }
         .overlay {
-            if let index {
-                Button {
-                    jumpText = ""
-                    jumping = true
-                } label: {
-                    Text("\(index + 1) / \(walls.count)")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 12).padding(.vertical, 6)
-                        .glassBackground(in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("第 \(index + 1) 张，共 \(walls.count) 张")
-                .accessibilityHint("输入编号跳转")
-            }
+            if let index { numberPill(index) }
         }
         .padding(.horizontal, 20)
         // 铺满全屏后 padding 是从屏幕边缘算的，安全区得自己加：竖屏状态栏 / 灵动岛下面再留 8，
@@ -437,8 +452,8 @@ struct WallPreview: View {
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { topBarBottom = $0 }
     }
 
-    private func undoButton(_ name: String) -> some View {
-        circleButton("arrow.uturn.backward", label: "撤销移出 \(name)") {
+    private func undoButton(_ name: String, size: CGFloat = 44) -> some View {
+        circleButton("arrow.uturn.backward", label: "撤销移出 \(name)", size: size) {
             Task {
                 if let n = await session.undoRemove(), walls.contains(where: { $0.name == n }) { go(to: n) }
             }
@@ -446,24 +461,28 @@ struct WallPreview: View {
         .disabled(session.acting != nil || session.state?.running == true)
     }
 
-    /// 宽屏横放时右上角那一小列：撤销、分享、关闭（照系统相册右上角的返回 / 分享 / 更多）。
-    private func sideTopButtons(_ w: Wallpaper) -> some View {
-        VStack(spacing: 12) {
-            if let undo = session.undoName { undoButton(undo) }
+    /// 宽屏竖屏时顶栏右边这一组（照系统相册）：分享、一块玻璃里三个整理操作、红色的删除。
+    private func topActions(_ w: Wallpaper) -> some View {
+        HStack(spacing: 8) {
             ShareOriginalButton(session: session, wall: w, glass: true, size: 44)
-            circleButton("xmark", label: "关闭") { dismiss() }
+            actionPill(w)
+            actionCircle(.delete, w)
         }
-        .padding(.trailing, 20)
-        .padding(.top, max(windowSafe.top + 8, 28))
     }
 
-    /// 宽屏横放时右下角那一列：四个整理操作竖着排（照系统相册右下角的心形 / 信息 / 调节 / 删除）。
-    private func sideActions(_ w: Wallpaper) -> some View {
-        VStack(alignment: .trailing, spacing: 10) {
-            actionButtons(w, width: 78)
+    /// 宽屏横放时右边那一竖列（照系统相册）：撤销、关闭、分享各自一颗，中间一列整理操作，最下面删除。
+    /// 外屏只有 466pt 高，九个控件按小一号排（圆钮 38、胶囊里 42、间距 8），不然整列比屏幕还高，
+    /// 最下面的删除会压到缩略图条上。
+    private func sideButtons(_ w: Wallpaper) -> some View {
+        VStack(spacing: 8) {
+            if let undo = session.undoName { undoButton(undo, size: 38) }
+            circleButton("xmark", label: "关闭", size: 38) { dismiss() }
+            ShareOriginalButton(session: session, wall: w, glass: true, size: 38)
+            actionPill(w, vertical: true, size: 42)
+            actionCircle(.delete, w, size: 38)
         }
         .padding(.trailing, 20)
-        // overlay 是对整个底栏（含底部留白）对齐的，这里得自己让开小横条
+        .padding(.top, max(windowSafe.top + 8, 24))
         .padding(.bottom, max(24, windowSafe.bottom + 12))
     }
 
@@ -480,8 +499,37 @@ struct WallPreview: View {
         .accessibilityLabel(label)
     }
 
-    /// `trailingSlot`：宽屏横放时右边那一列占的宽度，缩略图条让开它（照系统相册，条到按钮左边为止）。
-    private func bottomBar(_ w: Wallpaper, trailingSlot: CGFloat = 0) -> some View {
+    /// 操作图标（不带玻璃）：存到相册正在下载时换成一个转圈。
+    private func actionIcon(_ kind: WallActionKind, _ w: Wallpaper) -> some View {
+        Group {
+            if kind == .save, session.saving == w.name {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: kind.icon).font(.system(size: 18, weight: .semibold))
+            }
+        }
+        .foregroundStyle(kind.isDestructive ? Color.red : Color.primary)
+    }
+
+    /// 单独一颗圆的整理操作（右上角那一排、竖屏右边的删除）。
+    private func actionCircle(_ kind: WallActionKind, _ w: Wallpaper, size: CGFloat = 44) -> some View {
+        let enabled = kind.isEnabled(session, w)
+        return Button(role: kind.isDestructive ? .destructive : nil) {
+            kind.perform(session, w, confirmDelete: $confirmDelete)
+        } label: {
+            actionIcon(kind, w)
+                .frame(width: size, height: size)
+                .glassBackground(in: Circle(), interactive: true)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.45)
+        .accessibilityLabel(kind == .save && session.saving == w.name ? "正在下载" : kind.barTitle)
+        .accessibilityHint(kind.hint)
+    }
+
+    private func bottomBar(_ w: Wallpaper) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             // 把手：上滑 / 点它显示、收起文件名（VoiceOver 用户没法靠滑动）
             Button {
@@ -494,9 +542,12 @@ struct WallPreview: View {
             .buttonStyle(.plain)
             .accessibilityLabel(showsInfo ? "收起文件名" : "显示文件名")
 
-            // 宽屏横放时这条不再占满整行（右边让给按钮列），当前那张就对齐这条自己的正中
-            FilmStrip(session: session, current: current, screenMidX: sideColumn ? nil : screenMidX) { go(to: $0) }
-                .padding(.horizontal, -20) // 缩略图条撑满整行
+            // 缩略图条撑满整行，当前那张对齐屏幕正中（内屏侧边的传感器区会让这条变窄，不能用它自己的正中）；
+            // 宽屏横放时右边让开按钮那一列（直接缩窄这条，加 padding 挡不住滚动内容画到屏幕边上），
+            // 条按自己的正中（照系统相册）
+            FilmStrip(session: session, current: current, screenMidX: sideColumn ? nil : screenMidX,
+                      trailingInset: sideColumn ? 84 : 0) { go(to: $0) }
+                .padding(.horizontal, -20)
 
             if showsInfo {
                 VStack(alignment: .leading, spacing: 2) {
@@ -515,66 +566,60 @@ struct WallPreview: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
 
-            if !sideColumn { actionBar(w) } // 宽屏横放时这一排挪到右边一列去了
+            if !wide { actionRow(w) } // 宽屏的按钮在顶栏，横放时在右边一列
         }
-        .padding(.horizontal, 20).padding(.trailing, trailingSlot).padding(.top, 14)
+        .padding(.horizontal, 20).padding(.top, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { bottomBarTop = $0 }
     }
 
-    /// 常驻的一排悬浮按钮：关闭、分享，右边是四个整理操作。每块都是独立的液态玻璃。
-    /// 用 GeometryReader 拿这一行分到的宽度（466 宽的 Duo 外屏放不下宽松的那套，约 452，
-    /// 要换成紧凑的 56pt 方块）。不能用 ViewThatFits 猜：按钮里的文字可以缩，
-    /// 它量出来的宽度偏乐观，会挑到放不下的那种，画到屏幕外面去。
-    private func actionBar(_ w: Wallpaper) -> some View {
-        GeometryReader { g in
-            let compact = g.size.width < 460 // 宽松那套约 452 宽，放不下就换 56pt 的方块
-            HStack(spacing: compact ? 6 : 10) {
-                circleButton("xmark", label: "关闭", size: compact ? 40 : 44) { dismiss() }
-                ShareOriginalButton(session: session, wall: w, glass: true, size: compact ? 40 : 44)
-                Spacer(minLength: compact ? 6 : 12)
-                actionButtons(w, width: compact ? 56 : 78)
-            }
+    /// 窄屏底部这一排（照系统相册的 iPhone 版）：左边分享，中间一块玻璃里排三个整理操作，右边红色的删除。
+    /// 不写文字，只说给 VoiceOver 听。
+    private func actionRow(_ w: Wallpaper) -> some View {
+        HStack(spacing: 0) {
+            ShareOriginalButton(session: session, wall: w, glass: true, size: 44)
+            Spacer(minLength: 12)
+            actionPill(w)
+            Spacer(minLength: 12)
+            actionCircle(.delete, w)
         }
         .frame(height: 52)
     }
 
-    @ViewBuilder
-    private func actionButtons(_ w: Wallpaper, width: CGFloat) -> some View {
-        ForEach(WallActionKind.allCases, id: \.self) { kind in
-            if !kind.needsSource || w.hasSource {
-                let enabled = kind.isEnabled(session, w)
-                Button(role: kind.isDestructive ? .destructive : nil) {
-                    kind.perform(session, w, confirmDelete: $confirmDelete)
-                } label: {
-                    actionLabel(kind, w, width: width)
-                }
-                .buttonStyle(.plain)
-                .disabled(!enabled)
-                .opacity(enabled ? 1 : 0.45)
-                .accessibilityLabel(kind == .save && session.saving == w.name ? "正在下载" : kind.barTitle)
-                .accessibilityHint(kind.hint)
+    /// 存到相册、移出、不再选它三颗共用一层玻璃（相册里也是几个图标装在一个胶囊里）。
+    /// `vertical`：宽屏横放时右边那一列是竖着的。
+    private func actionPill(_ w: Wallpaper, vertical: Bool = false, size: CGFloat = 50) -> some View {
+        let kinds = Self.pillKinds.filter { !$0.needsSource || w.hasSource }
+        return Group {
+            if vertical {
+                VStack(spacing: 0) { contents(kinds, w, size: size) }.padding(.vertical, 3)
+            } else {
+                HStack(spacing: 0) { contents(kinds, w, size: size) }.padding(.horizontal, 3)
             }
         }
+        .glassBackground(in: Capsule(), interactive: true)
     }
 
-    /// 一块玻璃里图标在上、小字在下（和相册底栏一样），窄屏和宽屏只差一点宽度。
-    private func actionLabel(_ kind: WallActionKind, _ w: Wallpaper, width: CGFloat) -> some View {
-        VStack(spacing: 3) {
-            if kind == .save, session.saving == w.name {
-                ProgressView().controlSize(.small)
-            } else {
-                Image(systemName: kind.icon).font(.system(size: 17, weight: .semibold))
-            }
-            Text(kind.barTitle)
-                .font(.caption2)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+    private func contents(_ kinds: [WallActionKind], _ w: Wallpaper, size: CGFloat) -> some View {
+        ForEach(kinds, id: \.self) { kind in pillButton(kind, w, size: size) }
+    }
+
+    private static let pillKinds: [WallActionKind] = [.save, .remove, .exclude]
+
+    private func pillButton(_ kind: WallActionKind, _ w: Wallpaper, size: CGFloat) -> some View {
+        let enabled = kind.isEnabled(session, w)
+        return Button {
+            kind.perform(session, w, confirmDelete: $confirmDelete)
+        } label: {
+            actionIcon(kind, w)
+                .frame(width: size, height: size)
+                .contentShape(Rectangle())
         }
-        .frame(width: width, height: 52)
-        .foregroundStyle(kind.isDestructive ? Color.red : Color.primary)
-        .glassBackground(in: RoundedRectangle(cornerRadius: 16, style: .continuous), interactive: true)
-        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.45)
+        .accessibilityLabel(kind == .save && session.saving == w.name ? "正在下载" : kind.barTitle)
+        .accessibilityHint(kind.hint)
     }
 }
 
@@ -694,6 +739,8 @@ private struct FilmStrip: View {
     let current: String
     /// 屏幕正中的横坐标（全局坐标）
     let screenMidX: CGFloat?
+    /// 右边让开的宽度（宽屏横放时给按钮那一列腾地方）
+    let trailingInset: CGFloat
     let onSelect: (String) -> Void
     @State private var pos: String?
     /// 正在跟着大图滚动（不是手指拖的），这段时间里滚过的缩略图不算选中
@@ -706,8 +753,12 @@ private struct FilmStrip: View {
         GeometryReader { geo in
             // 当前那张对齐屏幕正中（不是这条自己的正中：内屏侧边有传感器区，这条会让开一块）
             let f = geo.frame(in: .global)
-            let mid = min(max((screenMidX ?? f.midX) - f.minX, Self.thumb.width / 2), max(f.width - Self.thumb.width / 2, Self.thumb.width / 2))
-            strip(width: f.width, mid: mid)
+            let w = max(f.width - trailingInset, 0)
+            let mid = min(max((screenMidX ?? f.midX) - f.minX, Self.thumb.width / 2), max(w - Self.thumb.width / 2, Self.thumb.width / 2))
+            strip(width: w, mid: mid)
+                .frame(width: w)
+                .clipped() // 水平 ScrollView 不自己裁掉越界的滚动内容，得手动裁到条的宽度
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(height: Self.thumb.height + 8)
         .onAppear { pos = current }
