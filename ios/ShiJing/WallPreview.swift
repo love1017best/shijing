@@ -113,8 +113,12 @@ struct WallPreview: View {
     /// iPhone 15 Pro 横放 402 都用常规寸（v0.3.166：以前按 520 分，Duo 外屏横放被当成小屏，按钮 38 比系统相册小一号）。
     private var tightColumn: Bool { sideColumn && screenSize.height < 380 }
 
-    /// 横放、右边一竖列（贴顶那一版）。状态栏在这种排法下会和列压在一起，见 statusBarHiddenCompat。
-    private var sideColumnLandscape: Bool { sideColumn && screenSize.width > screenSize.height }
+    /// 横放、右边一竖列，屏幕小（Duo 外屏、普通手机横放）。这些形状下系统自己就不画状态栏，
+    /// 我们也不显示。Duo 内屏横放例外（屏幕高 669）：系统相册在那里保留右上角那块状态栏
+    /// （时间、电量、信号竖着排），按钮列从它下面开始排——所以不能一律藏掉。
+    private var hideStatusBarInLandscape: Bool {
+        sideColumn && screenSize.width > screenSize.height && screenSize.height < 640
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -207,10 +211,9 @@ struct WallPreview: View {
         .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 60) }
         .presentationBackground(.clear)
         .preferredColorScheme(.dark)
-        // 隐藏顶栏底栏时状态栏也藏掉；横放右边一列时也藏：Duo 内屏横放的状态栏是右上角一大块
-        // （时间和 Wi‑Fi 竖着排列），列贴顶排就会压在上面，撤销和关闭两颗按钮被盖住、也点不到。
-        // 系统相册全屏看图时同样不显示状态栏，要联动的是竖放那一排按钮（见 topRowBesideStatusBar）。
-        .statusBarHiddenCompat(!chrome || axis == .dismiss || sideColumnLandscape)
+        // 隐藏顶栏底栏时状态栏也藏掉；小屏横放（外屏、普通手机）也一样：系统本来就不显示，
+        // 留着会压到右边那一列上。Duo 内屏横放不藏——系统相册在那里照样显示，列从它下面开始。
+        .statusBarHiddenCompat(!chrome || axis == .dismiss || hideStatusBarInLandscape)
         .deleteOriginalDialog(session: session, wall: $confirmDelete)
         .alert("跳到第几张", isPresented: $jumping) {
             TextField("1–\(walls.count)", text: $jumpText).iOSKeyboard(.numberPad)
@@ -511,13 +514,15 @@ struct WallPreview: View {
     /// 整理操作那块胶囊的高度，跟着圆钮一起收。
     private var topPillSize: CGFloat { topRowBesideStatusBar ? 42 : 48 }
 
-    /// 顶栏离上边缘多远。右边一列时顶部只剩编号：外屏竖放的状态栏是竖着排在右上角的，
-    /// 编号跟它同一高度往下一点（用户嫌贴着屏幕边，v0.3.168 从 28 提到 40）。
+    /// 顶栏离上边缘多远。右边一列时顶部只剩编号：
+    /// 横放时状态栏在右上角竖着排（内屏）或者根本不显示（外屏），编号照系统相册那条日期卡贴顶放 28；
+    /// 竖放时状态栏是竖着排在右上角的，编号比它再往下一点（用户嫌贴着屏幕边，v0.3.168 从 28 提到 40）。
     private var topBarTopPadding: CGFloat {
-        // 21 让 38 高的按钮中心落在 40，和外屏竖放的编号、系统相册那一行同一个高度
+        // 21 让 38 高的按钮中心落在 40，和系统相册那一行、状态栏（安全区 82 的一半）同一个高度
         if topRowBesideStatusBar { return 21 }
         if sideColumn {
-            return screenSize.width > screenSize.height ? max(windowSafe.top + 8, 28) : max(windowSafe.top + 12, 40)
+            if screenSize.width > screenSize.height { return 28 }
+            return max(windowSafe.top + 12, 40)
         }
         return max(windowSafe.top + 8, 28)
     }
@@ -564,17 +569,20 @@ struct WallPreview: View {
         let pill: CGFloat = tight ? 42 : 48
         let camNearTop = cameraFrame != .zero && cameraFrame.midY < screenSize.height / 2
         // 只有外屏 / 手机这种小屏才可能让摄像头压到这一列上（Duo 外屏横放时挖孔在角上，和列同一条竖线）。
-        // Duo 内屏（短边 669）横放时挖孔在顶边中间，和右侧那一列上下错开，不该把它往下推；
-        // 而且转屏后 reservedRegions 报的坐标不一定跟着转，按几何算「重不重叠」不可靠，
-        // 干脆按屏幕大小分开（内屏横放以前整列被推到 y≈130，比系统相册低了一截，v0.3.168）。
         // 摄像头压在列上才让开，而且只在列位于左侧时检查：Duo 外屏横放「圆角朝下」那一向摄像头在左上角，
         // 跟这一列同一条竖线（v0.3.166 用户反馈关闭按钮点不到就是这一向）；另一向摄像头在右下角，不冲突。
-        // 内屏横放时 reservedRegions 报的也是「右上角」，但内屏的挖孔其实在顶边中间、和列上下错开，
-        // 系统相册在这一向也是贴顶排的，所以不按它让开（v0.3.168：以前按屏幕短边判，转屏那一帧
-        // 尺寸还没更新，整列被顶到 y≈100，比系统相册低一截）。
+        // Duo 内屏横放不走这条路：那块挖孔和右上角的状态栏是同一块，见下面的 tallScreen。
         let camOnColumn = !columnOnRight && cameraFrame != .zero && cameraFrame.minX < 60
+        // 内屏横放：系统相册保留右上角那块状态栏（时间、电量、信号竖着排），按钮列紧贴着它下面开始——
+        // 那块就是前置摄像头的遮挡区（模拟器上量到 951 宽的屏上到 y 124.5），系统相册第一颗按钮顶边
+        // 也是 124。外屏、手机横放：状态栏不显示，贴顶 28，摄像头压在同一侧时往下让开。
+        let tallScreen = screenSize.height >= 640
+        let camOnColumnSide = cameraFrame != .zero
+            && (columnOnRight ? cameraFrame.midX > screenSize.width / 2 : cameraFrame.midX < screenSize.width / 2)
         let topInset: CGFloat = landscape
-            ? (camNearTop && camOnColumn ? max(cameraFrame.maxY + 8, 28) : max(windowSafe.top + 8, 28))
+            ? (tallScreen
+                ? (camNearTop && camOnColumnSide ? cameraFrame.maxY : max(windowSafe.top + button, 28))
+                : (camNearTop && camOnColumn ? max(cameraFrame.maxY + 8, 28) : max(windowSafe.top + 8, 28)))
             : 0
         // 竖放：上下两个 Spacer 夹住，整列垂直居中；横放：上面不留、下面用 Spacer 撑开，贴顶。
         // 不用 `.frame(maxHeight: .infinity, alignment: .top)`：overlay 里给的高度提案不一定是整屏，
@@ -592,9 +600,10 @@ struct WallPreview: View {
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity)
-        // 离屏幕边 32：系统相册那列按钮和状态栏在同一条竖线上（外屏竖放量的：按钮右缘距屏 33、
-        // 中心 408，顶栏那条时间中心 413），以前给的 20 整列偏右、看着跟状态栏没对齐（v0.3.167）
-        .padding(columnOnRight ? .trailing : .leading, 32)
+        // 离屏幕边 24：和状态栏同一条竖线（对着系统相册量的：外屏竖放 457 宽时按钮中心 408.5、
+        // 时间也在这条线上；内屏横放 951 宽时按钮中心 903）。列里最宽的是胶囊 48，所以 951−24−24=903。
+        // 以前给 20 整列偏右、给 26/32 又偏左 2~6pt
+        .padding(columnOnRight ? .trailing : .leading, 24)
     }
 
     /// 圆形的玻璃按钮（关闭、撤销、分享）。
