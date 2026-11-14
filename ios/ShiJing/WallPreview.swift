@@ -470,12 +470,21 @@ struct WallPreview: View {
             if let index { numberPill(index) }
         }
         .padding(.horizontal, 20)
+        // Duo 内屏竖放：系统相册把按钮行和右上角的时间、信号放在同一行（v0.3.167）
+        .padding(.trailing, topRowBesideStatusBar ? 120 : 0)
         // 铺满全屏后 padding 是从屏幕边缘算的，安全区得自己加：竖屏状态栏 / 灵动岛下面再留 8，
-        // 横屏（安全区几乎为 0）离上边缘至少 28，不然编号贴着屏幕边
-        .padding(.top, max(windowSafe.top + 8, 28))
+        // 横屏（安全区几乎为 0）离上边缘至少 28，不然编号贴着屏幕边。
+        // Duo 内屏竖放例外：状态栏本来就占着顶上一整行（安全区 82），按钮行要跟它并排、不能落到下面
+        .padding(.top, topRowBesideStatusBar ? 24 : max(windowSafe.top + 8, 28))
         .padding(.bottom, 8)
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { topBarBottom = $0 }
     }
+
+    /// 顶部那一排按钮要不要和状态栏并排：只有 Duo 内屏竖放是这样（系统相册里关闭、分享、日期、
+    /// 滑块、删除排成一行，最右边才是时间和信号）。按窗口顶边安全区认：Duo 内屏竖放 82，
+    /// iPad 竖放只有状态栏那 24，其他宽屏也到这不了这一支（`wide && !sideColumn`）。
+    /// 右边的按钮组要让开状态栏那一块（实测内屏竖放状态栏从 558pt 起、屏宽 669），留 120。
+    private var topRowBesideStatusBar: Bool { wide && !sideColumn && windowSafe.top > 60 }
 
     private func undoButton(_ name: String, size: CGFloat = 44) -> some View {
         circleButton("arrow.uturn.backward", label: "撤销移出 \(name)", size: size) {
@@ -521,7 +530,9 @@ struct WallPreview: View {
         }
         .padding(.top, topInset)
         .frame(maxHeight: .infinity, alignment: landscape ? .top : .center)
-        .padding(columnOnRight ? .trailing : .leading, 20)
+        // 离屏幕边 32：系统相册那列按钮和状态栏在同一条竖线上（外屏竖放量的：按钮右缘距屏 33、
+        // 中心 408，顶栏那条时间中心 413），以前给的 20 整列偏右、看着跟状态栏没对齐（v0.3.167）
+        .padding(columnOnRight ? .trailing : .leading, 32)
     }
 
     /// 圆形的玻璃按钮（关闭、撤销、分享）。
