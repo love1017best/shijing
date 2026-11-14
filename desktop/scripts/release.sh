@@ -19,6 +19,8 @@
 #      不受工作区里没提交的改动影响。
 #   5. gh release create，然后用这个 dmg 装到本机并启动；连着 iPhone / iPad 时把同一个 tag 的 iOS 版也装上。
 set -euo pipefail
+zmodload zsh/datetime # EPOCHREALTIME（计时用）
+TOTAL=$EPOCHREALTIME
 
 MACOS="" IOS="" IOS_NOTE="" DRY="" WANT=""
 while (($#)); do
@@ -111,13 +113,17 @@ fi
 [[ -f ios/ShiJing/Local.xcconfig ]] && command cp -f ios/ShiJing/Local.xcconfig "$WT/ios/ShiJing/" # 签名团队 ID（不进仓库）
 cd "$WT/desktop"
 echo "构建 dmg（arm64、通用版）…"
+t0=$EPOCHREALTIME
 go tool mygo build -skip-notarize >build-arm64.log 2>&1 || { tail -20 build-arm64.log; exit 1; }
 go tool mygo build -skip-notarize -platform darwin/universal >build-universal.log 2>&1 || { tail -20 build-universal.log; exit 1; }
+printf '两个 dmg：%.1f 秒\n' $((EPOCHREALTIME - t0))
 ARM=build/darwin-arm64/shi-jing-$VERSION-arm64.dmg
 UNI=build/darwin-universal/shi-jing-$VERSION.dmg
 echo "iOS 模拟器构建检查…"
+t0=$EPOCHREALTIME
 (cd ../ios && xcodebuild -project ShiJing.xcodeproj -scheme ShiJing -destination 'generic/platform=iOS Simulator' \
 	-derivedDataPath build-sim build -quiet >build-sim.log 2>&1) || { grep -m5 error ../ios/build-sim.log; echo "iOS 构建失败，tag 已推送但没有建 Release"; exit 1; }
+printf 'iOS 模拟器构建：%.1f 秒\n' $((EPOCHREALTIME - t0))
 
 if [[ -z "$IOS_NOTE" ]]; then
 	IOS_NOTE="iOS 端没有上架、不提供安装包：源码在 \`ios/\`，按 \`ios/README.md\` 用 Xcode 和自己的 Apple ID 装到手机上。这一版跑过模拟器构建；连着手机时会同时装到手机上。"
@@ -139,7 +145,12 @@ if [[ -n "$DRY" ]]; then
 	echo "（dry-run）构建都通过了：$ARM、$UNI。不建 Release、不安装。"
 	exit 0
 fi
+t0=$EPOCHREALTIME
 gh release create "v$VERSION" "$UNI" "$ARM" --verify-tag --title "拾景 v$VERSION" --notes "$NOTES"
+printf '上传发布包：%.1f 秒\n' $((EPOCHREALTIME - t0))
 
 # 装到本机（和连着的手机）：用的就是刚发布的包 / 同一个 tag
+t0=$EPOCHREALTIME
 scripts/install-local.sh --no-build
+printf '装到本机和手机：%.1f 秒\n' $((EPOCHREALTIME - t0))
+printf '发布总耗时：%.1f 秒\n' $((EPOCHREALTIME - TOTAL))
