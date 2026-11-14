@@ -49,13 +49,8 @@ struct DashboardView: View {
             } message: {
                 Text(session.actionError ?? "")
             }
-            .confirmationDialog("这次运行会删除不合格的原图", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("删除并换一批", role: .destructive) { Task { await session.run(deleteOriginals: true) } }
-                Button("只模拟筛选，不删除") { Task { await session.run(deleteOriginals: false) } }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text(session.state?.deleteNote ?? "")
-            }
+            // 「这次运行会删除不合格的原图」那个确认框挂在「换一批」按钮上（见 runButton）：
+            // iPad、Duo 这种 regular 宽度上它是 popover，挂在整页上会飘到屏幕中间、离按钮很远。
             .sensoryFeedback(.success, trigger: session.state?.last?.at) { old, new in
                 old != nil && new != nil && session.state?.last?.status == "ok"
             }
@@ -337,6 +332,15 @@ struct DashboardView: View {
                 .buttonBorderShape(.roundedRectangle(radius: 12))
                 .controlSize(.large)
                 .disabled(s.blocked != nil || session.busy || session.connection != .live)
+                // 确认框挂在按钮本身上：regular 宽度（iPad、Duo）上它是 popover，会从按钮旁边弹出来，
+                // 挂在整页上会飘到屏幕中间（v0.3.170 用户反馈「离按钮很远」）。
+                .confirmationDialog("这次运行会删除不合格的原图", isPresented: $confirmDelete, titleVisibility: .visible) {
+                    Button("删除并换一批", role: .destructive) { Task { await session.run(deleteOriginals: true) } }
+                    Button("只模拟筛选，不删除") { Task { await session.run(deleteOriginals: false) } }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text(session.state?.deleteNote ?? "")
+                }
     }
 
     /// 当前壁纸：前几张缩略图，点开看大图、长按整理；「全部」进整个网格。

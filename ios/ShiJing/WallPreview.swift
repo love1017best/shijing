@@ -214,7 +214,8 @@ struct WallPreview: View {
         // 隐藏顶栏底栏时状态栏也藏掉；小屏横放（外屏、普通手机）也一样：系统本来就不显示，
         // 留着会压到右边那一列上。Duo 内屏横放不藏——系统相册在那里照样显示，列从它下面开始。
         .statusBarHiddenCompat(!chrome || axis == .dismiss || hideStatusBarInLandscape)
-        .deleteOriginalDialog(session: session, wall: $confirmDelete)
+        // 删除确认不挂在这一层：iPad、Duo 这种 regular 宽度上确认框是 popover，挂整页会飘到屏幕中间，
+        // 和按下那颗删除按钮差很远。改挂在每个版式的删除按钮上（见 topActions / sideButtons / actionRow）。
         .alert("跳到第几张", isPresented: $jumping) {
             TextField("1–\(walls.count)", text: $jumpText).iOSKeyboard(.numberPad)
             Button("跳转") {
@@ -235,6 +236,7 @@ struct WallPreview: View {
         .sensoryFeedback(.success, trigger: session.walls.count) { old, new in new < old }
         // 关掉预览：记住操作列表是开着还是收着，下次打开还是这个样子
         .onDisappear { UserDefaults.standard.set(showsInfo, forKey: Self.infoOpenKey) }
+        .onAppear(perform: demoOpenDialogs)
         .task(id: current) {
             let store = ImageStore.shared
             if let img = store.cached(session, current, .thumb) {
@@ -246,6 +248,15 @@ struct WallPreview: View {
     }
 
     // MARK: 翻页
+
+    /// 截图用：模拟器里点不动按钮，用启动参数直接把删除确认框弹出来，看它弹在哪
+    private func demoOpenDialogs() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-demoConfirmDelete") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { confirmDelete = wall }
+        }
+        #endif
+    }
 
     /// 只摆当前和左右相邻的两页（首尾相接）。身份按文件名算：翻页时相邻页只是换了位置，
     /// 视图（连同已经解好的图）不用重建，滑动时也不会闪一下。
@@ -551,6 +562,7 @@ struct WallPreview: View {
             ShareOriginalButton(session: session, wall: w, glass: true, size: topButtonSize)
             actionPill(w, size: topPillSize)
             actionCircle(.delete, w, size: topButtonSize)
+                .deleteOriginalDialog(session: session, wall: $confirmDelete)
         }
     }
 
@@ -595,6 +607,7 @@ struct WallPreview: View {
                 ShareOriginalButton(session: session, wall: w, glass: true, size: button)
                 actionPill(w, vertical: true, size: pill)
                 actionCircle(.delete, w, size: button)
+                    .deleteOriginalDialog(session: session, wall: $confirmDelete)
             }
             .padding(.top, topInset)
             Spacer(minLength: 0)
@@ -702,6 +715,7 @@ struct WallPreview: View {
             actionPill(w)
             Spacer(minLength: 12)
             actionCircle(.delete, w)
+                .deleteOriginalDialog(session: session, wall: $confirmDelete)
         }
         .frame(height: 52)
     }

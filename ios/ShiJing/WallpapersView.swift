@@ -157,7 +157,6 @@ struct WallGrid: View {
         .fullScreenCoverCompat(item: $previewing) { w in
             WallPreview(session: session, startName: w.name)
         }
-        .deleteOriginalDialog(session: session, wall: $confirmDelete)
     }
 
     private var rowCount: Int {
@@ -165,23 +164,30 @@ struct WallGrid: View {
     }
 
     /// 一个格子（带长按菜单、选择模式的处理）。
+    /// 删除确认挂在格子上而不是整张网格上：iPad、Duo 这种 regular 宽度上确认框是 popover，
+    /// 挂在网格上会飘到网格正中，和长按的那个格子差很远。每格都挂一份，只有被点的那格生效。
     @ViewBuilder
     private func tile(_ w: Wallpaper, number: Int) -> some View {
-        if selecting {
-            cell(w, number: number)
-        } else {
-            cell(w, number: number)
-                .contextMenu {
-                    WallActionButtons(session: session, wall: w, confirmDelete: $confirmDelete)
-                    if let onSelect {
-                        Divider()
-                        Button("批量选择", systemImage: "checkmark.circle") { onSelect(w) }
+        Group {
+            if selecting {
+                cell(w, number: number)
+            } else {
+                cell(w, number: number)
+                    .contextMenu {
+                        WallActionButtons(session: session, wall: w, confirmDelete: $confirmDelete)
+                        if let onSelect {
+                            Divider()
+                            Button("批量选择", systemImage: "checkmark.circle") { onSelect(w) }
+                        }
+                    } preview: {
+                        WallImage(session: session, wall: w, kind: .image, contentMode: .fit)
+                            .frame(width: 320, height: 200)
                     }
-                } preview: {
-                    WallImage(session: session, wall: w, kind: .image, contentMode: .fit)
-                        .frame(width: 320, height: 200)
-                }
+            }
         }
+        .deleteOriginalDialog(session: session, wall: Binding(
+            get: { confirmDelete?.id == w.id ? confirmDelete : nil },
+            set: { if $0 == nil { confirmDelete = nil } }))
     }
 
     private func cell(_ w: Wallpaper, number: Int) -> some View {
@@ -557,6 +563,8 @@ struct ShareOriginalButton: View {
     /// 预览底部那排的直径（窄屏上要和关闭按钮一起收窄）
     var size: CGFloat = 44
     @State private var loading = false
+    /// 这颗按钮在屏幕上的位置，弹分享面板时当锚点用（见 SharePresenter）
+    @State private var anchor: CGRect = .zero
 
     /// 手机上存过这张的原图（离线时唯一能用的那份）
     private var cached: URL? {
@@ -573,6 +581,7 @@ struct ShareOriginalButton: View {
         }
         .disabled(loading || (session.offline && cached == nil)) // 离线、手机上又没存过：下载不了
         .accessibilityLabel("分享原图")
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { anchor = $0 }
     }
 
     private var button: some View {
@@ -607,7 +616,7 @@ struct ShareOriginalButton: View {
 
     @MainActor
     private func present(_ url: URL, deleteAfter: Bool) {
-        SharePresenter.present([url]) {
+        SharePresenter.present([url], anchor: anchor) {
             if deleteAfter { try? FileManager.default.removeItem(at: url) }
         }
     }
@@ -617,7 +626,11 @@ struct ShareOriginalButton: View {
 /// 收起时又跟着 sheet 一起走，两段动画叠着看很生涩。
 @MainActor
 enum SharePresenter {
-    static func present(_ items: [Any], onFinish: (() -> Void)? = nil) {
+    /// `anchor`：分享按钮在屏幕上的位置（全局坐标，和窗口原点一致）。iOS 18 及更早的 iPad、
+    /// Duo 这类 regular 宽度上分享面板是 popover，指到按钮那一块才会贴着按钮弹出来。
+    /// iOS 26 起系统把分享面板换成了自己居中的一块玻璃卡片，锚点会被它重置、指不过去（试过
+    /// sourceView/sourceRect/sourceItem、单独包一层普通视图控制器，都是弹在屏幕中间），只能这样。
+    static func present(_ items: [Any], anchor: CGRect? = nil, onFinish: (() -> Void)? = nil) {
         #if os(iOS)
         guard let scene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
@@ -629,14 +642,19 @@ enum SharePresenter {
             DispatchQueue.main.async { onFinish?() }
         }
         if let pop = vc.popoverPresentationController {
-            // iPad 上分享面板是个 popover，得给个锚点；预览是全屏的，指屏幕中间
             pop.sourceView = top.view
-            pop.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
-            pop.permittedArrowDirections = []
+            if let anchor, anchor != .zero, let window = top.view.window {
+                // SwiftUI 量到的是窗口坐标，换成最上层这个视图自己的坐标
+                pop.sourceRect = top.view.convert(anchor, from: window)
+                pop.permittedArrowDirections = .any // 让系统按按钮在屏幕上下的位置挑箭头方向
+            } else {
+                pop.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+                pop.permittedArrowDirections = []
+            }
         }
         top.present(vc, animated: true)
         #else
-        _ = items
+        _ = (items, anchor)
         onFinish?()
         #endif
     }
