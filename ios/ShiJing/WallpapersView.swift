@@ -125,22 +125,31 @@ struct WallGrid: View {
 
     var body: some View {
         let order = numbering
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Self.gap), count: columns), spacing: Self.gap) {
-            ForEach(Array(shown.enumerated()), id: \.element.id) { i, w in
-                if selecting {
-                    cell(w, number: order?[w.id] ?? i + 1)
-                } else {
-                    cell(w, number: order?[w.id] ?? i + 1)
-                        .contextMenu {
-                            WallActionButtons(session: session, wall: w, confirmDelete: $confirmDelete)
-                            if let onSelect {
-                                Divider()
-                                Button("批量选择", systemImage: "checkmark.circle") { onSelect(w) }
+        Group {
+            if rows != nil {
+                // 概览只显示前几行：用固定的 VStack 排，不进 LazyVGrid。
+                // LazyVGrid 放在 List 行里时，滚进来的格子会按上一轮布局的高度画，个别图缩成一小块、
+                // 浮在网格外面（Duo 外屏概览踩过，v0.3.168）。这里行数本来就不多，用不着懒加载。
+                VStack(spacing: Self.gap) {
+                    ForEach(0..<rowCount, id: \.self) { r in
+                        HStack(spacing: Self.gap) {
+                            ForEach(0..<columns, id: \.self) { c in
+                                let i = r * columns + c
+                                if i < shown.count {
+                                    let w = shown[shown.startIndex + i]
+                                    tile(w, number: order?[w.id] ?? i + 1)
+                                } else {
+                                    Color.clear // 最后一行的空位，撑住列宽
+                                }
                             }
-                        } preview: {
-                            WallImage(session: session, wall: w, kind: .image, contentMode: .fit)
-                                .frame(width: 320, height: 200)
                         }
+                    }
+                }
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Self.gap), count: columns), spacing: Self.gap) {
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { i, w in
+                        tile(w, number: order?[w.id] ?? i + 1)
+                    }
                 }
             }
         }
@@ -151,13 +160,41 @@ struct WallGrid: View {
         .deleteOriginalDialog(session: session, wall: $confirmDelete)
     }
 
+    private var rowCount: Int {
+        max(1, (shown.count + columns - 1) / columns)
+    }
+
+    /// 一个格子（带长按菜单、选择模式的处理）。
+    @ViewBuilder
+    private func tile(_ w: Wallpaper, number: Int) -> some View {
+        if selecting {
+            cell(w, number: number)
+        } else {
+            cell(w, number: number)
+                .contextMenu {
+                    WallActionButtons(session: session, wall: w, confirmDelete: $confirmDelete)
+                    if let onSelect {
+                        Divider()
+                        Button("批量选择", systemImage: "checkmark.circle") { onSelect(w) }
+                    }
+                } preview: {
+                    WallImage(session: session, wall: w, kind: .image, contentMode: .fit)
+                        .frame(width: 320, height: 200)
+                }
+        }
+    }
+
     private func cell(_ w: Wallpaper, number: Int) -> some View {
         Button {
             if let onOpen { onOpen(w) } else { previewing = w }
         } label: {
-            WallImage(session: session, wall: w)
-                .aspectRatio(16 / 10, contentMode: .fill)
-                .frame(minWidth: 0, maxWidth: .infinity)
+            // 格子尺寸只由 16:10 这个比例定，图片放在 overlay 里填满、超出裁掉。
+            // 以前把 aspectRatio(.fill) 直接挂在 WallImage 上，格子高矮跟着图片自身比例和
+            // 加载状态走：加载完的图和占位块不一样高，同一行里有的格子矮一截、有的图浮在网格外面
+            // （Duo 外屏概览上踩过）。
+            Color.clear
+                .aspectRatio(16 / 10, contentMode: .fit)
+                .overlay { WallImage(session: session, wall: w) }
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(alignment: .bottomTrailing) {
                     // 「全部壁纸」页标上编号，和大图预览顶部的编号一致，方便对照着找
