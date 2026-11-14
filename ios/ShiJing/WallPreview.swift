@@ -90,15 +90,19 @@ struct WallPreview: View {
     private var dragProgress: CGFloat { min(max(dragY, 0) / 400, 1) }
     private var zoomed: Bool { scale > 1.01 }
 
-    /// 宽屏（Duo 内屏、iPad）：按钮照系统相册放到顶部一排。普通 iPhone 和 Duo 外屏（466 宽）放不下
+    /// 宽屏（Duo 内屏、iPad）：按钮照系统相册放到顶部一排。普通 iPhone（402 宽）放不下
     /// 一排按钮加编号，还是底部一排。
     private var wide: Bool { screenSize.width >= 640 }
 
-    /// 宽屏横放（Duo 内屏、外屏横放）时，系统相册把按钮收到右边一竖列（iPad 横放是高屏，相册用的还是顶部一排，
-    /// 所以按高度区分：约 700 以下才收成一列）。按屏幕形状判断，不按机型。
+    /// 右边一竖列（照系统相册）：Duo 内屏横放、外屏横放和竖放都是这样（外屏系统报的是 regular 尺寸类，
+    /// 但系统相册在它上面照样用右侧一列）。只有高度够的宽屏才用顶部一排（iPad、Duo 内屏竖放），
+    /// 所以按高度分：约 700 以下收成一列。按屏幕形状判断，不按机型。
     private var sideColumn: Bool {
-        wide && screenSize.width > screenSize.height && screenSize.height < 700
+        screenSize.height < 700 && screenSize.width >= 460
     }
+
+    /// 侧列放不下常规尺寸时的小一号（普通 iPhone 横放只有 400 出头高）。
+    private var tightColumn: Bool { sideColumn && screenSize.height < 520 }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -164,8 +168,8 @@ struct WallPreview: View {
         .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 60) }
         .presentationBackground(.clear)
         .preferredColorScheme(.dark)
-        // 横屏时状态栏在右上角，正好和右上角那一排按钮打架（系统相册横屏也不显示状态栏）
-        .statusBarHiddenCompat(!chrome || axis == .dismiss || sideColumn)
+        // 状态栏照系统相册保持显示（横放、外屏都有时间信号），右列垂直居中不会和右上角的状态栏打架
+        .statusBarHiddenCompat(!chrome || axis == .dismiss)
         .deleteOriginalDialog(session: session, wall: $confirmDelete)
         .alert("跳到第几张", isPresented: $jumping) {
             TextField("1–\(walls.count)", text: $jumpText).iOSKeyboard(.numberPad)
@@ -428,12 +432,11 @@ struct WallPreview: View {
     }
 
     /// 顶栏。关闭和撤销在左、编号正中（照系统相册的标题）；宽屏照系统相册把分享和整理操作放顶部右边一排；
-    /// 宽屏横放时顶部只剩编号，按钮都收到右边一竖列（见 sideButtons）。
+    /// 右边一列的时候顶部只剩编号，按钮都在列里（见 sideButtons）。
     private var topBar: some View {
         HStack(spacing: 8) {
             if !sideColumn {
                 circleButton("xmark", label: "关闭") { dismiss() }
-                // 撤销也紧跟在关闭旁边：Duo 外屏的状态栏在右边竖着排，右上角放按钮会和时钟、Wi‑Fi 叠在一起
                 if let undo = session.undoName { undoButton(undo) }
             }
             Spacer(minLength: 8)
@@ -470,27 +473,32 @@ struct WallPreview: View {
         }
     }
 
-    /// 宽屏横放时右边那一竖列（照系统相册）：撤销、关闭、分享各自一颗，中间一列整理操作，最下面删除。
-    /// 外屏只有 466pt 高，九个控件按小一号排（圆钮 38、胶囊里 42、间距 8），不然整列比屏幕还高，
-    /// 最下面的删除会压到缩略图条上。
+    /// 右边那一竖列（照系统相册）：撤销、关闭、分享各自一颗，中间一列整理操作，最下面删除。
+    /// 整列垂直居中，避开右上角的状态栏（Duo 外屏竖放时那排时间和 Wi‑Fi 竖着排在右边，一直画到 150pt 左右）。
+    /// 普通 iPhone 横放只有 400 出头高，整列用小一号（圆钮 38、胶囊里 42、间距 6）。
     private func sideButtons(_ w: Wallpaper) -> some View {
-        VStack(spacing: 8) {
-            if let undo = session.undoName { undoButton(undo, size: 38) }
-            circleButton("xmark", label: "关闭", size: 38) { dismiss() }
-            ShareOriginalButton(session: session, wall: w, glass: true, size: 38)
-            actionPill(w, vertical: true, size: 42)
-            actionCircle(.delete, w, size: 38)
+        let tight = tightColumn
+        let button: CGFloat = tight ? 38 : 44
+        let pill: CGFloat = tight ? 42 : 48
+        return VStack {
+            Spacer(minLength: 0)
+            VStack(spacing: tight ? 6 : 8) {
+                if let undo = session.undoName { undoButton(undo, size: button) }
+                circleButton("xmark", label: "关闭", size: button) { dismiss() }
+                ShareOriginalButton(session: session, wall: w, glass: true, size: button)
+                actionPill(w, vertical: true, size: pill)
+                actionCircle(.delete, w, size: button)
+            }
+            Spacer(minLength: 0)
         }
         .padding(.trailing, 20)
-        .padding(.top, max(windowSafe.top + 8, 24))
-        .padding(.bottom, max(24, windowSafe.bottom + 12))
     }
 
     /// 圆形的玻璃按钮（关闭、撤销、分享）。
     private func circleButton(_ icon: String, label: String, size: CGFloat = 44,
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(.body.weight(.semibold))
+            Image(systemName: icon).font(.system(size: 20, weight: .semibold))
                 .frame(width: size, height: size)
                 .glassBackground(in: Circle(), interactive: true)
                 .contentShape(Circle())
@@ -505,7 +513,7 @@ struct WallPreview: View {
             if kind == .save, session.saving == w.name {
                 ProgressView().controlSize(.small)
             } else {
-                Image(systemName: kind.icon).font(.system(size: 18, weight: .semibold))
+                Image(systemName: kind.icon).font(.system(size: 20, weight: .semibold))
             }
         }
         .foregroundStyle(kind.isDestructive ? Color.red : Color.primary)
@@ -566,7 +574,7 @@ struct WallPreview: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
 
-            if !wide { actionRow(w) } // 宽屏的按钮在顶栏，横放时在右边一列
+            if !wide && !sideColumn { actionRow(w) } // 宽屏的按钮在顶栏，右边一列时在右列里
         }
         .padding(.horizontal, 20).padding(.top, 14)
         .frame(maxWidth: .infinity, alignment: .leading)

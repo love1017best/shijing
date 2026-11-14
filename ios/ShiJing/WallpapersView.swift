@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 // 三种操作的说法和桌面端 preview.go 的 act* 一致：「移出」只删壁纸文件夹里那份，「删除原图」才动图库。
 enum WallAction {
@@ -517,9 +520,6 @@ struct ShareOriginalButton: View {
     /// 预览底部那排的直径（窄屏上要和关闭按钮一起收窄）
     var size: CGFloat = 44
     @State private var loading = false
-    @State private var file: SharedFile?
-    /// 当前分享出去的那份临时文件：分享面板收起后删掉，不然每分享一张就留一份原图
-    @State private var shared: URL?
 
     /// 手机上存过这张的原图（离线时唯一能用的那份）
     private var cached: URL? {
@@ -536,9 +536,6 @@ struct ShareOriginalButton: View {
         }
         .disabled(loading || (session.offline && cached == nil)) // 离线、手机上又没存过：下载不了
         .accessibilityLabel("分享原图")
-        .sheet(item: $file, onDismiss: cleanUp) { f in
-            ActivitySheet(items: [f.url]).ignoresSafeArea()
-        }
     }
 
     private var button: some View {
@@ -549,54 +546,73 @@ struct ShareOriginalButton: View {
                 Image(systemName: "square.and.arrow.up").opacity(loading ? 0 : 1)
                 if loading { ProgressView() }
             }
-            .font(.body.weight(.semibold))
+            .font(.system(size: 20, weight: .semibold))
             .frame(width: glass ? size : 36, height: glass ? size : 36)
             .modifier(ShareGlass(glass: glass))
         }
     }
 
-    private func cleanUp() {
-        if let u = shared { try? FileManager.default.removeItem(at: u) }
-        shared = nil
-    }
-
+    @MainActor
     private func load() async {
         loading = true
         defer { loading = false }
         do {
             if let cached, session.offline {
-                shared = nil // 缓存里的那份不能删
-                file = SharedFile(url: cached)
+                present(cached, deleteAfter: false) // 手机上缓存的那份不能删
             } else {
                 let url = try await session.client().downloadOriginal(wall.name)
-                shared = url
-                file = SharedFile(url: url)
+                present(url, deleteAfter: true)
             }
         } catch {
             session.actionError = RemoteSession.describe(error)
         }
     }
-}
 
-struct SharedFile: Identifiable {
-    let url: URL
-    var id: URL { url }
-}
-
-#if os(iOS)
-struct ActivitySheet: UIViewControllerRepresentable {
-    let items: [Any]
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    @MainActor
+    private func present(_ url: URL, deleteAfter: Bool) {
+        SharePresenter.present([url]) {
+            if deleteAfter { try? FileManager.default.removeItem(at: url) }
+        }
     }
-    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
-#else
-struct ActivitySheet: View {
-    let items: [Any]
-    var body: some View { Text("只在 iOS 上可用") }
+
+/// 直接在最上层视图上弹出系统分享面板。用 SwiftUI 的 .sheet 包一层的话，面板得等 sheet 自己推上来才出现、
+/// 收起时又跟着 sheet 一起走，两段动画叠着看很生涩。
+@MainActor
+enum SharePresenter {
+    static func present(_ items: [Any], onFinish: (() -> Void)? = nil) {
+        #if os(iOS)
+        guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive }),
+              let top = topmost(scene.windows.first(where: { $0.isKeyWindow })?.rootViewController
+                                ?? scene.windows.first?.rootViewController) else { return }
+        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        vc.completionWithItemsHandler = { _, _, _, _ in
+            DispatchQueue.main.async { onFinish?() }
+        }
+        if let pop = vc.popoverPresentationController {
+            // iPad 上分享面板是个 popover，得给个锚点；预览是全屏的，指屏幕中间
+            pop.sourceView = top.view
+            pop.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+            pop.permittedArrowDirections = []
+        }
+        top.present(vc, animated: true)
+        #else
+        _ = items
+        onFinish?()
+        #endif
+    }
+
+    #if os(iOS)
+    /// 最上层那个视图控制器（预览、弹层可能已经叠了好几层）
+    private static func topmost(_ vc: UIViewController?) -> UIViewController? {
+        var top = vc
+        while let p = top?.presentedViewController { top = p }
+        return top
+    }
+    #endif
 }
-#endif
 
 /// 预览底部的分享按钮：外面套一块圆形的液态玻璃
 private struct ShareGlass: ViewModifier {
