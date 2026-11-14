@@ -43,6 +43,8 @@ struct MacPage<Content: View>: View {
                 ConnectionFallback(session: session)
             }
         }
+        // 收窄后两侧和底部露出的底色要和列表自己的一样，否则一块灰、一条白（见 SettingsPage 同名修饰）
+        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
         .navigationTitle(title)
         .connectionToolbar(session)
     }
@@ -89,6 +91,7 @@ struct SettingsPage: View {
             }
         }
         .frame(width: demoWidth, height: demoHeight)
+        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -182,6 +185,8 @@ struct SettingsPage: View {
     private let twoColMin: CGFloat = 660
     private let twoColMinHeight: CGFloat = 500
     private let twoColMax: CGFloat = 1360
+    /// 两栏中间的空隙
+    private let colSpacing: CGFloat = 24
 
     /// 当前栏和左右邻居先构建好（滑过去不会空一帧），更远、也从没显示过的先留空。
     private var builtGroups: Set<String> {
@@ -268,20 +273,28 @@ struct SettingsPage: View {
     @ViewBuilder
     private func macPage(_ state: RemoteState, built: Bool) -> some View {
         if twoColumn {
-            HStack(alignment: .top, spacing: 24) { // 两栏中间留一点空，卡片别贴在一起
-                List {
-                    if built {
-                        macNoticeSection(state)
-                        macLeftSections(state)
+            // 两栏等宽、一起居中，中间留一点空，卡片别贴在一起。
+            // 每栏的宽度得自己算：HStack 是按「内容的理想宽度」分配的，右栏下面那些说明文字
+            // 一行很长，会把右栏撑得比左栏宽、整排溢出屏幕右边（Duo 内屏上就是「右边一列超了」）。
+            GeometryReader { g in
+                let colW = max(0, (min(g.size.width, twoColMax) - colSpacing) / 2)
+                HStack(alignment: .top, spacing: colSpacing) {
+                    List {
+                        if built {
+                            macNoticeSection(state)
+                            macLeftSections(state)
+                        }
                     }
+                    .listStyle(.insetGrouped)
+                    .frame(width: colW)
+                    List {
+                        if built { macRightSections(state) }
+                    }
+                    .listStyle(.insetGrouped)
+                    .frame(width: colW)
                 }
-                .listStyle(.insetGrouped)
-                List {
-                    if built { macRightSections(state) }
-                }
-                .listStyle(.insetGrouped)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, max(0, (width - twoColMax) / 2))
         } else {
             List {
                 if built { macContent(state) }

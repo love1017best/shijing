@@ -182,6 +182,8 @@ NAS/网络卷上同步来的文件经常带有 `SF_ARCHIVED`（superuser-only）
   - v0.3.156 之前写的是 `contentMargins(.horizontal, max(0, (width - 680) / 2))`，窄屏上算出来是 0，把系统列表自带的左右留白顶掉，分组卡片贴着屏幕两边画成直角（Duo 外屏上整页看着很挤）。
   - 换成「按 `width` 判断要不要加 margin」也还是有坑：分页 TabView 里没显示过的页不会因为外层宽度变了就重建，`width` 还停在 0，留白照样算成 0——Duo 内屏上「这台 iPhone」「关于」两页比「电脑上的拾景」宽一大截。
   - 现在 `contentWidthCap(max:)` 用 `.frame(maxWidth: cap).frame(maxWidth: .infinity)` 收窄居中，再补一层 `.background(Color(uiColor: .systemGroupedBackground))` 把两侧填成列表底色（不收窄的话两侧会露白）。设置页、记录页、`MacPage`、配对页（640）都走它。
+  - **整页底色要铺满**（v0.3.160）：收窄只解决内容宽度，底色还得分页容器自己画——`SettingsPage` 和 `MacPage` 各加了一层 `.background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())`。加在 `NavigationStack` / `TabView` 上不管用（右侧浮动标签栏那条安全区和底部还是白的，列表一块灰、旁边一条白，Duo 内屏上像贴上去的），加在页面根视图上 `ignoresSafeArea` 才能盖住那块。
+  - **两栏时每栏宽度自己算**（v0.3.160）：`HStack` 按子视图的理想宽度分配，右栏 footer 的长说明文字会把它撑得比左栏宽、整排溢出屏幕（用户报的「右边一列还是超了」）。在 `GeometryReader` 里按 `colW = (min(可用宽, twoColMax) - 24) / 2` 给两个 `List` 显式 `.frame(width:)`，两栏才真的等宽、一起居中。
 - 小组件（`ios/ShiJingWidget`，bundle id `….ios.widget`）和快捷指令（`Shared/Intents.swift`）读不到 App 的 UserDefaults：**免费签名没有 App Groups，但钥匙串共享能用**（2026-11-11 真机签名验证过）。令牌和 `CurrentMac` 存在共享组里，组名带团队前缀，靠 Info.plist 的 `ShiJingKeychainGroup = $(AppIdentifierPrefix)…` 在构建时展开；模拟器没签名时退回默认组。旧版本存在默认组里的令牌读到时自动挪进共享组。`MacStore` 选中的 Mac 变了就写 `CurrentMac`。
 - 换完发通知没有推送可用：App 进后台时如果正在换，用 `beginBackgroundTask` 多连 ~30 秒；小组件运行中按分钟刷新。两边经 `RunNotifier` 共用钥匙串里「通知过的那次 `last.at`」，第一次只记不发，结束超过 15 分钟的不发。通知权限在第一次从手机换一批时才问。
 - 签名到期：`SigningExpiry` 读 `embedded.mobileprovision` 的 `ExpirationDate`；模拟器里用启动参数 `-demoExpiring` 假装 36 小时后到期，看提醒横幅。
