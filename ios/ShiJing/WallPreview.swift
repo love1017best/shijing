@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 大图预览：左右滑翻看壁纸文件夹里的全部图片（首尾相接，和桌面一样），双指缩放，
 /// 底部缩略图条可以拖着快速找图，点顶部编号可以输入编号跳转。
@@ -38,8 +39,11 @@ struct WallPreview: View {
     @State private var screenMidX: CGFloat?
     /// 顶栏下沿、底栏上沿（全局坐标）：竖屏完整显示时图片放在两者之间，不被底栏挡住
     @State private var topBarBottom: CGFloat = 0
-    /// 顶部安全区：横屏时状态栏不占地方（几乎是 0），顶栏按钮要自己离上边缘远一点
-    @State private var topSafe: CGFloat = 0
+    /// 窗口的安全区：整页 `ignoresSafeArea` 铺满之后，页面里量到的安全区是 0，所以从窗口上取。
+    /// 靠一层探针视图（`WindowSafeInsets`）在窗口布局完时报告——直接在 SwiftUI 的
+    /// `onGeometryChange` 里读窗口 insets，转屏时读到的是转屏前那一份（SwiftUI 先布局、
+    /// UIKit 后更新窗口 insets），横屏会一直用竖屏的 82pt（踩过）。
+    @State private var windowSafe = UIEdgeInsets.zero
     @State private var bottomBarTop: CGFloat?
     @State private var jumping = false
     @State private var jumpText = ""
@@ -125,12 +129,9 @@ struct WallPreview: View {
                 Spacer()
                 if let wall { bottomBar(wall) }
             }
-            // 底部让开小横条
-            .padding(.bottom, 20)
+            // 底部让开小横条（整页铺满了，安全区得自己留）
+            .padding(.bottom, max(24, windowSafe.bottom + 12))
             .opacity(axis == .dismiss ? 0 : 1)
-            .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { ins in
-                topSafe = ins.top
-            }
             .ignoresSafeArea(.keyboard) // 输入编号时底栏别被键盘顶上去
             .transition(.opacity)
         }
@@ -138,6 +139,8 @@ struct WallPreview: View {
         // 整页铺满：全屏页的内容区会被首页那条浮动标签栏挤窄 84pt（只有 382 宽），
         // 顶栏底栏跟着一起缩的话编号不在屏幕正中、按钮整排偏左
         .ignoresSafeArea()
+        // 窗口的安全区（转屏后会自己重报，见 WindowSafeInsets）
+        .background(WindowSafeInsets { if $0 != windowSafe { windowSafe = $0 } }.allowsHitTesting(false))
         .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 60) }
         .presentationBackground(.clear)
         .preferredColorScheme(.dark)
@@ -417,8 +420,9 @@ struct WallPreview: View {
             }
         }
         .padding(.horizontal, 20)
-        // 竖屏有状态栏垫着，离安全区 8 就够；横屏安全区几乎为 0，按钮离屏幕上边缘至少留 20
-        .padding(.top, max(8, 20 - topSafe))
+        // 铺满全屏后 padding 是从屏幕边缘算的，安全区得自己加：竖屏状态栏 / 灵动岛下面再留 8，
+        // 横屏（安全区几乎为 0）离上边缘至少 28，不然编号贴着屏幕边
+        .padding(.top, max(windowSafe.top + 8, 28))
         .padding(.bottom, 8)
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { topBarBottom = $0 }
     }
@@ -450,7 +454,7 @@ struct WallPreview: View {
             .accessibilityLabel(showsInfo ? "收起文件名" : "显示文件名")
 
             FilmStrip(session: session, current: current, screenMidX: screenMidX) { go(to: $0) }
-                .padding(.horizontal, -16) // 缩略图条撑满整行
+                .padding(.horizontal, -20) // 缩略图条撑满整行
 
             if showsInfo {
                 VStack(alignment: .leading, spacing: 2) {
@@ -471,7 +475,7 @@ struct WallPreview: View {
 
             actionBar(w)
         }
-        .padding()
+        .padding(.horizontal, 20).padding(.top, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { bottomBarTop = $0 }
     }
@@ -710,3 +714,26 @@ private struct FilmStrip: View {
     }
 }
 
+
+/// 报告窗口的安全区。大图预览整页 `ignoresSafeArea` 铺满屏幕，页面里的安全区是 0，
+/// 顶栏底栏的留白得按窗口的安全区自己算。窗口布局（首次出现、转屏）时读一次、
+/// 再 `async` 回主线程报出去——在布局过程中直接改 SwiftUI 的状态会报「during view update」。
+private struct WindowSafeInsets: UIViewRepresentable {
+    let onChange: (UIEdgeInsets) -> Void
+
+    func makeUIView(context: Context) -> Probe { Probe() }
+    func updateUIView(_ probe: Probe, context: Context) { probe.onChange = onChange }
+
+    final class Probe: UIView {
+        var onChange: ((UIEdgeInsets) -> Void)?
+
+        override func didMoveToWindow() { super.didMoveToWindow(); report() }
+        override func layoutSubviews() { super.layoutSubviews(); report() }
+        override func safeAreaInsetsDidChange() { super.safeAreaInsetsDidChange(); report() }
+
+        private func report() {
+            guard let insets = window?.safeAreaInsets else { return }
+            DispatchQueue.main.async { [weak self] in self?.onChange?(insets) }
+        }
+    }
+}

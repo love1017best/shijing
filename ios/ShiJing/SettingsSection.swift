@@ -64,13 +64,8 @@ struct SettingsPage: View {
     @State private var resTask: Task<Void, Never>?
     /// 设置分三类：mac = 电脑上的拾景（遥控改的），phone = 这台手机（离线缓存等），about = 版本和签名
     @AppStorage("settingsGroup") private var groupRaw = "mac"
-    /// 列表收窄到适合阅读的宽度（和电脑上的设置页一样），按上一帧量到的宽度算
-    @State private var width: CGFloat = 0
-    /// 高度：够高才分两栏（手机横放只有 400 出头，两栏会挤）
-    @State private var height: CGFloat = 0
     /// 显示过的栏：没显示过的不构建内容（电脑状态每秒推一次，三页 List 不必一起重建）
     @State private var seenGroups: Set<String> = []
-
     var body: some View {
         Group {
             if let state = session.state {
@@ -107,12 +102,6 @@ struct SettingsPage: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             if showsPager { groupPicker }
         }
-        // 量整页（含切换栏）：分不分两栏看的是整页有多大；量切换栏里面那块的话，
-        // Duo 内屏只剩 500 出头，会被当成「太矮」
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-            width = size.width
-            height = size.height
-        }
         .toolbar {
             if session.savingSettings {
                 ToolbarItem(placement: .automatic) { ProgressView() } // 正在把改动发给电脑
@@ -134,7 +123,7 @@ struct SettingsPage: View {
         return nil
     }
 
-    /// 三栏切换：整宽一条，内容区和下方的栏一样宽（宽屏两栏时跟着变宽）居中。
+    /// 三栏切换：整宽一条，内容最宽 680 居中，和下面列表的内容对齐。
     private var groupPicker: some View {
         Picker("设置分类", selection: $groupRaw) {
             Text("电脑上的拾景").tag(SettingsGroup.mac.rawValue)
@@ -142,7 +131,7 @@ struct SettingsPage: View {
             Text("关于").tag(SettingsGroup.about.rawValue)
         }
         .pickerStyle(.segmented)
-        .frame(maxWidth: twoColumn && groupRaw == SettingsGroup.mac.rawValue ? twoColMax : 680)
+        .frame(maxWidth: 680)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
@@ -171,22 +160,6 @@ struct SettingsPage: View {
         .tabViewStyle(.page(indexDisplayMode: .never))
         .onChange(of: groupRaw) { _, new in seenGroups.insert(new) }
     }
-
-    /// 宽度够了才分左右两栏（iPad、Duo 内屏），和电脑上的设置页一致；单栏时最宽 680、居中。
-    /// 高度也要够：Duo 内屏（整页 951×669）够，iPhone 横放只有 390 出头，两栏会挤成一团。
-    /// 量的是整页高度（含切换栏），量切换栏里面那块的话内屏只剩 500 出头，会被当成太矮。
-    private var twoColumn: Bool {
-        #if DEBUG
-        // 截图用：模拟器不好转成横屏，-demoTwoCol 直接按两栏排
-        if ProcessInfo.processInfo.arguments.contains("-demoTwoCol") { return true }
-        #endif
-        return width >= twoColMin && height >= twoColMinHeight
-    }
-    private let twoColMin: CGFloat = 660
-    private let twoColMinHeight: CGFloat = 500
-    private let twoColMax: CGFloat = 1360
-    /// 两栏中间的空隙
-    private let colSpacing: CGFloat = 24
 
     /// 当前栏和左右邻居先构建好（滑过去不会空一帧），更远、也从没显示过的先留空。
     private var builtGroups: Set<String> {
@@ -269,38 +242,15 @@ struct SettingsPage: View {
         offlineSection
     }
 
-    /// 电脑上的拾景：窄屏单栏（最宽 680 居中）；宽屏分左右两栏，和电脑上的设置页一个思路。
+    /// 电脑上的拾景：一个列表（和系统设置一样），内容最宽 680、居中。
+    /// 不做左右两栏：并排两个 List 各有各的滚动条，左栏那条落在屏幕中间、贴着右栏内容，
+    /// 而原生列表没法让滚动条跑到整页最右边——宽屏统一成单栏，滚动条才和系统设置一样在右边。
     @ViewBuilder
     private func macPage(_ state: RemoteState, built: Bool) -> some View {
-        if twoColumn {
-            // 两栏等宽、一起居中，中间留一点空，卡片别贴在一起。
-            // 每栏的宽度得自己算：HStack 是按「内容的理想宽度」分配的，右栏下面那些说明文字
-            // 一行很长，会把右栏撑得比左栏宽、整排溢出屏幕右边（Duo 内屏上就是「右边一列超了」）。
-            GeometryReader { g in
-                let colW = max(0, (min(g.size.width, twoColMax) - colSpacing) / 2)
-                HStack(alignment: .top, spacing: colSpacing) {
-                    List {
-                        if built {
-                            macNoticeSection(state)
-                            macLeftSections(state)
-                        }
-                    }
-                    .listStyle(.insetGrouped)
-                    .frame(width: colW)
-                    List {
-                        if built { macRightSections(state) }
-                    }
-                    .listStyle(.insetGrouped)
-                    .frame(width: colW)
-                }
-                .frame(maxWidth: .infinity)
-            }
-        } else {
-            List {
-                if built { macContent(state) }
-            }
-            .contentWidthCap(max: 680)
+        List {
+            if built { macContent(state) }
         }
+        .contentWidthCap(max: 680)
     }
 
     /// 单栏时的顺序：离线提示 → 输出 / 采样 / 画质 / 归档 → 筛选 / 自动换 / 系统 → 图库入口 → 待删除。
@@ -874,16 +824,22 @@ private struct OfflineCacheSection: View {
 }
 
 
+/// 系统分组列表自带的内容留白（窄屏时不额外加，保持原样）。
+private let baseInset: CGFloat = 20
+
 extension View {
-    /// 内容最宽 `cap`、居中；比 `cap` 窄时（手机）铺满，系统列表自带的留白照旧。
-    /// 用 frame 收窄、不按量到的宽度算 `contentMargins`：分页 TabView 里没显示过的页
-    /// 不会因为外层宽度变了就重建，量到的宽度还是 0 的话留白算出来就是 0——
-    /// Duo 内屏上「这台 iPhone」「关于」两页因此比「电脑上的拾景」宽一大截。
-    @ViewBuilder
+    /// 内容最宽 `cap`、居中；比 `cap` 窄时铺满，系统列表自带的留白照旧。
+    /// **收窄的是内容，不是列表本身**：列表保持全宽，滚动条才落在列表右边（和系统设置一样）。
+    /// 用 `contentMargins` 而不是给列表加 padding / frame——那两样会把滚动条一起挪到内容边上。
+    /// 窄屏也得给足系统默认的留白（`baseInset`），设成 0 会把列表自带的留白顶掉、卡片贴着屏幕边（v0.3.156 踩过）。
+    /// 宽度用 `GeometryReader` 现量，不依赖页面级的 `@State`：分页 TabView 里没显示过的页
+    /// 不会因为外层宽度变化就重建，状态量到的是 0（v0.3.157 踩过）。
     func contentWidthCap(max cap: CGFloat) -> some View {
-        self
-            .frame(maxWidth: cap)
-            .frame(maxWidth: .infinity)
-            .background(Color(uiColor: .systemGroupedBackground))
+        GeometryReader { g in
+            let pad = max(baseInset, (g.size.width - cap) / 2)
+            self
+                .contentMargins(.leading, pad, for: .scrollContent)
+                .contentMargins(.trailing, pad, for: .scrollContent)
+        }
     }
 }
