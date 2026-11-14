@@ -243,16 +243,15 @@ struct DashboardView: View {
                 Label {
                     VStack(alignment: .leading, spacing: 4) {
                         if let at = session.snapshotAt {
-                            Text("离线，显示的是上次同步的壁纸").font(.subheadline.bold())
-                            Text("显示的是 \(Self.ago(at))同步的内容，正在重连。图片只能看缓存过的。")
+                            Text("离线 · \(Self.ago(at))同步").font(.subheadline.bold())
+                            Text("正在重连，只能看缓存过的图。" + queuedNote)
                                 .font(.footnote).foregroundStyle(.secondary)
                         } else {
                             Text("连接已断开，正在重连").font(.subheadline.bold())
                             Text(msg).font(.footnote).foregroundStyle(.secondary)
-                        }
-                        if !session.queued.isEmpty {
-                            Text("离线时记下的 \(session.queued.count) 项操作，连上电脑后自动补上（删除原图要你确认后才删）。")
-                                .font(.footnote).foregroundStyle(.secondary)
+                            if !queuedNote.isEmpty {
+                                Text(queuedNote).font(.footnote).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 } icon: {
@@ -260,6 +259,13 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    /// 离线时记下的操作：连上电脑后会自动补，只有删原图要本人确认。
+    private var queuedNote: String {
+        session.queued.isEmpty
+            ? ""
+            : "记下的 \(session.queued.count) 项操作连上电脑后自动补上，删除原图要你确认。"
     }
 
     /// 「3 小时前」「刚刚」：快照有多旧。
