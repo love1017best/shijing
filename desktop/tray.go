@@ -117,10 +117,12 @@ func (a *app) trayStatus() []string {
 	return out
 }
 
-// trayIcon 是菜单栏图标：界面上同一套 Lucide「图片」图标，画成黑色 + 透明的模板图。
+// trayIcon 是菜单栏图标：和应用图标同一个画面——太阳挂在两座山之间的天上，
+// 画成黑色 + 透明的模板图，菜单栏深浅由系统染色。
+// 太阳和山脊之间留了缝，缩到 16pt 也不会糊成一团。
 func trayIcon() ([]byte, error) {
-	s := ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>`))
-	img := s.Image(32, 32, color.NRGBA{A: 255}) // 32 像素 = 16 pt 的 Retina 图
+	s := ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 20"><circle cx="12.2" cy="5.2" r="3.4" fill="currentColor"/><path fill="currentColor" d="M.6 19 6.6 6.4 12 17.4 17.2 5 23.4 19z"/></svg>`))
+	img := s.Image(48, 40, color.NRGBA{A: 255}) // 48×40 像素 = 21.6×18 pt，Retina 下也够清晰
 	var b bytes.Buffer
 	if err := png.Encode(&b, img); err != nil {
 		return nil, err

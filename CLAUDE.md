@@ -59,7 +59,7 @@
 - 概览页的步骤条/进度条/结果卡片靠 `core.Reporter.Progress` 和 `RunPipeline` 返回的 `core.Summary`；改流程时记得同步上报，`TestRunPipelineEndToEnd` 会检查四个阶段都报到了。
 - 界面状态只能在主线程改：后台 goroutine（目录选择框、流程运行）一律通过 `app.update`（= `Window.Update`）回到主线程。日志是攒批刷新的（80ms 一次），复制几百张图时不会每行触发一次重绘。
 - 关窗不退出（`background.go`）：`win.OnClose` 里 `PreventDefault` + `hideMain`（隐藏窗口，并把激活策略切成 `ActivationPolicyAccessory`，Dock 图标一起消失，只留菜单栏的图标）。**叫出窗口一律走 `showMain`**（切回 regular、`Show`、`Focus`），它调 `SetActivationPolicy` 是运行时可变的。真正退出时 `App.Quit()` 也会经过 `OnClose`，所以 `OnBeforeQuit` 里要先置 `quitting = true` 放行，否则 Cmd+Q 会被吞掉变成"只隐藏"；任务运行中 Cmd+Q 先弹窗确认。Dock 角标由 `app.onRunState` 钩子驱动（测试里为 nil）。
-- 菜单栏图标（`tray.go`）：`setupTray` 用 `mygo.NewTray` 建一个模板图标（Lucide「图片」，`ui.SVG.Image(32,32)` 画成黑色 + 透明 PNG）。**不给 TrayOptions 设常驻菜单**，`OnClick` / `OnRightClick` 里现建 `trayItems()` 再 `SetMenu` + `PopUpMenu`，弹完 `defer SetMenu(nil)`——这样菜单里的状态（图库连上没有、上次换了几张、运行进度）每次点开都是新的，不用另外同步。菜单里「换一批壁纸」在要删原图时先 `showWindow`（确认框在窗口上），其余情况后台直接跑。
+- 菜单栏图标（`tray.go`）：`setupTray` 用 `mygo.NewTray` 建一个模板图标（跟应用图标同一个画面：太阳 + 两座山，用 SVG 现画成黑色 + 透明的模板图，`ui.SVG.Image(48,40)`）。**不给 TrayOptions 设常驻菜单**，`OnClick` / `OnRightClick` 里现建 `trayItems()` 再 `SetMenu` + `PopUpMenu`，弹完 `defer SetMenu(nil)`——这样菜单里的状态（图库连上没有、上次换了几张、运行进度）每次点开都是新的，不用另外同步。菜单里「换一批壁纸」在要删原图时先 `showWindow`（确认框在窗口上），其余情况后台直接跑。
 - `resolvePath()` 必须像 Python 的 `Path.resolve(strict=False)` 那样解析"存在的那部分前缀"：macOS 上 `/var` → `/private/var`，只对完整路径 `EvalSymlinks` 的话，不存在的文件会退回未解析的路径，SMB→NFS 换算就会因前缀不匹配而静默失效（测试里踩过）。
 - 与 Python 版的细微差异（都是有意的）：`filter_sources` 用解析后的路径比较（Python 版拿未解析的 source 去比解析后的集合，路径含软链接时会漏过滤）；重复添加同一个目录会被拒绝（列表用路径当 key）；删除失败只记日志继续，不像 Python 版直接抛异常中断。
 - 界面测试用 `ui.NewTester` 无窗口跑；按标签找输入框要用 `AccessByRole`（`Access(...)` 会先命中 Field 的标签文字），文本框是 `RoleTextField`，`NumberInput` 在无障碍树里是 `RoleGroup`。

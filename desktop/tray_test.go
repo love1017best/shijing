@@ -131,7 +131,7 @@ func TestTrayIconIsTemplatePNG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b := img.Bounds(); b.Dx() != 32 || b.Dy() != 32 {
+	if b := img.Bounds(); b.Dx() != 48 || b.Dy() != 40 {
 		t.Fatalf("图标尺寸 = %v", b)
 	}
 	// 模板图：有画到的地方是黑的，其余透明；不能整张空白
