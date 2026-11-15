@@ -64,7 +64,7 @@
 - 与 Python 版的细微差异（都是有意的）：`filter_sources` 用解析后的路径比较（Python 版拿未解析的 source 去比解析后的集合，路径含软链接时会漏过滤）；重复添加同一个目录会被拒绝（列表用路径当 key）；删除失败只记日志继续，不像 Python 版直接抛异常中断。
 - 界面测试用 `ui.NewTester` 无窗口跑；按标签找输入框要用 `AccessByRole`（`Access(...)` 会先命中 Field 的标签文字），文本框是 `RoleTextField`，`NumberInput` 在无障碍树里是 `RoleGroup`。
 - MyGo 的 `Row` 默认把子元素**垂直居中**，要撑满高度得显式 `.AlignItems(ui.Stretch)`；`Segmented` 默认拉满整行宽度，想按内容宽度就包一层 `Row`。看布局最快的办法是写个临时测试用 `NewTesterWith(..., TesterOptions{Dark: ...})` 渲染 `tt.Image()` 存 PNG，比启动应用截图快得多。
-- README 截图（`docs/screenshots/`）由 `desktop/screenshots_test.go` 用无窗口 Tester 渲染：程序画的示意风景图当壁纸、演示用的目录和日志，2 倍缩放后再画上圆角和红绿灯。**不要用真实壁纸/真实 NAS 路径截图**。界面改了就设 `SHOTS_DIR` 重跑一遍。
+- README 截图（`docs/screenshots/`）由 `desktop/screenshots_test.go` 用无窗口 Tester 渲染：程序画的示意风景图当壁纸、演示用的目录和日志，2 倍缩放后再画上圆角和红绿灯。**不要用真实壁纸/真实 NAS 路径截图**。界面改了就设 `SHOTS_DIR` 重跑一遍。手机那几张 `docs/screenshots/ios-*.png`（README「手机遥控」一节）是手工截的：iPhone Duo 模拟器装 Debug 构建，`-demo …` 启动参数（记录页要 `-demo -demoOffline`，不然转圈等不到数据）、`simctl io booted screenshot --display=1` 截外屏，再用 PIL 缩到 932 宽、加圆角（演示图本身就是色块风景，没有真实照片）。
 - `mygo build` 生成的 dmg 文件名是应用名的拼音（`shi-jing-*.dmg`），这是正常的。
 
 ### 5. 慢的根源是 SMB 往返延迟，不是计算量；拾景对 NAS 的 I/O 已并发化
