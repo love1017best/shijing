@@ -119,8 +119,38 @@ final class RemoteSession {
     /// 开始（或重新开始）保持连接。App 回到前台时调用。
     func start() {
         paused = false
+        // 回到前台、点了「重试」：事件流连上、收到第一份状态之前都按「正在连接」算。
+        // 以前这里不动连接状态，手机在后台时 Mac 走了、回前台后还显示着「已连接」，
+        // 这期间点「下载原图 / 分享原图」会对着一个连不上的地址干等到超时。
+        if connection == .live { connection = .connecting }
         task?.cancel()
         task = Task { await loop() }
+    }
+
+    /// 发请求时发现连不上电脑了（不是电脑返回的错误）：立刻当成断开，
+    /// 别等事件流那边超时——那之前界面还以为连着，图片、原图都会去连一个连不上的地址干等。
+    /// 判断错误类型见 `isNetworkFailure`。
+    func noteNetworkFailure(_ error: Error) {
+        guard connection == .live, !paused, !isUnpaired else { return }
+        guard Self.isNetworkFailure(error) else { return }
+        connection = .offline(Self.describe(error))
+        task?.cancel()
+        task = Task { await loop() } // 马上重连，不用等事件流那边退出
+    }
+
+    /// 网络层的失败（连不上、超时、断了）。服务端返回 4xx/5xx 不算。
+    /// `nonisolated`：图片缓存那些后台任务也要用它判断。
+    nonisolated static func isNetworkFailure(_ error: Error) -> Bool {
+        guard let e = error as? URLError else { return false }
+        switch e.code {
+        case .timedOut, .cannotConnectToHost, .networkConnectionLost, .cannotFindHost,
+             .notConnectedToInternet, .dnsLookupFailed:
+            return true
+        case .cancelled:
+            return false // 自己取消的（换一批、关预览时取消下载），不是连不上
+        default:
+            return false
+        }
     }
 
     /// App 进入后台时断开，回前台再连。
@@ -289,6 +319,7 @@ final class RemoteSession {
             connection = .unpaired(msg)
         } catch {
             actionError = Self.describe(error)
+            noteNetworkFailure(error)
         }
     }
 
@@ -319,6 +350,7 @@ final class RemoteSession {
             connection = .unpaired(msg)
         } catch {
             actionError = Self.describe(error)
+            noteNetworkFailure(error)
         }
         return false
     }
@@ -333,6 +365,7 @@ final class RemoteSession {
             connection = .unpaired(msg)
         } catch {
             actionError = Self.describe(error)
+            noteNetworkFailure(error)
         }
     }
 
@@ -357,6 +390,7 @@ final class RemoteSession {
             connection = .unpaired(msg)
         } catch {
             actionError = Self.describe(error)
+            noteNetworkFailure(error)
         }
         return nil
     }
@@ -376,7 +410,16 @@ final class RemoteSession {
         let live = connection == .live
         let cached = ImageStore.cachedOriginal(name: w.name)
         guard live || cached != nil else {
-            actionError = "连不上电脑，这张原图也没存在手机上。可以在「设置 › 离线」打开「保存原图」并补齐，或者连上电脑再存。"
+            switch connection {
+            case .connecting:
+                actionError = "还在连电脑，连上后再试一次。"
+            case .offline:
+                actionError = "连不上电脑，这张原图也没存在手机上。可以在「设置 › 离线」打开「保存原图」并补齐，或者连上电脑再存。"
+            case .unpaired(let msg):
+                actionError = msg
+            case .live:
+                break
+            }
             return
         }
         saving = w.name
@@ -409,6 +452,7 @@ final class RemoteSession {
             actionError = e.localizedDescription
         } catch let e as URLError {
             actionError = Self.describe(e)
+            noteNetworkFailure(e)
         } catch {
             actionError = "存不进相册：\(error.localizedDescription)"
         }
@@ -455,6 +499,7 @@ final class RemoteSession {
             return true
         } catch {
             // 列表拉不到不影响别的，下次状态推送再试
+            noteNetworkFailure(error)
             return false
         }
     }
@@ -553,6 +598,7 @@ final class RemoteSession {
             connection = .unpaired(msg)
         } catch {
             actionError = Self.describe(error)
+            noteNetworkFailure(error)
         }
         return false
     }
@@ -567,6 +613,7 @@ final class RemoteSession {
             connection = .unpaired(msg)
         } catch {
             actionError = Self.describe(error)
+            noteNetworkFailure(error)
         }
     }
 }

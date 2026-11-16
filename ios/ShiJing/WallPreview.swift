@@ -42,8 +42,10 @@ struct WallPreview: View {
     @State private var flipped = false
 
     @State private var screenMidX: CGFloat?
-    /// 整页的尺寸（判断宽屏横放用，见 sideColumn）
+    /// 整页量到的尺寸（图片排版用）
     @State private var screenSize = CGSize.zero
+    /// 窗口的大小：判断版式（宽屏 / 右边一列 / 是否横放）只认它，见 layoutSize
+    @State private var windowSize = CGSize.zero
     /// 前置摄像头（被占用的那块玻璃）在页面里的位置：iPhone Duo 外屏竖放时在右上，横放时跟着设备转到左边或右边。
     /// 右边那一列按钮就放在这同一侧，和摄像头、状态栏对齐（`reservedRegions(kind: .occlusion)`，iOS 27.1 起）
     @State private var cameraFrame: CGRect = CGRect(x: 0, y: 0, width: 0, height: 0)
@@ -52,12 +54,14 @@ struct WallPreview: View {
     /// 顶栏下沿、底栏上沿（全局坐标）：竖屏完整显示时图片放在两者之间，不被底栏挡住
     @State private var topBarBottom: CGFloat = 0
     /// 窗口的安全区：整页 `ignoresSafeArea` 铺满之后，页面里量到的安全区是 0，所以从窗口上取。
-    /// 靠一层探针视图（`WindowSafeInsets`）在窗口布局完时报告——直接在 SwiftUI 的
+    /// 靠一层探针视图（`WindowMetrics`）在窗口布局完时报告——直接在 SwiftUI 的
     /// `onGeometryChange` 里读窗口 insets，转屏时读到的是转屏前那一份（SwiftUI 先布局、
     /// UIKit 后更新窗口 insets），横屏会一直用竖屏的 82pt（踩过）。
     @State private var windowSafe = UIEdgeInsets.zero
     @State private var bottomBarTop: CGFloat?
     @State private var jumping = false
+    /// 打开输编号提示框那一刻的版式尺寸（见 layoutSize）
+    @State private var jumpLayout = CGSize.zero
     @State private var jumpText = ""
     /// 当前这张的模糊底：图片没铺满屏幕时（竖屏看横图）显示在上下留白里，顶栏底栏浮在它上面
     @State private var backdrop: PlatformImage?
@@ -95,9 +99,20 @@ struct WallPreview: View {
     private var dragProgress: CGFloat { min(max(dragY, 0) / 400, 1) }
     private var zoomed: Bool { scale > 1.01 }
 
+    /// 判断版式用的尺寸：窗口的大小，不是页面当场量到的 `screenSize`。
+    /// Duo 内屏输编号跳转时要弹提示框、弹数字键盘，这期间 SwiftUI 量到的尺寸会变一下，
+    /// 右边那一列按钮就跑到顶部一排去、删除按钮正好落在灵动岛上（v0.3.175 用户反馈）。
+    /// 窗口大小只在转屏、窗口拉伸时变；还没探针读数时退回当场量到的尺寸。
+    /// 输编号的提示框弹着的这段时间干脆按打开之前的尺寸算（`jumpLayout`）：
+    /// 跳转只是换一张图，不该让按钮挪位置。
+    private var layoutSize: CGSize {
+        if jumping, jumpLayout != .zero { return jumpLayout }
+        return windowSize == .zero ? screenSize : windowSize
+    }
+
     /// 宽屏（Duo 内屏、iPad）：按钮照系统相册放到顶部一排。普通 iPhone（402 宽）放不下
     /// 一排按钮加编号，还是底部一排。
-    private var wide: Bool { screenSize.width >= 640 }
+    private var wide: Bool { layoutSize.width >= 640 }
 
     /// 右边一竖列（照系统相册）：Duo 内屏横放、外屏横放和竖放都是这样（外屏系统报的是 regular 尺寸类，
     /// 但系统相册在它上面照样用右侧一列）。只有高度够的宽屏才用顶部一排（iPad、Duo 内屏竖放），
@@ -105,19 +120,19 @@ struct WallPreview: View {
     /// 宽度门槛取 420：真机 Duo 外屏量到 457×678、模拟器是 466×678，普通 iPhone 竖屏只有 402 宽
     /// 且高都 ≥ 700，420 两边都不卡（v0.3.165 踩过：先前写 460，真机差 3pt 落空，外屏还是底部一排）。
     private var sideColumn: Bool {
-        screenSize.height < 700 && screenSize.width >= 420
+        layoutSize.height < 700 && layoutSize.width >= 420
     }
 
     /// 侧列放不下常规尺寸时的小一号。门槛按「整列（含撤销）放不放得下」算：常规尺寸整列约 44×4 + 48 + 8×4 ≈ 316，
     /// 加上离边距的一点留白，屏幕高 380 以下的才需要缩（iPhone SE 横放 375）；Duo 外屏横放 466、
     /// iPhone 15 Pro 横放 402 都用常规寸（v0.3.166：以前按 520 分，Duo 外屏横放被当成小屏，按钮 38 比系统相册小一号）。
-    private var tightColumn: Bool { sideColumn && screenSize.height < 380 }
+    private var tightColumn: Bool { sideColumn && layoutSize.height < 380 }
 
     /// 横放、右边一竖列，屏幕小（Duo 外屏、普通手机横放）。这些形状下系统自己就不画状态栏，
     /// 我们也不显示。Duo 内屏横放例外（屏幕高 669）：系统相册在那里保留右上角那块状态栏
     /// （时间、电量、信号竖着排），按钮列从它下面开始排——所以不能一律藏掉。
     private var hideStatusBarInLandscape: Bool {
-        sideColumn && screenSize.width > screenSize.height && screenSize.height < 640
+        sideColumn && layoutSize.width > layoutSize.height && layoutSize.height < 640
     }
 
     var body: some View {
@@ -153,7 +168,7 @@ struct WallPreview: View {
                 return .zero
             } action: { f in
                 if f != cameraFrame { cameraFrame = f }
-                let onRight = cameraFrame == .zero || cameraFrame.midX > screenSize.width / 2
+                let onRight = cameraFrame == .zero || cameraFrame.midX > layoutSize.width / 2
                 if onRight != columnOnRight { columnOnRight = onRight }
             }
             .contentShape(Rectangle())
@@ -206,8 +221,11 @@ struct WallPreview: View {
         // 整页铺满：全屏页的内容区会被首页那条浮动标签栏挤窄 84pt（只有 382 宽），
         // 顶栏底栏跟着一起缩的话编号不在屏幕正中、按钮整排偏左
         .ignoresSafeArea()
-        // 窗口的安全区（转屏后会自己重报，见 WindowSafeInsets）
-        .background(WindowSafeInsets { if $0 != windowSafe { windowSafe = $0 } }.allowsHitTesting(false))
+        // 窗口的安全区和大小（转屏后会自己重报，见 WindowMetrics）
+        .background(WindowMetrics { insets, size in
+            if insets != windowSafe { windowSafe = insets }
+            if size != windowSize { windowSize = size }
+        }.allowsHitTesting(false))
         .overlay(alignment: .top) { NoticeBubble(text: session.notice).padding(.top, 60) }
         .presentationBackground(.clear)
         .preferredColorScheme(.dark)
@@ -473,6 +491,7 @@ struct WallPreview: View {
     private func numberPill(_ i: Int) -> some View {
         Button {
             jumpText = ""
+            jumpLayout = layoutSize
             jumping = true
         } label: {
             Text("\(i + 1) / \(walls.count)")
@@ -532,7 +551,7 @@ struct WallPreview: View {
         // 21 让 38 高的按钮中心落在 40，和系统相册那一行、状态栏（安全区 82 的一半）同一个高度
         if topRowBesideStatusBar { return 21 }
         if sideColumn {
-            if screenSize.width > screenSize.height { return 28 }
+            if layoutSize.width > layoutSize.height { return 28 }
             return max(windowSafe.top + 12, 40)
         }
         return max(windowSafe.top + 8, 28)
@@ -544,7 +563,7 @@ struct WallPreview: View {
     /// 真机上读到的值和模拟器不一样，按钮行就掉到状态栏下面去了（v0.3.168）。
     /// 右边的按钮组要让开状态栏那一块（实测内屏竖放状态栏从 558pt 起、屏宽 669），留 120。
     private var topRowBesideStatusBar: Bool {
-        wide && !sideColumn && screenSize.height > screenSize.width && screenSize.width < 700
+        wide && !sideColumn && layoutSize.height > layoutSize.width && layoutSize.width < 700
     }
 
     private func undoButton(_ name: String, size: CGFloat = 44) -> some View {
@@ -576,10 +595,10 @@ struct WallPreview: View {
     /// 普通 iPhone 横放屏幕高 380 以下时才用小一号（圆钮 38、胶囊里 42、间距 6）。
     private func sideButtons(_ w: Wallpaper) -> some View {
         let tight = tightColumn
-        let landscape = screenSize.width > screenSize.height
+        let landscape = layoutSize.width > layoutSize.height
         let button: CGFloat = tight ? 38 : 44
         let pill: CGFloat = tight ? 42 : 48
-        let camNearTop = cameraFrame != .zero && cameraFrame.midY < screenSize.height / 2
+        let camNearTop = cameraFrame != .zero && cameraFrame.midY < layoutSize.height / 2
         // 只有外屏 / 手机这种小屏才可能让摄像头压到这一列上（Duo 外屏横放时挖孔在角上，和列同一条竖线）。
         // 摄像头压在列上才让开，而且只在列位于左侧时检查：Duo 外屏横放「圆角朝下」那一向摄像头在左上角，
         // 跟这一列同一条竖线（v0.3.166 用户反馈关闭按钮点不到就是这一向）；另一向摄像头在右下角，不冲突。
@@ -588,9 +607,9 @@ struct WallPreview: View {
         // 内屏横放：系统相册保留右上角那块状态栏（时间、电量、信号竖着排），按钮列紧贴着它下面开始——
         // 那块就是前置摄像头的遮挡区（模拟器上量到 951 宽的屏上到 y 124.5），系统相册第一颗按钮顶边
         // 也是 124。外屏、手机横放：状态栏不显示，贴顶 28，摄像头压在同一侧时往下让开。
-        let tallScreen = screenSize.height >= 640
+        let tallScreen = layoutSize.height >= 640
         let camOnColumnSide = cameraFrame != .zero
-            && (columnOnRight ? cameraFrame.midX > screenSize.width / 2 : cameraFrame.midX < screenSize.width / 2)
+            && (columnOnRight ? cameraFrame.midX > layoutSize.width / 2 : cameraFrame.midX < layoutSize.width / 2)
         let topInset: CGFloat = landscape
             ? (tallScreen
                 ? (camNearTop && camOnColumnSide ? cameraFrame.maxY : max(windowSafe.top + button, 28))
@@ -944,25 +963,28 @@ private struct FilmStrip: View {
 }
 
 
-/// 报告窗口的安全区。大图预览整页 `ignoresSafeArea` 铺满屏幕，页面里的安全区是 0，
-/// 顶栏底栏的留白得按窗口的安全区自己算。窗口布局（首次出现、转屏）时读一次、
-/// 再 `async` 回主线程报出去——在布局过程中直接改 SwiftUI 的状态会报「during view update」。
-private struct WindowSafeInsets: UIViewRepresentable {
-    let onChange: (UIEdgeInsets) -> Void
+/// 报告窗口的安全区和大小。大图预览整页 `ignoresSafeArea` 铺满屏幕，页面里的安全区是 0，
+/// 顶栏底栏的留白得按窗口的安全区自己算；版式的宽窄、横竖也按窗口大小判断
+/// （页面上当场量到的尺寸在弹提示框、弹键盘时会变一下，见 layoutSize）。
+/// 窗口布局（首次出现、转屏）时读一次、再 `async` 回主线程报出去——在布局过程中直接改 SwiftUI 的状态会报「during view update」。
+private struct WindowMetrics: UIViewRepresentable {
+    let onChange: (UIEdgeInsets, CGSize) -> Void
 
     func makeUIView(context: Context) -> Probe { Probe() }
     func updateUIView(_ probe: Probe, context: Context) { probe.onChange = onChange }
 
     final class Probe: UIView {
-        var onChange: ((UIEdgeInsets) -> Void)?
+        var onChange: ((UIEdgeInsets, CGSize) -> Void)?
 
         override func didMoveToWindow() { super.didMoveToWindow(); report() }
         override func layoutSubviews() { super.layoutSubviews(); report() }
         override func safeAreaInsetsDidChange() { super.safeAreaInsetsDidChange(); report() }
 
         private func report() {
-            guard let insets = window?.safeAreaInsets else { return }
-            DispatchQueue.main.async { [weak self] in self?.onChange?(insets) }
+            guard let window else { return }
+            let insets = window.safeAreaInsets
+            let size = window.bounds.size
+            DispatchQueue.main.async { [weak self] in self?.onChange?(insets, size) }
         }
     }
 }

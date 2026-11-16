@@ -130,7 +130,12 @@ func loadRecord<T: Codable>(
         do {
             return RecordLoad(value: try await online(session.client()), syncedAt: nil, error: nil)
         } catch {
-            // 刚连不上：接着看有没有存下来的副本
+            // 刚连不上：顺手把连接状态改成离线，接着看有没有存下来的副本
+            if case APIError.unauthorized(let msg) = error {
+                session.connection = .unpaired(msg)
+            } else {
+                session.noteNetworkFailure(error)
+            }
             if let c: OfflineStore.Cached<T> = await OfflineStore.shared.loadRecord(session.macID.uuidString, kind) {
                 return RecordLoad(value: c.value, syncedAt: c.at, error: nil)
             }

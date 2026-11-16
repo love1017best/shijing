@@ -609,8 +609,12 @@ struct ShareOriginalButton: View {
                 let url = try await session.client().downloadOriginal(wall.name)
                 present(url, deleteAfter: true)
             }
+        } catch APIError.unauthorized(let msg) {
+            session.connection = .unpaired(msg)
         } catch {
             session.actionError = RemoteSession.describe(error)
+            // 连不上电脑：顺手把连接状态改成离线，别让界面停在「已连接」上
+            session.noteNetworkFailure(error)
         }
     }
 

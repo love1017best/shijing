@@ -114,10 +114,19 @@ final class ImageStore {
                 originalWidth = w
             } else if offline {
                 data = nil // 连不上电脑：只认磁盘上缓存过的
-            } else {
-                data = try? await client?.imageData(name, kind: kind)
-                if let data, !offline {
-                    await Task.detached(priority: .utility) { Self.writeDisk(name, kind, data) }.value
+            } else if session.offline {
+                // 开始读之前还是连着的，等排队排到这里已经断了：别再发请求干等
+                data = nil
+            } else if let client {
+                do {
+                    let d = try await client.imageData(name, kind: kind)
+                    data = d
+                    if !offline {
+                        await Task.detached(priority: .utility) { Self.writeDisk(name, kind, d) }.value
+                    }
+                } catch {
+                    // 连不上电脑了：顺手把连接状态改成离线，别让后面每张图都各等一次超时
+                    session.noteNetworkFailure(error)
                 }
             }
             return await Task.detached(priority: .userInitiated) {
@@ -168,18 +177,27 @@ final class ImageStore {
             if wantOriginals { queue.append(contentsOf: names.map { ($0, .original) }) }
             var next = 0
             var hitLimit = false
-            await withTaskGroup(of: (ImageKind, Int64).self) { group in
+            await withTaskGroup(of: (ImageKind, Int64, Error?).self) { group in
                 // 同时最多 3 张，别把手机的网络和解码占满
                 let workers = 3
                 func addNext() -> Bool {
                     guard next < queue.count, !hitLimit else { return false }
                     let (n, kind) = queue[next]
                     next += 1
-                    group.addTask { (kind, await Self.fetchOne(client, n, kind)) }
+                    group.addTask { await Self.fetchOne(client, n, kind) }
                     return true
                 }
                 for _ in 0..<workers where addNext() {}
-                while let (kind, bytes) = await group.next() {
+                while let (kind, bytes, error) = await group.next() {
+                    if let error {
+                        // 连不上电脑了：这一轮先停（已经存下的留着），连上以后会接着补
+                        group.cancelAll()
+                        if g == gen {
+                            prefetching = false
+                            session.noteNetworkFailure(error)
+                        }
+                        return
+                    }
                     if Task.isCancelled {
                         group.cancelAll()
                         if g == gen { prefetching = false }
@@ -216,26 +234,38 @@ final class ImageStore {
         prefetching = false
     }
 
-    /// 下载一张存到磁盘；已经有了就不动。返回写下的字节数。
-    private nonisolated static func fetchOne(_ client: APIClient, _ name: String, _ kind: ImageKind) async -> Int64 {
-        if readDisk(name, kind) != nil { return 0 }
-        if kind == .image, cachedOriginal(name: name) != nil { return 0 } // 有原图能本地缩，不用再下
+    /// 下载一张存到磁盘；已经有了就不动。返回写下的字节数，以及「连不上电脑」时的那个错误
+    /// （调用方据此停掉这一轮，别把后面几百张各等一次超时）。
+    private nonisolated static func fetchOne(_ client: APIClient, _ name: String,
+                                             _ kind: ImageKind) async -> (ImageKind, Int64, Error?) {
+        if readDisk(name, kind) != nil { return (kind, 0, nil) }
+        if kind == .image, cachedOriginal(name: name) != nil { return (kind, 0, nil) } // 有原图能本地缩，不用再下
         if kind == .original, let f = diskFile(name, .original),
-           FileManager.default.fileExists(atPath: f.path) { return 0 }
+           FileManager.default.fileExists(atPath: f.path) { return (kind, 0, nil) }
         if kind == .original {
-            guard let tmp = try? await client.downloadOriginal(name) else { return 0 }
+            let tmp: URL
+            do {
+                tmp = try await client.downloadOriginal(name)
+            } catch {
+                return (kind, 0, RemoteSession.isNetworkFailure(error) ? error : nil)
+            }
             defer { try? FileManager.default.removeItem(at: tmp) }
-            if Task.isCancelled { return 0 }
-            guard let f = diskFile(name, .original) else { return 0 }
+            if Task.isCancelled { return (kind, 0, nil) }
+            guard let f = diskFile(name, .original) else { return (kind, 0, nil) }
             let fm = FileManager.default
             try? fm.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true)
-            guard (try? fm.moveItem(at: tmp, to: f)) != nil else { return 0 }
-            return Int64((try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            guard (try? fm.moveItem(at: tmp, to: f)) != nil else { return (kind, 0, nil) }
+            return (kind, Int64((try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0), nil)
         }
-        guard let data = try? await client.imageData(name, kind: kind) else { return 0 }
-        if Task.isCancelled { return 0 }
+        let data: Data
+        do {
+            data = try await client.imageData(name, kind: kind)
+        } catch {
+            return (kind, 0, RemoteSession.isNetworkFailure(error) ? error : nil)
+        }
+        if Task.isCancelled { return (kind, 0, nil) }
         writeDisk(name, kind, data)
-        return Int64(data.count)
+        return (kind, Int64(data.count), nil)
     }
 
     /// 手机上存着的那张原图（离线时存相册 / 分享、预览兜底用）。

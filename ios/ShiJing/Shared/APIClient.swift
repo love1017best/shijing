@@ -125,7 +125,7 @@ struct APIClient: Sendable {
 
     /// 一张壁纸的 JPEG：缩略图或大图。小组件会传一个更短的超时（见 TimelineMaker 的时间预算）。
     func imageData(_ name: String, kind: ImageKind, timeout: TimeInterval? = nil) async throws -> Data {
-        let req = request("GET", "api/wallpapers/\(name)/\(kind.rawValue)", timeout: timeout ?? (kind.isLarge ? 40 : 20))
+        let req = request("GET", "api/wallpapers/\(name)/\(kind.rawValue)", timeout: timeout ?? (kind.isLarge ? 30 : 15))
         let (data, resp) = try await Self.session.data(for: req)
         try Self.check(resp, data: data)
         return data
@@ -192,8 +192,10 @@ struct APIClient: Sendable {
     }
 
     /// 下载壁纸的原文件到临时目录（文件名不变），分享 / 存相册用。
+    /// 超时按「多久没收到数据」算（URLSession 的 request timeout 就是这个意思），
+    /// 所以 30 秒够传几十 MB；连不上电脑时也只要等这么久，不用原来的 120 秒（点一下干等两分钟）。
     func downloadOriginal(_ name: String) async throws -> URL {
-        let req = request("GET", "api/wallpapers/\(name)/original", timeout: 120)
+        let req = request("GET", "api/wallpapers/\(name)/original", timeout: 30)
         let (tmp, resp) = try await Self.session.download(for: req)
         // 只有文件很小（多半是错误响应的文字）时才读进内存——原图有几十 MB，不能整份读
         let attrs = try? FileManager.default.attributesOfItem(atPath: tmp.path)

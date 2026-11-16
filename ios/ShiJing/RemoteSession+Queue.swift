@@ -130,7 +130,8 @@ extension RemoteSession {
         guard !flushing, queued.contains(where: { $0.kind != .delete }), connection == .live else { return }
         flushing = true
         defer { flushing = false }
-        await refreshWalls(force: true)
+        // 先拉一份电脑上现在的列表，拉不到（这一下连不上）就整轮都不动，等下次
+        guard await refreshWalls(force: true) else { return }
         var applied = 0
         var expired = 0
         // 一条一条消费：补之前先从队列里摘掉（设置页的「待补操作」跟着变），补不成再放回原处。
@@ -192,6 +193,7 @@ extension RemoteSession {
                 // 又断了：放回原处，留着下次
                 queued.insert(act, at: min(i, queued.count))
                 saveQueue()
+                noteNetworkFailure(error)
                 break
             }
         }
@@ -263,6 +265,7 @@ extension RemoteSession {
             return .queued
         } catch {
             actionError = Self.describe(error)
+            noteNetworkFailure(error)
             return .queued
         }
     }

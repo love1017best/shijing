@@ -467,41 +467,45 @@ struct DashboardView: View {
         StatusSection(state: s)
     }
 
-    /// 图库（NAS）没连上时删的原图没法立刻删，电脑那边排着队：放在横幅下面提醒一下，
-    /// 图库连上后电脑会自动删掉（和电脑概览里的「待删除」条一致）。
-    /// 另外离线时在手机上记下的「删除原图」也放在这里：连上后要到设置里确认一次才会删。
+    /// 待删原图的两个去处，放在同一个分组里（以前是两块分开的，看着像同一件事说了两遍）：
+    /// - 电脑上排队的：图库（NAS）没连上时删的，图库连上后电脑自己会删掉；
+    /// - 这台手机记下的：离线时点的「删除原图」，连上后要本人再确认一次才会删。
+    /// 一个是电脑的队列、一个是手机的队列，标题里写清楚，别让人以为是同一个。
     @ViewBuilder private var pendingSection: some View {
-        if let p = session.state?.pending, p > 0 {
+        let desk = session.state?.pending ?? 0
+        let mine = session.queuedDeletes.count
+        if desk > 0 || mine > 0 {
             Section {
-                Label {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("\(p) 项删除原图在电脑上排队").font(.subheadline.bold())
-                        Text("图库连上电脑后会自动删除。不想删的，到「设置 › 待删除」里逐条取消。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "clock").foregroundStyle(.orange)
-                }
-            }
-        }
-        if !session.queuedDeletes.isEmpty {
-            let n = session.queuedDeletes.count
-            let live = session.connection == .live
-            Section {
-                NavigationLink {
-                    QueuedActionsView(session: session)
-                } label: {
+                if desk > 0 {
                     Label {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("\(n) 张原图等你确认删除").font(.subheadline.bold())
-                            Text(live ? "点开看缩略图，逐张或全部确认后才会删除；取消会把那张放回列表。"
-                                      : "连上电脑后才能确认删除，点开可以先看看是哪几张。")
+                            Text("电脑上排队 \(desk) 张").font(.subheadline.bold())
+                            Text("图库没连上时删的，图库连上后电脑会自动删掉。不想删的，到「设置 › 待删除」里取消。")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
                     } icon: {
-                        Image(systemName: "trash").foregroundStyle(.red)
+                        Image(systemName: "clock").foregroundStyle(.orange)
                     }
                 }
+                if mine > 0 {
+                    let live = session.connection == .live
+                    NavigationLink {
+                        QueuedActionsView(session: session)
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("这台手机记下了 \(mine) 张等你确认").font(.subheadline.bold())
+                                Text(live ? "点开看缩略图，逐张或全部确认后才会删除；取消会把那张放回列表。"
+                                          : "连上电脑后才能确认删除，点开可以先看看是哪几张。")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "trash").foregroundStyle(.red)
+                        }
+                    }
+                }
+            } header: {
+                Text("删除原图")
             }
         }
     }
