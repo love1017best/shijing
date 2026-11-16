@@ -89,27 +89,27 @@ func (a *app) trayStatus() []string {
 	dirs := a.allDirs()
 	switch n := a.unmountedCount(); {
 	case len(dirs) == 0:
-		out = append(out, "图库：还没有添加目录")
+		out = append(out, "图库：未添加目录")
 	case n == 0 && a.checkingMounts():
 		out = append(out, fmt.Sprintf("图库：%d 个目录 · 正在检查", len(dirs)))
 	case n == 0:
-		out = append(out, fmt.Sprintf("图库：%d 个目录都连着", len(dirs)))
+		out = append(out, fmt.Sprintf("图库：%d 个目录已连接", len(dirs)))
 	case n == len(dirs):
-		out = append(out, "图库：目录都没连上")
+		out = append(out, "图库：目录均未连接")
 	default:
-		out = append(out, fmt.Sprintf("图库：%d 个目录没连上", n))
+		out = append(out, fmt.Sprintf("图库：%d 个目录未连接", n))
 	}
 	switch r := a.last; {
 	case a.running:
-		out = append(out, "正在换壁纸 · "+a.progressLabel())
+		out = append(out, "正在更换壁纸 · "+a.progressLabel())
 	case r == nil:
-		out = append(out, "上次运行：还没有运行过")
+		out = append(out, "上次运行：尚未运行")
 	case errors.Is(r.err, core.ErrCanceled):
 		out = append(out, "上次运行：已停止 · "+r.at.Format("1月2日 15:04"))
 	case r.err != nil:
 		out = append(out, "上次运行：失败 · "+r.at.Format("1月2日 15:04"))
 	default:
-		out = append(out, fmt.Sprintf("上次运行：换上 %d 张 · %s", r.sum.Copy.Copied, r.at.Format("1月2日 15:04")))
+		out = append(out, fmt.Sprintf("上次运行：已更换 %d 张 · %s", r.sum.Copy.Copied, r.at.Format("1月2日 15:04")))
 	}
 	if next := a.nextAutoRun(); !next.IsZero() {
 		out = append(out, "下次自动换："+next.Format("1月2日 15:04"))

@@ -62,7 +62,7 @@ func (a *app) jumpKeys(c *ui.Context) bool {
 		if total := len(a.walls.all); n >= 1 && n <= total {
 			a.previewIdx = n - 1
 		} else {
-			a.toast = fmt.Sprintf("没有第 %d 张，一共 %d 张", n, total)
+			a.toast = fmt.Sprintf("第 %d 张不存在，共 %d 张", n, total)
 		}
 		return true
 	case c.Shortcut(0, ui.KeyBackspace):
@@ -299,7 +299,7 @@ func (a *app) previewModal(c *ui.Context) {
 			if bmp == nil {
 				msg := "正在载入…"
 				if _, tried := a.big[wall]; tried {
-					msg = "读不了这张图"
+					msg = "无法读取这张图片"
 				}
 				box.Background(hairline(t)).Center().Children(func() {
 					ui.Text(c, msg).FontSize(12).TextColor(t.TextMuted)
@@ -313,7 +313,7 @@ func (a *app) previewModal(c *ui.Context) {
 			ui.Row(c).AlignSelf(ui.Stretch).Gap(12).AlignItems(ui.Center).Children(func() {
 				ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(2).Children(func() {
 					ui.Text(c, filepath.Base(wall)).FontSize(13).Bold().SingleLine()
-					sub := "原图：没有记录（之前的版本换上的）"
+					sub := "原图：无记录（由旧版本更换）"
 					if src != "" {
 						sub = "原图：" + tildify(src)
 					}
@@ -345,9 +345,9 @@ func (a *app) previewModal(c *ui.Context) {
 				}
 			})
 			// 只留一句最要紧的；完整说明和键盘用法放在 ⓘ 的提示里（按钮上已经标了快捷键）
-			note := "移出不动原图，可以 ⌘Z 撤销；只有「删除图库里的原图」会删掉原图，不可撤销。"
+			note := "「移出」不会删除原图，可按 ⌘Z 撤销；只有「删除图库里的原图」会删除原图，且不可撤销。"
 			if src == "" {
-				note = "这张是之前的版本换上的，找不到对应的原图，只能移出（⌘Z 可以撤销）。"
+				note = "这张由旧版本更换，找不到对应的原图，无法删除，只能移出（⌘Z 可以撤销）。"
 			}
 			ui.Row(c).AlignSelf(ui.Stretch).Gap(6).AlignItems(ui.Center).Children(func() {
 				muted(c, note).Grow(1).Shrink(1).MinWidth(0)

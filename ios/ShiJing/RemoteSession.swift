@@ -102,7 +102,7 @@ final class RemoteSession {
         }
         networkDown = true
         guard !isUnpaired else { return }
-        connection = .offline("手机没有连上网络。")
+        connection = .offline("手机未连接网络。")
         task?.cancel()
         task = nil
     }
@@ -266,9 +266,9 @@ final class RemoteSession {
         if let e = error as? URLError {
             switch e.code {
             case .timedOut, .cannotConnectToHost, .networkConnectionLost, .cannotFindHost:
-                return "连不上这台 Mac：确认 Mac 没有睡眠、拾景正在运行、设置里打开了「允许手机遥控」，手机和 Mac 在同一个网络里。"
+                return "无法连接到这台 Mac：确认 Mac 未休眠、拾景正在运行、设置中已打开「允许手机遥控」，手机与 Mac 处于同一网络。"
             case .notConnectedToInternet:
-                return "手机没有连上网络。"
+                return "手机未连接网络。"
             default:
                 break
             }
@@ -339,7 +339,7 @@ final class RemoteSession {
 
     private func pendingAct(_ op: (APIClient) async throws -> RemoteState) async -> Bool {
         guard connection == .live else {
-            actionError = "连不上电脑，排队删除只能在电脑上取消。"
+            actionError = "无法连接到电脑，排队的删除只能在电脑上取消。"
             return false
         }
         do {
@@ -412,9 +412,9 @@ final class RemoteSession {
         guard live || cached != nil else {
             switch connection {
             case .connecting:
-                actionError = "正在连接电脑，连上后再试一次。"
+                actionError = "正在连接电脑，连接后再试一次。"
             case .offline:
-                actionError = "连不上电脑，这张原图也没存在手机上。可以在「设置 › 离线」打开「保存原图」并补齐，或者连上电脑再存。"
+                actionError = "无法连接到电脑，这张原图也没有保存在手机上。可以在「设置 › 离线」中打开「保存原图」并补齐，或连接电脑后再保存。"
             case .unpaired(let msg):
                 actionError = msg
             case .live:
@@ -567,7 +567,7 @@ final class RemoteSession {
         let ok = await wallAct(w, kind: .remove) { try await $0.deleteOriginal(w.name) }
         // 图库没连上：电脑把这次删除排队了，别让手机上看起来像已经删掉
         if ok, (state?.pending ?? 0) > before {
-            showNotice("图库没连上，这次删除已排队")
+            showNotice("图库未连接，本次删除已排队")
         }
         return ok
     }

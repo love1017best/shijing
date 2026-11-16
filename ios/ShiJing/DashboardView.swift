@@ -244,10 +244,10 @@ struct DashboardView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         if let at = session.snapshotAt {
                             Text("离线 · \(Self.ago(at))同步").font(.subheadline.bold())
-                            Text("正在重连，只能看缓存过的图。" + queuedNote)
+                            Text("正在重新连接，只能查看已缓存的图片。" + queuedNote)
                                 .font(.footnote).foregroundStyle(.secondary)
                         } else {
-                            Text("连接已断开，正在重连").font(.subheadline.bold())
+                            Text("连接已断开，正在重新连接").font(.subheadline.bold())
                             Text(msg).font(.footnote).foregroundStyle(.secondary)
                             if !queuedNote.isEmpty {
                                 Text(queuedNote).font(.footnote).foregroundStyle(.secondary)
@@ -265,7 +265,7 @@ struct DashboardView: View {
     private var queuedNote: String {
         session.queued.isEmpty
             ? ""
-            : "记下的 \(session.queued.count) 项操作会在连上电脑后处理，删除原图要你确认。"
+            : "记下的 \(session.queued.count) 项操作会在连接电脑后处理，删除原图需要你确认。"
     }
 
     /// 「3 小时前」「刚刚」：快照有多旧。
@@ -306,10 +306,10 @@ struct DashboardView: View {
     /// 「换一批」按钮下面的说明：点不了的原因、目录访问不了、会删原图。
     /// 连不上时不画那块点不动的按钮，这里换成一行「连上电脑后才能换一批」——在毛玻璃上显示，叠在图上会看不清。
     private func runNote(_ s: RemoteState) -> String? {
-        if session.connection != .live { return "连上电脑后才能换一批。" }
+        if session.connection != .live { return "连接电脑后才能换一批。" }
         if let b = s.blocked { return b }
         if s.unmounted > 0 { return "上次检查时有 \(s.unmounted) 个图库目录访问不了，换一批前会重新检查。" }
-        if s.willDelete { return "会先删除图库里不合格的原图，点了之后可以选只模拟。" }
+        if s.willDelete { return "此操作会删除图库中的不合格原图，执行时可以选择仅模拟。" }
         return nil
     }
 
@@ -389,7 +389,7 @@ struct DashboardView: View {
 
     private func deleteRow(_ s: RemoteState) -> some View {
         let n = s.runDelete ? s.deleted : s.rejected
-        let title = s.runDelete ? "已删除 \(n) 张不合格原图" : "发现 \(n) 张不合格（模拟，没有删除）"
+        let title = s.runDelete ? "已删除 \(n) 张不合格原图" : "发现 \(n) 张不合格（模拟运行，未删除）"
         return Label {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -442,8 +442,8 @@ struct DashboardView: View {
 
     private func lastStatusText(_ l: LastRun) -> String {
         switch l.status {
-        case "stopped": l.copied > 0 ? "中途停止，换上了 \(l.copied) 张" : "中途停止"
-        default: "没有换成"
+        case "stopped": l.copied > 0 ? "中途停止，已更换 \(l.copied) 张" : "中途停止"
+        default: "未完成更换"
         }
     }
 
@@ -480,7 +480,7 @@ struct DashboardView: View {
                     Label {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("电脑上排队 \(desk) 张").font(.subheadline.bold())
-                            Text("这些是图库没连上时记下的，图库连上后电脑会自动删除。不想删的，到「设置 › 待删除」里取消。")
+                            Text("这些是图库未连接时记录的，图库连接后电脑会自动删除。不想删除的，请到「设置 › 待删除」中取消。")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
                     } icon: {
@@ -494,9 +494,9 @@ struct DashboardView: View {
                     } label: {
                         Label {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("这台手机记下了 \(mine) 张等你确认").font(.subheadline.bold())
-                                Text(live ? "每一张都有缩略图，逐张或全部确认后才会删除；取消会把那张放回列表。"
-                                          : "连上电脑后才能确认删除；现在可以点开看看是哪几张。")
+                                Text("这台手机有 \(mine) 张待确认").font(.subheadline.bold())
+                                Text(live ? "每张都有缩略图，逐张或全部确认后才会删除；取消会把对应的图片放回列表。"
+                                          : "连接电脑后才能确认删除；现在可以打开查看具体是哪几张。")
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                         } icon: {
@@ -517,7 +517,7 @@ struct DashboardView: View {
                 Label {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(SigningExpiry.isExpired ? "签名已经到期" : "签名\(text)").font(.subheadline.bold())
-                        Text("免费签名 7 天到期，到期后拾景无法启动。连上电脑重新安装一次就能续上。")
+                        Text("免费签名 7 天到期，到期后拾景无法启动。在电脑上重新安装一次就能续上。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 } icon: {
@@ -571,7 +571,7 @@ struct ConnectionBadge: View {
         let (color, text): (Color, String) = switch connection {
         case .live: (.green, "已连接") // 走不到，调用方只在异常时放它
         case .connecting: (.orange, "正在连接")
-        case .offline: (.orange, "重连中")
+        case .offline: (.orange, "重新连接中")
         case .unpaired: (.red, "未配对")
         }
         Label {

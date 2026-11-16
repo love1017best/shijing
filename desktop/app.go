@@ -333,7 +333,7 @@ func (a *app) willDelete() bool {
 
 // deleteNotice 是运行前确认删除原图时的说明（桌面的确认框和手机上的确认都用它）。
 func (a *app) deleteNotice() string {
-	return fmt.Sprintf("会先检查「筛选 + 采样」里的 %d 个目录，把竖屏、正方形和低于 %d×%d 的图片从图库里直接删除，不可撤销。"+
+	return fmt.Sprintf("此操作会删除图库中的不合格原图：会检查「筛选 + 采样」中的 %d 个目录，删除竖屏、正方形和低于 %d×%d 的图片，不可撤销。"+
 		"删除会记进「删除记录」。", len(a.cfg.FilterAndSampleDirs), int(a.minW), int(a.minH))
 }
 
@@ -407,7 +407,7 @@ func (a *app) startRunWith(o runOpts) {
 			a.loadWallpapers() // 不等下一帧：桌面窗口关着时 view 不重画（手机靠这次重读拿到新列表）
 			switch {
 			case err == nil:
-				a.toast = fmt.Sprintf("已换上 %d 张新壁纸", sum.Copy.Copied)
+				a.toast = fmt.Sprintf("已更换 %d 张壁纸", sum.Copy.Copied)
 			case errors.Is(err, core.ErrCanceled):
 				a.toast = "已停止"
 			}

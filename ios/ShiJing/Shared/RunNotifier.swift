@@ -34,13 +34,13 @@ enum RunNotifier {
         let c = UNMutableNotificationContent()
         switch l.status {
         case "ok":
-            c.title = "换上了 \(l.copied) 张新壁纸"
+            c.title = "已更换 \(l.copied) 张壁纸"
             c.body = [l.brief, mac].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         case "stopped":
-            c.title = "换壁纸中途停止了"
-            c.body = l.copied > 0 ? "换上了 \(l.copied) 张 · \(mac)" : mac
+            c.title = "壁纸更换中途停止"
+            c.body = l.copied > 0 ? "已更换 \(l.copied) 张 · \(mac)" : mac
         default:
-            c.title = "壁纸没有换成"
+            c.title = "本次未完成更换"
             c.body = l.error ?? mac
         }
         c.sound = .default

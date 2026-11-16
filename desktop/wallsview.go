@@ -50,7 +50,7 @@ func (a *app) wallsPage(c *ui.Context) {
 		muted(c, "正在读取壁纸文件夹…")
 		return
 	case len(a.walls.all) == 0:
-		muted(c, "壁纸文件夹里还没有图片。在概览页换一批试试。")
+		muted(c, "壁纸文件夹中没有图片。请先在概览页更换一批。")
 		return
 	case len(list) == 0:
 		muted(c, "没有匹配的壁纸。")
@@ -89,7 +89,7 @@ func (a *app) wallsPage(c *ui.Context) {
 		a.wallCell(c, list[i], numbers[list[i]])
 	}).Height(gridH)
 	if a.running {
-		grid.Disabled(true).Opacity(0.4).Tooltip("正在换壁纸，这是上一批")
+		grid.Disabled(true).Opacity(0.4).Tooltip("正在更换壁纸，当前显示上一批")
 	}
 	a.wallsSelectionBar(c, list)
 }
@@ -114,7 +114,7 @@ func (a *app) wallCell(c *ui.Context, p string, number int) {
 	} else if tried {
 		// 解码过了但读不了：说明白，别留一块空白
 		cell.Center().Children(func() {
-			ui.Text(c, "读不了").FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, "无法读取").FontSize(11).TextColor(t.TextMuted)
 		})
 	}
 	if a.wallSelecting {
@@ -237,9 +237,9 @@ func (a *app) removeSelectedWalls(exclude bool) {
 	}
 	a.endWallSelection()
 	if exclude {
-		a.toast = fmt.Sprintf("已移出 %d 张，原图都还在图库里；以后采样会跳过它们", len(todo))
+		a.toast = fmt.Sprintf("已移出 %d 张，图库中的原图未删除；后续采样将跳过这些图片", len(todo))
 	} else {
-		a.toast = fmt.Sprintf("已移出 %d 张，原图都还在图库里（⌘Z 一次撤回一张）", len(todo))
+		a.toast = fmt.Sprintf("已移出 %d 张，图库中的原图未删除（⌘Z 一次撤回一张）", len(todo))
 	}
 }
 
@@ -248,14 +248,14 @@ func (a *app) wallsSummary(list []string) string {
 	if len(a.walls.all) == 0 {
 		return ""
 	}
-	hint := "单击查看大图，右键打开菜单。"
+	hint := "单击图片预览大图，右键打开操作菜单。"
 	if a.wallSelecting {
-		hint = "单击格子勾选，选好后用下面的按钮一起移出。"
+		hint = "单击图片勾选，选好后用下方按钮一起移出。"
 	}
 	if len(list) == len(a.walls.all) {
-		return fmt.Sprintf("壁纸文件夹里一共 %d 张，%s", len(list), hint)
+		return fmt.Sprintf("当前本地壁纸文件夹图片数量：%d，%s", len(list), hint)
 	}
-	return fmt.Sprintf("筛选出 %d 张，一共 %d 张，%s", len(list), len(a.walls.all), hint)
+	return fmt.Sprintf("筛选结果 %d 张，全部 %d 张，%s", len(list), len(a.walls.all), hint)
 }
 
 // wallsFilterBar 是搜索框和目录筛选。

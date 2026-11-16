@@ -178,9 +178,9 @@ func (a *app) removeWallpaper(wall string, exclude bool) {
 	}
 	a.dropWall(wall)
 	if exclude {
-		a.toast = "已移出壁纸文件夹，原图还在图库里；以后采样会跳过它（⌘Z 撤销）"
+		a.toast = "已移出壁纸文件夹，图库中的原图未删除；后续采样将跳过它（⌘Z 撤销）"
 	} else {
-		a.toast = "已移出壁纸文件夹，原图还在图库里（⌘Z 撤销）"
+		a.toast = "已移出壁纸文件夹，图库中的原图未删除（⌘Z 撤销）"
 	}
 	if stash != "" {
 		r.stash = stash
@@ -216,7 +216,7 @@ func (a *app) deleteOriginal(wall string) {
 	a.appendLog(fmt.Sprintf("🔥 手动删除原图: %s", src))
 	_ = os.Remove(wall)
 	a.dropWall(wall)
-	a.toast = "已删除图库里的原图，记进了删除记录"
+	a.toast = "已删除图库中的原图，并记进删除记录"
 }
 
 // dropWall 把一张从列表里去掉（不重新扫描，其余缩略图不变）。

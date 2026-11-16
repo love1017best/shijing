@@ -120,7 +120,7 @@ func (rs *remoteServer) handleWallImage(width int, cached bool) func(http.Respon
 		}
 		<-rs.decodeSem
 		if out == nil {
-			writeErr(w, http.StatusUnprocessableEntity, "这张图读不了")
+			writeErr(w, http.StatusUnprocessableEntity, "无法读取这张图片")
 			return
 		}
 		w.Header().Set("Content-Type", "image/jpeg")
@@ -173,7 +173,7 @@ func (rs *remoteServer) handleWallRemove(w http.ResponseWriter, r *http.Request,
 	rs.wallAction(w, r, func(path string) string {
 		a := rs.a
 		if body.Exclude && a.wallSource(path) == "" {
-			return "这张是之前的版本换上的，找不到原图，只能移出"
+			return "这张由旧版本更换，找不到原图，无法删除，只能移出"
 		}
 		before := len(a.walls.all)
 		a.removeWallpaper(path, body.Exclude)
@@ -192,7 +192,7 @@ func (rs *remoteServer) handleWallDelete(w http.ResponseWriter, r *http.Request,
 	rs.wallAction(w, r, func(path string) string {
 		a := rs.a
 		if a.wallSource(path) == "" {
-			return "这张是之前的版本换上的，找不到原图"
+			return "这张由旧版本更换，找不到原图"
 		}
 		before := len(a.walls.all)
 		a.deleteOriginal(path)

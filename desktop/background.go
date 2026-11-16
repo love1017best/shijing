@@ -50,7 +50,7 @@ func setupBackground(a *app, win *mygo.Window) {
 					Parent:             win,
 					Type:               mygo.MessageWarning,
 					Message:            "任务还在运行，确定要退出吗？",
-					Detail:             "退出会中断正在进行的筛选或复制，壁纸目录可能只换了一部分。",
+					Detail:             "退出会中断正在进行的筛选或复制，壁纸文件夹可能只更换了一部分。",
 					Buttons:            []string{"继续运行", "退出"},
 					DefaultButton:      0,
 					CancelButton:       0,
@@ -111,10 +111,10 @@ func (a *app) runNotice() (title, body string) {
 	case r == nil:
 		return "", ""
 	case r.err == nil:
-		return fmt.Sprintf("已换上 %d 张新壁纸", r.sum.Copy.Copied), fmt.Sprintf("用时 %.0f 秒", r.sum.Elapsed.Seconds())
+		return fmt.Sprintf("已更换 %d 张壁纸", r.sum.Copy.Copied), fmt.Sprintf("用时 %.0f 秒", r.sum.Elapsed.Seconds())
 	case errors.Is(r.err, core.ErrCanceled):
 		return "已停止", ""
 	default:
-		return "这次没有换成", r.err.Error()
+		return "本次未完成更换", r.err.Error()
 	}
 }

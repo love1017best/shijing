@@ -79,7 +79,7 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 		if len(dirs) == 0 {
 			box.Children(func() {
 				ui.Column(c).Height(84).Center().Gap(4).Children(func() {
-					ui.Text(c, "还没有目录").FontSize(13).TextColor(t.TextMuted)
+					ui.Text(c, "暂无目录").FontSize(13).TextColor(t.TextMuted)
 					muted(c, "单击右上角的「添加目录…」，或者把文件夹拖到这里")
 				})
 			})

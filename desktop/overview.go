@@ -78,11 +78,11 @@ func (a *app) hero(c *ui.Context) {
 				switch n := a.unmountedCount(); {
 				case a.running:
 				case strings.TrimSpace(a.cfg.DestDir) == "":
-					warn = "还没有设置壁纸文件夹，先到「设置」里选一个"
+					warn = "尚未设置壁纸文件夹，请先在「设置」中选择"
 				case n > 0 && n == len(dirs):
-					warn = "图库目录都没挂载，连上图库后到「图库」里重新检查"
+					warn = "图库目录均未挂载，连接后可在「图库」中重新检查"
 				case n > 0:
-					warn = fmt.Sprintf("%d 个目录未挂载，这次会跳过它们", n)
+					warn = fmt.Sprintf("%d 个目录未挂载，本次将跳过", n)
 				}
 				if warn != "" {
 					ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
@@ -99,7 +99,7 @@ func (a *app) hero(c *ui.Context) {
 							amber := ui.Hex("#FFD27A")
 							ui.Row(c).Shrink(0).Gap(4).AlignItems(ui.Center).Tooltip(a.deleteNotice()).Children(func() {
 								ui.Icon(c, iconAlert).FontSize(11.5).TextColor(amber)
-								ui.Text(c, "会先删除不合格原图").FontSize(12.5).TextColor(amber).SingleLine()
+								ui.Text(c, "此操作会删除原图").FontSize(12.5).TextColor(amber).SingleLine()
 							})
 						}
 					})
@@ -156,11 +156,11 @@ func (a *app) openWallpapers() {
 func (a *app) heroEyebrow() string {
 	switch {
 	case a.running:
-		return "正在换壁纸"
+		return "正在更换壁纸"
 	case a.last != nil && a.last.err == nil:
-		return "当前壁纸 · " + a.last.at.Format("1月2日 15:04") + " 换上"
+		return "当前壁纸 · " + a.last.at.Format("1月2日 15:04") + " 更换"
 	case a.stoppedWithCopies():
-		return "当前壁纸 · " + a.last.at.Format("1月2日 15:04") + " 换上（中途停止）"
+		return "当前壁纸 · " + a.last.at.Format("1月2日 15:04") + " 更换（中途停止）"
 	case len(a.walls.all) > 0:
 		return "当前壁纸"
 	default:
@@ -171,17 +171,17 @@ func (a *app) heroEyebrow() string {
 func (a *app) heroTitle() string {
 	switch {
 	case a.running:
-		return "正在拾一批新风景…"
+		return "正在更换壁纸…"
 	case a.last != nil && a.last.err == nil:
-		return fmt.Sprintf("已换上 %d 张新壁纸", a.last.sum.Copy.Copied)
+		return fmt.Sprintf("已更换 %d 张壁纸", a.last.sum.Copy.Copied)
 	case a.stoppedWithCopies():
-		return fmt.Sprintf("换上了 %d 张新壁纸", a.last.sum.Copy.Copied)
+		return fmt.Sprintf("已更换 %d 张壁纸", a.last.sum.Copy.Copied)
 	case len(a.walls.all) > 0:
 		return fmt.Sprintf("%d 张壁纸", len(a.walls.all))
 	case len(a.allDirs()) == 0:
 		return "先在「图库」里添加目录"
 	default:
-		return "从图库里拾一批风景"
+		return "从图库中选取壁纸"
 	}
 }
 
@@ -238,7 +238,7 @@ func (a *app) thumbStrip(c *ui.Context) {
 	a.loadMoreThumbs(cells)
 	grid.Columns(cols)
 	if a.running {
-		grid.Opacity(0.4).Tooltip("正在换壁纸，这是上一批")
+		grid.Opacity(0.4).Tooltip("正在更换壁纸，当前显示上一批")
 	}
 	grid.Children(func() {
 		for i := range shown {
@@ -312,7 +312,7 @@ func (a *app) statStrip(c *ui.Context) {
 		mountSub, mountColor := "全部可访问", t.TextMuted
 		switch n := a.unmountedCount(); {
 		case len(dirs) == 0:
-			mountSub = "还没有添加"
+			mountSub = "未添加"
 		case n > 0:
 			mountSub, mountColor = fmt.Sprintf("%d 个未挂载", n), t.Warning
 		case a.checkingMounts():
@@ -325,9 +325,9 @@ func (a *app) statStrip(c *ui.Context) {
 			pct := float64(g.Copy.Rotated) / float64(g.Copy.Candidates) * 100
 			value = fmt.Sprintf("已轮换 %.0f%%", pct)
 			sub = fmt.Sprintf("%s / %s 张", humanCount(g.Copy.Rotated), humanCount(g.Copy.Candidates))
-			tip = fmt.Sprintf("每次 %d 张，优先选没换上过的图：整个图库都换上过一遍后开始新一轮", int(a.num))
+			tip = fmt.Sprintf("每次 %d 张，优先选择本轮未更换过的图片；整个图库都更换过一遍后开始新一轮", int(a.num))
 		case a.cfg.PreferUnseen:
-			sub = "优先选没换上过的"
+			sub = "优先选未更换过的"
 		case a.cfg.BalanceFirst:
 			sub = "平衡采样"
 		}
@@ -340,7 +340,7 @@ func (a *app) statStrip(c *ui.Context) {
 
 		switch r := a.last; {
 		case r == nil:
-			cell(3, "上次运行", "—", "还没有运行过", t.TextMuted, "")
+			cell(3, "上次运行", "—", "尚未运行", t.TextMuted, "")
 		case errors.Is(r.err, core.ErrCanceled):
 			cell(3, "上次运行", "已停止", r.at.Format("1月2日 15:04"), t.TextMuted, "")
 		case r.err != nil:
@@ -352,7 +352,7 @@ func (a *app) statStrip(c *ui.Context) {
 			}
 			value := fmt.Sprintf("用时 %.0f 秒", r.sum.Elapsed.Seconds())
 			if c := r.sum.Copy; c.PrevSelected > 0 {
-				value = fmt.Sprintf("新换 %d 张", c.Selected-c.Repeated)
+				value = fmt.Sprintf("已更换 %d 张", c.Selected-c.Repeated)
 			}
 			cell(3, "上次运行", value, sub, color, a.resultDetail())
 		}
@@ -387,7 +387,7 @@ func (a *app) resultDetail() string {
 	s := a.last.sum
 	var parts []string
 	if c := s.Copy; c.PrevSelected > 0 {
-		parts = append(parts, fmt.Sprintf("和上一轮相比：新换上 %d 张，重复 %d 张（重合率 %s）",
+		parts = append(parts, fmt.Sprintf("和上一轮相比：新更换 %d 张，重复 %d 张（重合率 %s）",
 			c.Selected-c.Repeated, c.Repeated, overlapPercent(c)))
 		if c.PrevByName {
 			parts = append(parts, "（没有上一轮的记录，按壁纸文件夹里原有的文件名比较，结果是近似的）")
@@ -565,7 +565,7 @@ func (a *app) deleteStrip(c *ui.Context) {
 	switch {
 	case n == 0 && a.runDelFailed == 0:
 		color = t.TextMuted
-		title = "还没有发现不合格的图片"
+		title = "尚未发现不合格的图片"
 		if !filtering {
 			title = "筛选没有发现不合格的图片"
 		}
@@ -615,7 +615,7 @@ func (a *app) deleteStrip(c *ui.Context) {
 func (a *app) errorCard(c *ui.Context) {
 	t := c.Theme()
 	r := a.last
-	tint, icon, title := t.Danger, iconAlert, "这次没有换成"
+	tint, icon, title := t.Danger, iconAlert, "本次未完成更换"
 	var msg string
 	switch {
 	case errors.Is(r.err, core.ErrCanceled):
@@ -682,7 +682,7 @@ func (a *app) logPanel(c *ui.Context) {
 				})
 				ui.Box(c).Height(1).Background(hairline(t))
 				if len(rows) == 0 {
-					msg := "还没有日志，运行一次后会显示在这里"
+					msg := "暂无日志，运行一次后会显示在这里"
 					if a.logProblemsOnly && len(a.log) > 0 {
 						msg = "没有警告、错误或删除"
 					}

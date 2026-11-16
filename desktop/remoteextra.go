@@ -180,7 +180,7 @@ func (rs *remoteServer) handleSettings(w http.ResponseWriter, r *http.Request, d
 			}
 		}
 		set(&a.cfg.DeleteDuringFilter, body.Delete, "删除不合格原图")
-		set(&a.cfg.PreferUnseen, body.PreferUnseen, "优先选没换上过的")
+		set(&a.cfg.PreferUnseen, body.PreferUnseen, "优先选未更换过的")
 		set(&a.cfg.RefreshWallpaper, body.Refresh, "刷新系统壁纸")
 		set(&a.cfg.BalanceFirst, body.BalanceFirst, "平衡采样")
 		set(&a.cfg.Incremental, body.Incremental, "增量筛选")
@@ -244,7 +244,7 @@ func (rs *remoteServer) handleUndo(w http.ResponseWriter, r *http.Request, dev s
 		a := rs.a
 		switch {
 		case a.running:
-			msg = "正在换壁纸，等换完再撤销"
+			msg = "正在更换壁纸，等更换完成后再撤销"
 		case len(a.undo) == 0:
 			msg = "没有可以撤销的移出"
 		default:
@@ -396,13 +396,13 @@ func (rs *remoteServer) handleWallOriginal(w http.ResponseWriter, r *http.Reques
 	}
 	f, err := os.Open(path) // 软链接模式下壁纸是链接，Open 会跟过去读原图
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "读不了这张图："+err.Error())
+		writeErr(w, http.StatusNotFound, "无法读取这张图片："+err.Error())
 		return
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "读不了这张图")
+		writeErr(w, http.StatusNotFound, "无法读取这张图片")
 		return
 	}
 	http.ServeContent(w, r, name, st.ModTime().Truncate(time.Second), f)

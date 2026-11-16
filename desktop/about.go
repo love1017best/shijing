@@ -27,7 +27,7 @@ func (a *app) aboutPage(c *ui.Context) {
 			ui.Image(c, aboutIcon).Size(96, 96).Label(appName + " 图标")
 		}
 		ui.Text(c, appName).FontSize(28).Bold()
-		muted(c, "从图库里随机拾一批风景，换上 macOS 壁纸。")
+		muted(c, "从图库中随机选取一批风景图片，用作 macOS 壁纸。")
 		ui.Row(c).Gap(8).Children(func() {
 			pill(c, a.versionLabel(), t.Accent)
 			pill(c, "作者 "+author, t.TextMuted)

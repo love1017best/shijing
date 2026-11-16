@@ -53,9 +53,9 @@ func (a *app) queueDelete(wall, src string) {
 		a.pending = append(a.pending, e)
 		a.savePending()
 	}
-	a.appendLog(fmt.Sprintf("🕓 图库没连上，排队删除原图（连上后自动执行）: %s", src))
+	a.appendLog(fmt.Sprintf("🕓 图库未连接，原图删除已排队（连接后自动执行）: %s", src))
 	a.removeWallpaper(wall, false)
-	a.toast = "图库没连上，已排队：连上后自动删除这张原图（⌘Z 撤销移出，队列在概览页查看）"
+	a.toast = "图库未连接，删除已排队：连接后自动删除这张原图（⌘Z 撤销移出，队列在概览页查看）"
 }
 
 // maybeProcessPending 尝试执行队列：只在图库目录全都挂上时动手（对着断掉/卡住的卷逐个 stat 会一直卡着），
@@ -81,16 +81,16 @@ func (a *app) applyPending(res core.PendingResult) {
 		a.appendLog(fmt.Sprintf("🔥 手动删除原图（排队执行，%s 排队）: %s", e.AddedAt.Format("1月2日 15:04"), e.Path))
 	}
 	for _, e := range res.Gone {
-		a.appendLog(fmt.Sprintf("🕓 排队的原图已经不在了，跳过: %s", e.Path))
+		a.appendLog(fmt.Sprintf("🕓 排队的原图已不存在，跳过: %s", e.Path))
 	}
 	for _, e := range res.Stale {
-		a.appendLog(fmt.Sprintf("⚠️ 排队的原图在排队期间被改过，没有删除: %s", e.Path))
+		a.appendLog(fmt.Sprintf("⚠️ 排队的原图在排队期间被修改，未删除: %s", e.Path))
 	}
 	if len(res.Deleted)+len(res.Gone) > 0 {
-		a.toast = fmt.Sprintf("图库连上了：删除了 %d 张排队的原图", len(res.Deleted))
+		a.toast = fmt.Sprintf("图库已连接：删除了 %d 张排队的原图", len(res.Deleted))
 	}
 	if len(res.Stale) > 0 && len(res.Deleted)+len(res.Gone) == 0 {
-		a.toast = fmt.Sprintf("%d 张排队的原图在排队期间被改过，没有删除（见日志）", len(res.Stale))
+		a.toast = fmt.Sprintf("%d 张排队的原图在排队期间被修改，未删除（见日志）", len(res.Stale))
 	}
 	a.pending = res.Kept
 	a.savePending()
@@ -125,8 +125,8 @@ func (a *app) pendingBar(c *ui.Context) {
 	ui.Row(c).AlignSelf(ui.Stretch).Padding(12, 14).Radius(12).Gap(10).AlignItems(ui.Center).
 		Background(amber.Alpha(0.12)).Border(1, amber.Alpha(0.35)).Children(func() {
 		ui.Icon(c, iconClock).FontSize(14).TextColor(amber)
-		ui.Text(c, fmt.Sprintf("%d 项原图等着删除", n)).FontSize(12.5).Bold().TextColor(amber).SingleLine()
-		muted(c, "图库连上后自动执行，可以逐条取消").Shrink(1).MinWidth(0)
+		ui.Text(c, fmt.Sprintf("%d 张原图等待删除", n)).FontSize(12.5).Bold().TextColor(amber).SingleLine()
+		muted(c, "图库连接后自动执行，可逐条取消").Shrink(1).MinWidth(0)
 		ui.Spacer(c)
 		ui.Button(c, "查看").OnClick(func() { a.pendingShown = true })
 	})
@@ -146,8 +146,8 @@ func (a *app) pendingModal(c *ui.Context) {
 				ui.Spacer(c)
 				ui.Button(c, "全部取消").OnClick(a.cancelAllPending)
 			})
-			muted(c, "这些是在图库没连上时点「删除原图」的。图库连上后会自动校验并删除，删除会记进删除记录；"+
-				"排队期间原图被改过的不会删，只记日志。取消只撤销删除原图，壁纸文件夹里那张已经移出，可以用 ⌘Z 恢复。")
+			muted(c, "这些是在图库未连接时点击「删除原图」的原图。图库连接后会自动校验并删除，删除会记进删除记录；"+
+				"排队期间被修改过的原图不会删除，只记日志。取消只撤销删除原图，壁纸文件夹中的那份已经移出，可以用 ⌘Z 恢复。")
 			ui.Column(c).MaxHeight(320).Gap(2).Children(func() {
 				list := a.pending
 				if len(list) > 8 {
@@ -164,7 +164,7 @@ func (a *app) pendingModal(c *ui.Context) {
 					})
 				}
 				if rest := len(a.pending) - len(list); rest > 0 {
-					muted(c, fmt.Sprintf("还有 %d 项…（取消完上面的会接着显示）", rest))
+					muted(c, fmt.Sprintf("还有 %d 项…（取消上方条目后会继续显示）", rest))
 				}
 			})
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {

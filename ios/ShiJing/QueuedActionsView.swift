@@ -18,7 +18,7 @@ struct QueuedActionsView: View {
         List {
             if session.queued.isEmpty {
                 ContentUnavailableView("没有待处理的操作", systemImage: "checkmark.circle",
-                                       description: Text("离线时点的「移出」「不再选」「删除原图」会先记在这里，连上电脑后处理。"))
+                                       description: Text("离线时操作的「移出」「不再选」「删除原图」会先记录在这里，连接电脑后处理。"))
             } else {
                 if !deletes.isEmpty {
                     Section {
@@ -33,8 +33,8 @@ struct QueuedActionsView: View {
                         Text("待确认删除原图（\(deletes.count)）")
                     } footer: {
                         Text(live
-                             ? "不可撤销：会从图库里删掉原文件，也会记进电脑上的删除记录。已经不在这一批壁纸里的会跳过。"
-                             : "连上电脑后才能确认删除。缩略图是离线时缓存下来的那一张。")
+                             ? "不可撤销：会从图库中删除原文件，也会记进电脑上的删除记录。已经不在这一批壁纸里的会跳过。"
+                             : "连接电脑后才能确认删除。缩略图是离线时缓存的图片。")
                     }
                 }
                 if !others.isEmpty {
@@ -43,15 +43,15 @@ struct QueuedActionsView: View {
                             row(a, destructive: false)
                         }
                     } header: {
-                        Text("连上电脑后自动处理（\(others.count)）")
+                        Text("连接电脑后自动处理（\(others.count)）")
                     } footer: {
-                        Text(live ? "正在逐项处理；处理不了的会留在这里。" : "连上电脑后自动处理。")
+                        Text(live ? "正在逐项处理；处理不了的会留在这里。" : "连接电脑后自动处理。")
                     }
                 }
                 Section {
                     Button("全部取消", role: .destructive) { session.cancelAllQueued() }
                 } footer: {
-                    Text("取消会把那张放回列表原来的位置。「删除原图」取消后，原图还在图库里。")
+                    Text("取消会把对应的图片放回列表原来的位置。「删除原图」取消后，图库中的原图仍保留。")
                 }
             }
         }
@@ -66,7 +66,7 @@ struct QueuedActionsView: View {
             Button("删除原图", role: .destructive) { Task { await session.confirmQueuedDelete(a) } }
             Button("取消", role: .cancel) {}
         } message: { a in
-            Text("会从图库里删除 \(a.source ?? a.name)，不可撤销，并记进电脑上的删除记录。")
+            Text("会从图库中删除 \(a.source ?? a.name)，不可撤销，并记进电脑上的删除记录。")
         }
         .confirmationDialog(
             "确认删除 \(deletes.count) 张原图？",
@@ -76,7 +76,7 @@ struct QueuedActionsView: View {
             Button("全部删除", role: .destructive) { Task { await session.confirmAllQueuedDeletes() } }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("逐张从图库里删除，不可撤销。已经不在这一批壁纸里的会跳过。")
+            Text("逐张从图库中删除，不可撤销。已经不在这一批壁纸里的会跳过。")
         }
         .sheet(item: $preview) { a in
             QueuedPreviewSheet(session: session, action: a)
@@ -112,7 +112,7 @@ struct QueuedActionsView: View {
                             .buttonStyle(.borderless)
                             .disabled(busy)
                     } else {
-                        Text("连上后确认").font(.caption2).foregroundStyle(.tertiary)
+                        Text("连接后确认").font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
                 Button("取消") { session.cancelQueued(a) }

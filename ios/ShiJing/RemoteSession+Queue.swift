@@ -80,9 +80,9 @@ extension RemoteSession {
         walls.removeAll { $0.name == w.name }
         remember(wallsChanged: true)
         switch kind {
-        case .exclude: showNotice("已记下，连上电脑后移出并不再选它。")
-        case .remove: showNotice("已记下，连上电脑后移出。")
-        case .delete: showNotice("已记下，连上电脑后确认再删除原图。")
+        case .exclude: showNotice("已记录，连接电脑后移出并不再选它。")
+        case .remove: showNotice("已记录，连接电脑后移出。")
+        case .delete: showNotice("已记录，连接电脑后确认再删除原图。")
         }
     }
 
@@ -224,12 +224,12 @@ extension RemoteSession {
         guard connection == .live, a.kind == .delete,
               queued.contains(where: { $0.id == a.id }) else { return .cancelled }
         guard state?.running != true else {
-            actionError = "正在换壁纸，等换完再删"
+            actionError = "正在更换壁纸，等更换完成后再删除"
             return .queued
         }
         // 离线记下时已经把那张从本地列表去掉了，要先拉一份电脑上现在的列表才知道它还在不在这一批
         if refresh, !(await refreshWalls(force: true)) {
-            actionError = "连不上电脑，这张先留着，下次再确认"
+            actionError = "无法连接到电脑，这张先保留，下次再确认"
             return .queued
         }
         guard queued.contains(where: { $0.id == a.id }) else { return .cancelled } // 拉列表期间被取消
@@ -246,7 +246,7 @@ extension RemoteSession {
             walls.removeAll { $0.name == a.name }
             remember(wallsChanged: true)
             if (s.pending ?? 0) > before {
-                showNotice("图库没连上，这次删除已排队")
+                showNotice("图库未连接，本次删除已排队")
             } else {
                 showNotice("已删除原图：\(a.name)")
             }
@@ -273,13 +273,13 @@ extension RemoteSession {
     /// 一次确认所有还没删的原图（界面上已经弹框确认过）。
     func confirmAllQueuedDeletes() async {
         guard connection == .live, state?.running != true else {
-            if state?.running == true { actionError = "正在换壁纸，等换完再删" }
+            if state?.running == true { actionError = "正在更换壁纸，等更换完成后再删除" }
             return
         }
         let items = queuedDeletes
         guard !items.isEmpty else { return }
         guard await refreshWalls(force: true) else {
-            actionError = "连不上电脑，先不删，下次再确认"
+            actionError = "无法连接到电脑，先不删除，下次再确认"
             return
         }
         var deleted = 0, expired = 0, left = 0

@@ -51,7 +51,7 @@ enum WallActionKind: CaseIterable {
         case .save: WallAction.saveHint
         case .remove: WallAction.removeHint
         case .exclude: WallAction.excludeHint
-        case .delete: "从图库删除这张原图，不可撤销。连不上电脑时先记下来，连上后再确认一次才会删。"
+        case .delete: "从图库删除这张原图，不可撤销。无法连接电脑时会先记录，连接后再确认一次才会删除。"
         }
     }
 
@@ -279,9 +279,9 @@ extension View {
             Button("取消", role: .cancel) {}
         } message: { w in
             if session.offline {
-                Text("会从图库里删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销。现在连不上电脑，会先记下来，连上后在「设置 › 待处理操作」里再确认一次才会删除。")
+                Text("会从图库中删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销。现在无法连接电脑，会先记录，连接后在「设置 › 待处理操作」中再确认一次才会删除。")
             } else {
-                Text("会从图库里删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销，会记进电脑上的删除记录。")
+                Text("会从图库中删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销，会记进电脑上的删除记录。")
             }
         }
     }

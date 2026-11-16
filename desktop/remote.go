@@ -369,7 +369,7 @@ func (rs *remoteServer) authed(h func(w http.ResponseWriter, r *http.Request, de
 	return func(w http.ResponseWriter, r *http.Request) {
 		dev := rs.deviceFor(r)
 		if dev == "" {
-			writeErr(w, http.StatusUnauthorized, "这台手机还没有配对，或者配对已在电脑上取消")
+			writeErr(w, http.StatusUnauthorized, "这台手机尚未配对，或配对已在电脑上取消")
 			return
 		}
 		h(w, r, dev)
@@ -677,9 +677,9 @@ func (a *app) remoteBlocked() string {
 	case a.running:
 		return "正在运行"
 	case len(a.allDirs()) == 0:
-		return "还没有添加图库目录，请先在电脑上添加"
+		return "尚未添加图库目录，请先在电脑上添加"
 	case strings.TrimSpace(a.cfg.DestDir) == "":
-		return "还没有设置壁纸文件夹，请先在电脑上设置"
+		return "尚未设置壁纸文件夹，请先在电脑上设置"
 	}
 	return ""
 }

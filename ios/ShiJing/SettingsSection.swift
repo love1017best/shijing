@@ -203,13 +203,13 @@ struct SettingsPage: View {
             } header: {
                 Text(ThisDevice.label)
             } footer: {
-                Text("免费签名 7 天到期，到期后拾景无法启动。连上电脑重新安装一次就能续上，设置和配对都会保留。")
+                Text("免费签名 7 天到期，到期后拾景无法启动。在电脑上重新安装一次就能续上，设置和配对都会保留。")
             }
         }
     }
 
     private func macVersion(_ state: RemoteState) -> String {
-        state.version.isEmpty ? "还没连上" : "v" + state.version
+        state.version.isEmpty ? "尚未连接" : "v" + state.version
     }
 
     /// 这台手机：离线缓存、离线时记下的待处理操作，还有两边的版本。
@@ -282,8 +282,8 @@ struct SettingsPage: View {
             Section {
                 Label {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("现在连不上电脑，设置只能查看").font(.subheadline.bold())
-                        Text("改设置、换一批都要等连上电脑。离线时记下的「移出」「不再选」连上后会自动处理；「删除原图」连上后还要再确认一次。")
+                        Text("现在无法连接电脑，设置仅可查看").font(.subheadline.bold())
+                        Text("改设置、更换壁纸都需要连接电脑。离线时记录的「移出」「不再选」连接后自动处理；「删除原图」连接后还需要再确认一次。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 } icon: {
@@ -310,7 +310,7 @@ struct SettingsPage: View {
         } header: {
             Text("输出")
         } footer: {
-            Text("复制：每张图在壁纸文件夹里存一份，占空间；图库没连上时照样能看。\n软链接：只存指向原图的链接，省空间；图库没连上时这些图无法显示。")
+            Text("复制：每张图在壁纸文件夹里存一份，占空间；图库未连接时仍可查看。\n软链接：只存指向原图的链接，省空间；图库未连接时这些图片无法显示。")
         }
     }
 
@@ -327,11 +327,11 @@ struct SettingsPage: View {
             if let balance = set.balanceFirst {
                 toggle("平衡采样", balance, key: "balance_first", disabled: disabled)
             }
-            toggle("优先选没换上过的", set.preferUnseen, key: "prefer_unseen", disabled: disabled)
+            toggle("优先选未更换过的", set.preferUnseen, key: "prefer_unseen", disabled: disabled)
         } header: {
             Text("采样")
         } footer: {
-            Text("平衡采样：优先让每个子文件夹至少入选一张，避免少数几个大文件夹占满名额。\n优先选没换上过的：这一轮里还没换上过的图片先选，都换上过一遍再从头开始。")
+            Text("平衡采样：优先让每个子文件夹至少入选一张，避免少数几个大文件夹占满名额。\n优先选未更换过的：本轮尚未更换过的图片优先入选，整个图库都更换过一遍后再从头开始。")
         }
     }
 
@@ -345,7 +345,7 @@ struct SettingsPage: View {
         } header: {
             Text("筛选")
         } footer: {
-            Text("打开后，换一批时会删除图库里竖屏、接近正方形、分辨率不够的原图，不能撤销。从手机换一批时会先确认，也可以选这次只模拟。\n增量筛选会跳过上次检查后没有变化的文件夹。")
+            Text("打开后，更换壁纸时会删除图库中竖屏、接近正方形、分辨率不够的原图，且不可撤销。从手机更换时会先确认，也可以选择本次仅模拟。\n增量筛选会跳过上次检查后没有变化的文件夹。")
         }
     }
 
@@ -381,7 +381,7 @@ struct SettingsPage: View {
         } header: {
             Text("系统")
         } footer: {
-            Text("换完一批后重启 macOS 的壁纸服务，不然系统会继续轮换已经删掉的旧图。图库目录的添加和移除、归档位置等在电脑上改。")
+            Text("更换一批后重启 macOS 的壁纸服务，否则系统会继续轮换已经删掉的旧图。图库目录的添加和移除、归档位置等在电脑上修改。")
         }
     }
 
@@ -493,7 +493,7 @@ struct SettingsPage: View {
             } header: {
                 Text("待删除（\(items.count)）")
             } footer: {
-                Text("图库没连上时，要删的原图会先排在电脑上，图库连上后再自动删除。取消后这张原图保留；壁纸文件夹里的那一份在手机上已经移出了。")
+                Text("图库未连接时，需要删除的原图会先排在电脑上，图库连接后自动删除。取消后这张原图保留；壁纸文件夹中的那一份已在手机上移出。")
             }
         }
     }
@@ -518,7 +518,7 @@ struct SettingsPage: View {
                 }
             }
         } footer: {
-            Text("离线时记下的整理：「移出」「不再选」连上电脑后自动处理；「删除原图」不可撤销，连上后还要逐张（或全部）确认才会删除。")
+            Text("离线时记录的整理：「移出」「不再选」连接电脑后自动处理；「删除原图」不可撤销，连接后还要逐张（或全部）确认才会删除。")
         }
     }
 
@@ -581,8 +581,8 @@ struct LibraryDirsView: View {
                         Section {
                             Label {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("现在连不上电脑，下面是上次同步的信息").font(.subheadline.bold())
-                                    Text("挂载状态和张数可能已经变了，连上电脑后可以重新检查。")
+                                    Text("现在无法连接电脑，下面是上次同步的信息").font(.subheadline.bold())
+                                    Text("挂载状态和张数可能已经变化，连接电脑后可以重新检查。")
                                         .font(.footnote).foregroundStyle(.secondary)
                                 }
                             } icon: {
@@ -759,7 +759,7 @@ private struct OfflineCacheSection: View {
         } header: {
             Text("离线")
         } footer: {
-            Text("连不上电脑时，概览和壁纸显示的是上次同步的内容，换一批后不在这批里的图会删掉。打开「保存原图」会把图库里的原文件也存下来，离线时能存到相册、分享原图。存到「缓存上限」为止。")
+            Text("无法连接电脑时，概览和壁纸显示的是上次同步的内容；更换一批后，不在这批里的图片会删除。打开「保存原图」会把图库中的原文件也保存下来，离线时可以存到相册、分享原图，直到达到「缓存上限」。")
         }
     }
 
@@ -773,7 +773,7 @@ private struct OfflineCacheSection: View {
         }
         if store.prefetchHitLimit { return "已到上限，剩下的没存" }
         if store.prefetchPaused { return "已暂停" }
-        if viewable < total { return "还没存完" }
+        if viewable < total { return "尚未缓存完" }
         return "全部存好了"
     }
 

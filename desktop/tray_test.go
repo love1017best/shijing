@@ -17,7 +17,7 @@ import (
 func TestTrayStatusWithoutDirs(t *testing.T) {
 	f, _ := newFakeApp(t)
 	lines := f.trayStatus()
-	if len(lines) != 2 || lines[0] != "图库：还没有添加目录" || lines[1] != "上次运行：还没有运行过" {
+	if len(lines) != 2 || lines[0] != "图库：未添加目录" || lines[1] != "上次运行：尚未运行" {
 		t.Fatalf("状态 = %v", lines)
 	}
 }
@@ -33,7 +33,7 @@ func TestTrayStatusRunAndMounts(t *testing.T) {
 		sum: core.Summary{Copy: core.CopyResult{Copied: 400}},
 	}
 	lines := f.trayStatus()
-	want := []string{"图库：1 个目录没连上", "上次运行：换上 400 张 · 11月14日 08:12"}
+	want := []string{"图库：1 个目录未连接", "上次运行：已更换 400 张 · 11月14日 08:12"}
 	if strings.Join(lines, "|") != strings.Join(want, "|") {
 		t.Fatalf("状态 = %v", lines)
 	}
@@ -42,7 +42,7 @@ func TestTrayStatusRunAndMounts(t *testing.T) {
 	f.running = true
 	f.prog = progress{stage: core.StageCopy, done: 3, total: 10}
 	lines = f.trayStatus()
-	if len(lines) != 2 || lines[1] != "正在换壁纸 · 复制 3 / 10 张" {
+	if len(lines) != 2 || lines[1] != "正在更换壁纸 · 复制 3 / 10 张" {
 		t.Fatalf("运行中的状态 = %v", lines)
 	}
 
@@ -85,7 +85,7 @@ func TestTrayItems(t *testing.T) {
 	// 还没有添加图库目录：换一批、打开壁纸文件夹都不能点
 	f.cfg.DestDir = ""
 	items := f.trayItems()
-	want := "打开主界面||图库：还没有添加目录|上次运行：还没有运行过||换一批壁纸|打开壁纸文件夹||退出拾景"
+	want := "打开主界面||图库：未添加目录|上次运行：尚未运行||换一批壁纸|打开壁纸文件夹||退出拾景"
 	if got := labels(items); got != want {
 		t.Fatalf("菜单 = %s", got)
 	}

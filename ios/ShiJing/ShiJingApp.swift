@@ -270,7 +270,7 @@ struct WidgetDemo: View {
     var body: some View {
         let now = Date().timeIntervalSince1970
         let idle = RemoteState(
-            version: "0.3.104", eyebrow: "", title: "已换上 300 张新壁纸", running: false, stopping: false,
+            version: "0.3.104", eyebrow: "", title: "已更换 300 张壁纸", running: false, stopping: false,
             steps: [], stage: nil, done: 0, total: 0, fraction: -1, label: nil, lastLine: nil, runDelete: false,
             rejected: 0, deleted: 0, deleteFailed: 0, blocked: nil, unmounted: 0, willDelete: false, deleteNote: nil,
             last: LastRun(at: now - 3600, status: "ok", error: nil, selected: 300, copied: 300, failed: 0, elapsed: 73,
@@ -278,7 +278,7 @@ struct WidgetDemo: View {
             nextAuto: now + 5 * 3600, wallpapers: 300, wallsRev: nil, dest: "", sampleCount: 300, libraryDirs: 3)
         var running = idle
         running.running = true
-        running.title = "正在拾一批新风景…"
+        running.title = "正在更换壁纸…"
         running.fraction = 0.43
         running.label = "复制 128 / 300 张"
         let e1 = entry(idle, "风景-冰岛-0001.jpg")

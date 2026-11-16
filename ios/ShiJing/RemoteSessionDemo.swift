@@ -16,18 +16,18 @@ extension RemoteSession {
         let running = mode == "running"
         let now = Date().timeIntervalSince1970
         s.state = RemoteState(
-            version: "0.3.7", eyebrow: running ? "正在换壁纸" : "当前壁纸 · 11月11日 15:04 换上",
-            title: running ? "正在拾一批新风景…" : "已换上 300 张新壁纸",
+            version: "0.3.7", eyebrow: running ? "正在更换壁纸" : "当前壁纸 · 11月11日 15:04 更换",
+            title: running ? "正在更换壁纸…" : "已更换 300 张壁纸",
             running: running, stopping: false, steps: ["filter", "scan", "copy", "refresh"],
             stage: running ? "copy" : nil, done: running ? 128 : 0, total: running ? 300 : 0,
             fraction: running ? 128.0 / 300 : -1, label: running ? "复制 128 / 300 张 · 还剩约 1 分钟" : nil,
             lastLine: running ? "[风景/冰岛] ✅ 已复制: 风景-冰岛-0423.jpg" : nil,
             runDelete: true, rejected: 3, deleted: 3, deleteFailed: 0,
             blocked: nil, unmounted: 0, willDelete: true,
-            deleteNote: "会先检查「筛选 + 采样」里的 2 个目录，把竖屏、正方形和低于 3840×2160 的图片从图库里直接删除，不可撤销。",
+            deleteNote: "此操作会删除图库中的不合格原图：会检查「筛选 + 采样」中的 2 个目录，删除竖屏、正方形和低于 3840×2160 的图片，不可撤销。",
             last: running ? nil : LastRun(at: now - 3600, status: "ok", error: nil, selected: 300, copied: 300, failed: 0,
                                          elapsed: 73, brief: "重合 4% · 删 3 张",
-                                         detail: "和上一轮相比：新换上 288 张，重复 12 张（重合率 4%）\n筛选删除 3 张\n覆盖 300 / 415 个文件夹"),
+                                         detail: "和上一轮相比：新更换 288 张，重复 12 张（重合率 4%）\n筛选删除 3 张\n覆盖 300 / 415 个文件夹"),
             nextAuto: now + 6 * 3600, wallpapers: 300, wallsRev: "demo", dest: "~/Pictures/Wallpapers0", sampleCount: 300, libraryDirs: 3)
         s.state?.settings = RemoteSettings(
             sampleCount: 300, autoRunHours: 6, autoOptions: [0, 6, 12, 24, 168],
@@ -70,7 +70,7 @@ extension RemoteSession {
             || ProcessInfo.processInfo.arguments.contains("-demoQueuePage") { s.seedQueuedForDemo() }
         // 截图用：-demo -demoOffline 显示「离线，显示的是上次同步的壁纸」的样子
         if ProcessInfo.processInfo.arguments.contains("-demoOffline") {
-            s.connection = .offline("连不上这台 Mac：确认 Mac 没有睡眠、拾景正在运行、设置里打开了「允许手机遥控」，手机和 Mac 在同一个网络里。")
+            s.connection = .offline("无法连接到这台 Mac：确认 Mac 未休眠、拾景正在运行、设置中已打开「允许手机遥控」，手机与 Mac 处于同一网络。")
             s.snapshotAt = Date().addingTimeInterval(-3 * 3600 - 2400)
             // 顺便把演示图写进磁盘缓存，让「离线也能看图」这条路径真的走一遍（读的是磁盘，不是内存里的演示图）
             ImageStore.shared.seedDiskCache(names: s.walls.prefix(24).map(\.name), hero: s.heroName)

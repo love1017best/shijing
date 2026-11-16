@@ -722,7 +722,7 @@ struct WallPreview: View {
             if showsInfo {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(w.name).font(.subheadline.bold()).lineLimit(1).truncationMode(.middle)
-                    Text(w.hasSource ? "原图：\(w.source ?? "")" : "原图：没有记录（之前的版本换上的），只能移出")
+                    Text(w.hasSource ? "原图：\(w.source ?? "")" : "原图：无记录（由旧版本更换），无法删除，只能移出")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10)
@@ -732,7 +732,7 @@ struct WallPreview: View {
             }
 
             if session.state?.running == true {
-                Label("正在换壁纸，等换完再整理", systemImage: "hourglass")
+                Label("正在更换壁纸，等更换完成后再整理", systemImage: "hourglass")
                     .font(.footnote).foregroundStyle(.secondary)
             }
 
@@ -832,9 +832,9 @@ private struct PreviewPage: View {
                 VStack(spacing: 8) {
                     Image(systemName: session.offline ? "icloud.slash" : "photo.badge.exclamationmark")
                         .font(.largeTitle)
-                    Text(session.offline ? "这张还没缓存" : "无法读取这张图片").font(.headline)
+                    Text(session.offline ? "这张图片尚未缓存" : "无法读取这张图片").font(.headline)
                     if session.offline {
-                        Text("连上电脑后整批图片会自动存到手机上").font(.footnote).foregroundStyle(.secondary)
+                        Text("连接电脑后整批图片会自动保存到手机上").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
                 .foregroundStyle(.secondary)
@@ -847,7 +847,7 @@ private struct PreviewPage: View {
         .overlay(alignment: .bottom) {
             // 离线、大图还没缓存，但缩略图在：先拿缩略图垫着，顺便说明一下（不然看着像糊了）
             if tried, session.offline, bigImage == nil, thumbImage != nil {
-                Text("离线 · 大图还没缓存，显示的是缩略图")
+                Text("离线 · 大图尚未缓存，当前显示缩略图")
                     .font(.caption2)
                     .padding(.horizontal, 10).padding(.vertical, 5)
                     .glassBackground(in: Capsule())

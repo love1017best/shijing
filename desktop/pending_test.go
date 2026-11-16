@@ -40,7 +40,7 @@ func TestDeleteOriginalQueuesWhenLibraryOffline(t *testing.T) {
 	if len(f.undo) != 1 {
 		t.Errorf("移出应当可以 ⌘Z 撤销，撤销栈里有 %d 条", len(f.undo))
 	}
-	if !slices.ContainsFunc(f.log, func(s string) bool { return strings.Contains(s, "排队删除原图") }) {
+	if !slices.ContainsFunc(f.log, func(s string) bool { return strings.Contains(s, "原图删除已排队") }) {
 		t.Errorf("运行日志里应当记一条排队: %v", f.log)
 	}
 }
@@ -106,7 +106,7 @@ func TestPendingSkipsFileChangedAfterQueuing(t *testing.T) {
 	if _, err := os.Stat(src); err != nil {
 		t.Errorf("改过的文件不该删: %v", err)
 	}
-	if !tt.HasText("在排队期间被改过，没有删除") {
+	if !tt.HasText("在排队期间被修改，未删除") {
 		t.Errorf("应当提示没删: %v", tt.Texts())
 	}
 }
@@ -119,7 +119,7 @@ func TestPendingBarCancel(t *testing.T) {
 		{Path: "/Volumes/Media0/a/2.jpg", Wall: "2.jpg"},
 	}
 	tt.Frame()
-	if !tt.HasText("2 项原图等着删除") {
+	if !tt.HasText("2 张原图等待删除") {
 		t.Fatalf("概览应当有队列提示: %v", tt.Texts())
 	}
 	click(t, tt, "查看")

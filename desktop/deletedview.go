@@ -24,7 +24,7 @@ func (a *app) deletedPage(c *ui.Context) {
 		panel(c).Children(func() {
 			ui.Column(c).Height(120).Center().Gap(6).Children(func() {
 				ui.Icon(c, iconTrash).FontSize(22).TextColor(t.TextMuted)
-				ui.Text(c, "还没有删除过图片").FontSize(13).TextColor(t.TextMuted)
+				ui.Text(c, "暂无删除记录").FontSize(13).TextColor(t.TextMuted)
 			})
 		})
 		return

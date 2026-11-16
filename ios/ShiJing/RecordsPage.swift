@@ -157,7 +157,7 @@ struct RecordsCacheNote: View {
         Label {
             Text(session.offline
                  ? "离线 · \(DashboardView.ago(at))同步，下面是手机上存的副本"
-                 : "连不上电脑 · 显示的是 \(DashboardView.ago(at))同步的副本")
+                 : "无法连接电脑 · 显示的是 \(DashboardView.ago(at))同步的副本")
         } icon: {
             Image(systemName: "wifi.slash").foregroundStyle(.orange)
         }
@@ -210,8 +210,8 @@ struct LogView: View {
                 if lines.isEmpty {
                     VStack(spacing: 0) {
                         RecordsCacheHeader(session: session, at: syncedAt)
-                        ContentUnavailableView("还没有日志", systemImage: "text.alignleft",
-                                               description: Text("电脑上的拾景这次启动后还没运行过。"))
+                        ContentUnavailableView("暂无日志", systemImage: "text.alignleft",
+                                               description: Text("电脑上的拾景本次启动后尚未运行。"))
                     }
                 } else {
                     VStack(spacing: 0) {
@@ -254,7 +254,7 @@ struct LogView: View {
 
     private func load() async {
         let r = await loadRecord(session, .log,
-                                 offlineNote: "现在连不上电脑，手机上还没存过日志。连上电脑后会自动存一份，以后断线也能看。") {
+                                 offlineNote: "现在无法连接电脑，手机上尚未存过日志。连接电脑后会自动存一份，之后离线也能查看。") {
             try await $0.log()
         }
         lines = r.value
@@ -347,7 +347,7 @@ struct DeletionsView: View {
                     }
                 }
             } else if let error {
-                ContentUnavailableView("读不到删除记录", systemImage: "exclamationmark.triangle", description: Text(error))
+                ContentUnavailableView("无法读取删除记录", systemImage: "exclamationmark.triangle", description: Text(error))
             } else {
                 ProgressView()
             }
@@ -429,7 +429,7 @@ struct DeletionsView: View {
 
     private func load() async {
         let r = await loadRecord(session, .deletions,
-                                 offlineNote: "现在连不上电脑，手机上还没存过删除记录。连上电脑后会自动存一份，以后断线也能看。") {
+                                 offlineNote: "现在无法连接电脑，手机上尚未存过删除记录。连接电脑后会自动存一份，之后离线也能查看。") {
             try await $0.deletions()
         }
         list = r.value
@@ -480,7 +480,7 @@ struct ExcludedView: View {
                             }
                         } footer: {
                             Text(session.offline
-                                 ? "离线时只能查看，连上电脑后再恢复。"
+                                 ? "离线时只能查看，连接电脑后再恢复。"
                                  : "恢复以后，换一批时这些原图又可能被选上。左滑一张可以单独恢复。")
                         }
                         // 「全部恢复」放在列表末尾：原来在导航栏右下角，三栏并排后 tab 页的 toolbar
@@ -512,7 +512,7 @@ struct ExcludedView: View {
 
     private func load() async {
         let r = await loadRecord(session, .excluded,
-                                 offlineNote: "现在连不上电脑，手机上还没存过「不再选」名单。连上电脑后会自动存一份，以后断线也能看。") {
+                                 offlineNote: "现在无法连接电脑，手机上尚未存过「不再选」名单。连接电脑后会自动存一份，之后离线也能查看。") {
             try await $0.excluded()
         }
         items = r.value
@@ -522,7 +522,7 @@ struct ExcludedView: View {
 
     private func restore(_ paths: [String]?) async {
         guard !session.offline else {
-            session.actionError = "连不上电脑时不能恢复，连上后再试。"
+            session.actionError = "未连接电脑时无法恢复，连接后再试。"
             return
         }
         do {

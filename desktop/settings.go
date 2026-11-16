@@ -51,12 +51,12 @@ func (a *app) settingsPage(c *ui.Context) {
 				})
 			},
 			func() {
-				desc := "先从这一轮里还没换上过的图里选，整个图库都换上过一遍后再开始新一轮，减少和前几次重复。"
+				desc := "优先选择本轮未更换过的图片；整个图库都更换过一遍后再开始新一轮，减少和前几次重复。"
 				if g := a.lastGood; g != nil && g.Copy.Rotated > 0 && g.Copy.Candidates > 0 {
-					desc += fmt.Sprintf("\n这一轮已换上过 %s / %s 张（%.0f%%）。", humanCount(g.Copy.Rotated), humanCount(g.Copy.Candidates),
+					desc += fmt.Sprintf("\n本轮已更换 %s / %s 张（%.0f%%）。", humanCount(g.Copy.Rotated), humanCount(g.Copy.Candidates),
 						float64(g.Copy.Rotated)/float64(g.Copy.Candidates)*100)
 				}
-				settingRow(c, "优先选没换上过的", desc, func(l ui.Element) {
+				settingRow(c, "优先选未更换过的", desc, func(l ui.Element) {
 					ui.Switch(c, &a.cfg.PreferUnseen).LabelledBy(l)
 				})
 			})
@@ -129,7 +129,7 @@ func (a *app) settingsPage(c *ui.Context) {
 
 		group(c, "系统", "",
 			func() {
-				settingRow(c, "刷新系统壁纸", "换完一批后重启 macOS 的壁纸服务。系统设置里用这个文件夹随机切换壁纸时，不刷新的话系统会一直轮换已经删掉的旧图。", func(l ui.Element) {
+				settingRow(c, "刷新系统壁纸", "更换一批后重启 macOS 的壁纸服务。系统设置里用这个文件夹随机切换壁纸时，不刷新的话系统会一直轮换已经删掉的旧图。", func(l ui.Element) {
 					ui.Switch(c, &a.cfg.RefreshWallpaper).LabelledBy(l)
 				})
 			})

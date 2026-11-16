@@ -8,7 +8,7 @@ enum IntentError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noMac: "还没有配对 Mac：先打开拾景，在 Mac 上配对一次。"
+        case .noMac: "尚未配对 Mac：请先打开拾景，在 Mac 上完成配对。"
         }
     }
 }
@@ -22,7 +22,7 @@ private func currentClient() throws -> (CurrentMac, APIClient) {
 private func explain(_ error: Error, mac: String) -> Error {
     if error is APIError || error is IntentError { return error }
     if error is URLError {
-        return APIError.server(status: 0, message: "连不上「\(mac)」：确认 Mac 没有睡眠、拾景正在运行并打开了「允许手机遥控」，手机和 Mac 在同一个网络里。")
+        return APIError.server(status: 0, message: "无法连接到「\(mac)」：确认 Mac 未休眠、拾景正在运行并已打开「允许手机遥控」，手机与 Mac 处于同一网络。")
     }
     return error
 }
@@ -45,7 +45,7 @@ struct RunWallpaperIntent: AppIntent {
         let (mac, client) = try currentClient()
         do {
             let before = try await client.state()
-            if before.running { return .result(dialog: "「\(mac.name)」正在换壁纸，等这次换完。") }
+            if before.running { return .result(dialog: "「\(mac.name)」正在更换壁纸，请等待本次更换完成。") }
             if let b = before.blocked { return .result(dialog: "现在换不了：\(b)") }
             let s = try await client.run(deleteOriginals: deleteOriginals)
             WidgetReload.all()
@@ -63,7 +63,7 @@ struct StopWallpaperIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let (mac, client) = try currentClient()
         do {
-            guard try await client.state().running else { return .result(dialog: "「\(mac.name)」现在没在换壁纸。") }
+            guard try await client.state().running else { return .result(dialog: "「\(mac.name)」当前没有在更换壁纸。") }
             _ = try await client.stop()
             WidgetReload.all()
             return .result(dialog: "已经让「\(mac.name)」停下。")
@@ -83,7 +83,7 @@ struct WallpaperStatusIntent: AppIntent {
             let s = try await client.state()
             var text: String
             if s.running {
-                text = "「\(mac.name)」正在换壁纸"
+                text = "「\(mac.name)」正在更换壁纸"
                 if let l = s.label, !l.isEmpty { text += "：\(l)" }
             } else {
                 text = "\(s.title)。"

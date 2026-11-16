@@ -220,7 +220,7 @@ func TestRunShowsProgressThenResult(t *testing.T) {
 		t.Error("运行中应显示进度条")
 	}
 	close(f.release)
-	f.settle(t, tt, func() bool { return !f.running && tt.HasText("已换上 2 张新壁纸") })
+	f.settle(t, tt, func() bool { return !f.running && tt.HasText("已更换 2 张壁纸") })
 
 	if len(f.runCfgs) != 1 || !slices.Equal(f.runCfgs[0].SampleOnlyDirs, []string{"/Volumes/Media0/Fav"}) {
 		t.Errorf("传给流程的配置: %+v", f.runCfgs)
@@ -241,7 +241,7 @@ func TestRunFailureKeepsMessage(t *testing.T) {
 	f.runErr = core.ErrNoImages
 	tt.Frame()
 	click(t, tt, "换一批壁纸")
-	f.settle(t, tt, func() bool { return !f.running && tt.HasText("这次没有换成") })
+	f.settle(t, tt, func() bool { return !f.running && tt.HasText("本次未完成更换") })
 	if !errors.Is(f.last.err, core.ErrNoImages) || !tt.HasText(core.ErrNoImages.Error()) {
 		t.Errorf("应显示失败原因: %q", tt.Texts())
 	}
@@ -265,7 +265,7 @@ func TestRunStopAndResultSurvivesRestart(t *testing.T) {
 	f.settle(t, tt, func() bool { return tt.HasText("复制 1 / 2 张") })
 	click(t, tt, "停止")
 	f.settle(t, tt, func() bool { return !f.running && tt.HasText("已停止") })
-	if !errors.Is(f.last.err, core.ErrCanceled) || !tt.HasText("换上了 1 张新壁纸") {
+	if !errors.Is(f.last.err, core.ErrCanceled) || !tt.HasText("已更换 1 张壁纸") {
 		t.Errorf("停止后应说明保留了几张: %q", tt.Texts())
 	}
 
@@ -331,7 +331,7 @@ func TestRunDisabledWhenAllUnmounted(t *testing.T) {
 	if info, ok := tt.AccessByRole(ui.RoleButton, "换一批壁纸"); !ok || !info.Disabled {
 		t.Error("目录都没挂载时不能运行")
 	}
-	if !tt.HasText("图库目录都没挂载，连上图库后到「图库」里重新检查") {
+	if !tt.HasText("图库目录均未挂载，连接后可在「图库」中重新检查") {
 		t.Errorf("横幅应说明原因: %q", tt.Texts())
 	}
 }
@@ -516,7 +516,7 @@ func TestRunNeedsDestDir(t *testing.T) {
 	if info, ok := tt.AccessByRole(ui.RoleButton, "换一批壁纸"); !ok || !info.Disabled {
 		t.Error("没有壁纸文件夹时不能运行")
 	}
-	if !tt.HasText("还没有设置壁纸文件夹，先到「设置」里选一个") {
+	if !tt.HasText("尚未设置壁纸文件夹，请先在「设置」中选择") {
 		t.Errorf("横幅应提示设置壁纸文件夹: %q", tt.Texts())
 	}
 }
@@ -658,7 +658,7 @@ func TestRunShowsDeletionsAndOverlap(t *testing.T) {
 		}
 	}
 	close(f.release)
-	f.settle(t, tt, func() bool { return !f.running && tt.HasText("新换 1 张") })
+	f.settle(t, tt, func() bool { return !f.running && tt.HasText("已更换 1 张") })
 	if !tt.HasText("重合 50%") {
 		t.Error("上次运行应显示和上一轮的重合率")
 	}

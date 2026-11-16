@@ -33,7 +33,7 @@ struct ConnectionFallback: View {
             }
         case .offline(let msg):
             ContentUnavailableView {
-                Label("连不上 \(session.mac.name)", systemImage: "wifi.exclamationmark")
+                Label("无法连接 \(session.mac.name)", systemImage: "wifi.exclamationmark")
             } description: {
                 Text(msg)
             } actions: {

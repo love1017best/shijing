@@ -53,7 +53,7 @@ func TestWallsPageSearchFolderAndPreview(t *testing.T) {
 	f.page = pageWalls
 	tt.Frame()
 
-	if !tt.HasText("壁纸文件夹里一共 4 张") || !tt.HasText("第 1 张 山-01.jpg") {
+	if !tt.HasText("当前本地壁纸文件夹图片数量：4") || !tt.HasText("第 1 张 山-01.jpg") {
 		t.Fatalf("壁纸页应列出全部壁纸: %q", tt.Texts())
 	}
 
@@ -61,7 +61,7 @@ func TestWallsPageSearchFolderAndPreview(t *testing.T) {
 	click(t, tt, "按文件名搜索壁纸")
 	tt.Type("山")
 	tt.Frame()
-	if !tt.HasText("筛选出 2 张，一共 4 张") || tt.HasText("第 2 张 海-02.jpg") {
+	if !tt.HasText("筛选结果 2 张，全部 4 张") || tt.HasText("第 2 张 海-02.jpg") {
 		t.Errorf("搜索「山」应只剩 2 张，且编号仍按完整顺序: %q", tt.Texts())
 	}
 	if !tt.HasText("第 1 张 山-01.jpg") || !tt.HasText("第 3 张 山-03.jpg") {
@@ -76,7 +76,7 @@ func TestWallsPageSearchFolderAndPreview(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if f.wallFolder != "图库/人像" || !tt.HasText("筛选出 2 张，一共 4 张") || tt.HasText("第 1 张 山-01.jpg") {
+	if f.wallFolder != "图库/人像" || !tt.HasText("筛选结果 2 张，全部 4 张") || tt.HasText("第 1 张 山-01.jpg") {
 		t.Errorf("按目录筛选应只剩人像那两张: folder=%q texts=%q", f.wallFolder, tt.Texts())
 	}
 
@@ -123,7 +123,7 @@ func TestWallsPageBatchRemove(t *testing.T) {
 	if len(f.walls.all) != 2 || f.wallSelecting || len(f.wallSel) != 0 {
 		t.Errorf("批量移出后应只剩 2 张并退出选择模式: all=%v selecting=%v sel=%v", f.walls.all, f.wallSelecting, f.wallSel)
 	}
-	if !tt.HasText("壁纸文件夹里一共 2 张") || tt.HasText("已选") {
+	if !tt.HasText("当前本地壁纸文件夹图片数量：2") || tt.HasText("已选") {
 		t.Errorf("批量移出后页面应更新: %q", tt.Texts())
 	}
 

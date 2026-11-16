@@ -47,7 +47,7 @@ func (a *app) remoteGroup(c *ui.Context) {
 	}
 	if len(devs) == 0 && a.cfg.RemoteEnabled {
 		rows = append(rows, func() {
-			settingRow(c, "还没有配对的手机", "在 iPhone 上打开拾景 App、选这台 Mac，这里会弹出 6 位配对码。", func(ui.Element) {})
+			settingRow(c, "暂无已配对的手机", "在 iPhone 上打开拾景 App、选这台 Mac，这里会弹出 6 位配对码。", func(ui.Element) {})
 		})
 	}
 	if a.cfg.RemoteEnabled {
@@ -116,7 +116,7 @@ func (a *app) qrPairModal(c *ui.Context) {
 		a.qrOpen, a.qrCode = false, ""
 		// 是被另一台手机的手动配对请求顶掉的就不提示过期（那种情况会弹配对码）
 		if _, _, manual := a.remote.currentPair(); !manual {
-			a.toast = "配对码过期了，需要的话再点一次「显示二维码」"
+			a.toast = "配对码已过期，如需重新配对请再次点击「显示二维码」"
 		}
 		return
 	}

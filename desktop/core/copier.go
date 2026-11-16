@@ -470,7 +470,7 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 		default:
 			res.NewCycle = len(history) > 0
 			if res.NewCycle {
-				logf("🌀 没换上过的只剩 %d 张，全部选上，整个图库轮换完一遍，开始新一轮", len(uAll))
+				logf("🌀 未更换过的只剩 %d 张，全部选中，整个图库已轮换完一遍，开始新一轮", len(uAll))
 			}
 			poolAll, poolGrouped, poolLeaves = uAll, uGrouped, uLeaves
 			fillAll, fillGrouped, fillLeaves = subsetImages(all, grouped, leafOrder, func(img sourceImage) bool { return history[img.path] })
@@ -566,7 +566,7 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 				res.Rotated++
 			}
 		}
-		logf("🌀 图库轮换进度：已换上过 %d / %d 张（%.0f%%）", res.Rotated, len(all), float64(res.Rotated)/float64(max(1, len(all)))*100)
+		logf("🌀 图库轮换进度：已更换 %d / %d 张（%.0f%%）", res.Rotated, len(all), float64(res.Rotated)/float64(max(1, len(all)))*100)
 	}
 	logf("✅ 完成! 已处理 %d 张图片", len(selected))
 	logf("💾 目标目录: %s", destDir)
@@ -668,7 +668,7 @@ func compareSelection(file, destDir string, prev *prevSelection, selected []sour
 		if prev.byName {
 			note = "，按文件名比较"
 		}
-		logf("🔁 和上一轮相比：新换上 %d 张，重复 %d 张（重合率 %.0f%%%s）",
+		logf("🔁 和上一轮相比：新更换 %d 张，重复 %d 张（重合率 %.0f%%%s）",
 			len(cur)-res.Repeated, res.Repeated, float64(res.Repeated)/float64(len(cur))*100, note)
 	}
 	data, err := json.Marshal(savedSelection{Dest: destDir, Sources: cur, Dests: dests})
