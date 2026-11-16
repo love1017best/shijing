@@ -370,7 +370,8 @@ final class RemoteSession {
         }
     }
 
-    /// 撤销最近一次移出：放回壁纸文件夹原来的位置。成功时返回放回去的那张的文件名。    @discardableResult
+    /// 撤销最近一次移出：放回壁纸文件夹原来的位置。成功时返回放回去的那张的文件名。
+    @discardableResult
     func undoRemove() async -> String? {
         // 离线时撤销的是手机上还没补上的「移出」：直接从队列里拿掉、放回列表，不用连电脑
         if offline {

@@ -70,6 +70,12 @@ extension RemoteSession {
         }
     }
 
+    /// 一条没补成：放回原来那一格（下次先补它），别接到队尾。
+    private func reinsert(_ act: OfflineAction, at i: Int) {
+        queued.insert(act, at: min(i, queued.count))
+        saveQueue()
+    }
+
     func enqueue(_ kind: OfflineAction.Kind, _ w: Wallpaper) {
         guard !queued.contains(where: { $0.name == w.name && $0.kind == kind }) else { return }
         let index = walls.firstIndex { $0.name == w.name }
@@ -152,20 +158,17 @@ extension RemoteSession {
                             state = try await client().removeWallpaper(act.name, exclude: true)
                             moved = true
                             excluded = true
-                            walls.removeAll { $0.name == act.name }
                         } catch APIError.server(_, let msg) where msg.contains("找不到原图") {
                             // 旧版本换上的没有原图记录：只能移出，名单按手机记下的原图路径补
                             state = try await client().removeWallpaper(act.name, exclude: false)
                             moved = true
-                            walls.removeAll { $0.name == act.name }
-                        } catch APIError.server(_, let msg) where msg.contains("正在换壁纸") {
-                            // 电脑在忙：交给外层放回队列，换完一批再补
-                            throw APIError.server(status: 409, message: msg)
-                        } catch APIError.server(let status, _) where status == 404 || status == 409 {
+                        } catch APIError.server(let status, let msg)
+                            where (status == 404 || status == 409) && !msg.contains("正在换壁纸") {
                             // 刚拉完列表电脑上又没了（或者已经换了一批）：移出这一步不用做了，
                             // 但「不再选」和批次无关，下面照样按原图路径补进名单
-                            walls.removeAll { $0.name == act.name }
                         }
+                        // 「正在换壁纸」上面不接，交给外层放回队列、换完一批再补
+                        walls.removeAll { $0.name == act.name }
                     }
                     if !excluded, let src = act.source, !src.isEmpty {
                         // 这一批已经换掉了（或者刚才是只能移出）：至少把原图记进名单，和批次无关
@@ -187,20 +190,17 @@ extension RemoteSession {
                 }
             } catch APIError.server(_, let msg) where msg.contains("正在换壁纸") {
                 // 电脑在忙，不是过期：放回原处，换完一批时再补
-                queued.insert(act, at: min(i, queued.count))
-                saveQueue()
+                reinsert(act, at: i)
                 break
             } catch APIError.server(let status, _) where status == 404 || status == 409 {
                 expired += 1
             } catch APIError.unauthorized(let msg) {
                 connection = .unpaired(msg)
-                queued.insert(act, at: min(i, queued.count))
-                saveQueue()
+                reinsert(act, at: i)
                 break
             } catch {
                 // 又断了：放回原处，留着下次
-                queued.insert(act, at: min(i, queued.count))
-                saveQueue()
+                reinsert(act, at: i)
                 noteNetworkFailure(error)
                 break
             }
@@ -224,6 +224,13 @@ extension RemoteSession {
 
     enum QueuedDeleteResult { case deleted, queued, expired, cancelled }
 
+    /// 电脑正在换壁纸时不能删原图。拦下时顺手写好提示。
+    private func blockedByRun() -> Bool {
+        guard state?.running == true else { return false }
+        actionError = "正在更换壁纸，等更换完成后再删除"
+        return true
+    }
+
     /// 用户在「待处理操作」里确认了离线时记下的「删除原图」：删之前会先拉一份电脑上现在的列表。
     /// 那张已经不在这一批里的：接口只能按壁纸名删，没法再删图库里的原图，只能告诉用户去电脑上删。
     /// `refresh` 为 false 时先不拉列表（批量确认时外面已经拉过一次）。
@@ -231,10 +238,7 @@ extension RemoteSession {
     func confirmQueuedDelete(_ a: OfflineAction, refresh: Bool = true) async -> QueuedDeleteResult {
         guard connection == .live, a.kind == .delete,
               queued.contains(where: { $0.id == a.id }) else { return .cancelled }
-        guard state?.running != true else {
-            actionError = "正在更换壁纸，等更换完成后再删除"
-            return .queued
-        }
+        guard !blockedByRun() else { return .queued }
         // 离线记下时已经把那张从本地列表去掉了，要先拉一份电脑上现在的列表才知道它还在不在这一批
         if refresh, !(await refreshWalls(force: true)) {
             actionError = "无法连接到电脑，这张先保留，下次再确认"
@@ -280,10 +284,8 @@ extension RemoteSession {
 
     /// 一次确认所有还没删的原图（界面上已经弹框确认过）。
     func confirmAllQueuedDeletes() async {
-        guard connection == .live, state?.running != true else {
-            if state?.running == true { actionError = "正在更换壁纸，等更换完成后再删除" }
-            return
-        }
+        guard connection == .live else { return }
+        guard !blockedByRun() else { return }
         let items = queuedDeletes
         guard !items.isEmpty else { return }
         guard await refreshWalls(force: true) else {
