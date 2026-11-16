@@ -347,7 +347,7 @@ func TestRemoteRunRechecksMounts(t *testing.T) {
 	h.settle(t, h.tt, func() bool { return h.unmountedCount() == 1 })
 	tok := h.pair(t, "iPhone")
 
-	if code, data := h.do(t, "POST", "/api/run", tok, map[string]bool{"delete": true}); code != 409 || !strings.Contains(data["error"].(string), "NAS") {
+	if code, data := h.do(t, "POST", "/api/run", tok, map[string]bool{"delete": true}); code != 409 || !strings.Contains(data["error"].(string), "图库可能没有挂载") {
 		t.Fatalf("图库都没挂载时 = %d %v", code, data)
 	}
 	// NAS 后来挂上了：遥控运行前会重新检查，不用等桌面上重新查

@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// 「待补操作」：离线时在壁纸上点的整理都记在这里。
+/// 「待处理操作」：离线时在壁纸上点的整理都记在这里。
 /// 单独一页，每条带缩略图预览：点图看大图，「删除原图」逐张（或全部）确认后才会真的删；
-/// 「移出」「不再选」连上电脑后自动补上，也可以取消。
+/// 「移出」「不再选」连上电脑后自动处理，也可以取消。
 struct QueuedActionsView: View {
     let session: RemoteSession
     @State private var confirm: RemoteSession.OfflineAction?
@@ -17,7 +17,7 @@ struct QueuedActionsView: View {
     var body: some View {
         List {
             if session.queued.isEmpty {
-                ContentUnavailableView("没有待补操作", systemImage: "checkmark.circle",
+                ContentUnavailableView("没有待处理的操作", systemImage: "checkmark.circle",
                                        description: Text("离线时点的「移出」「不再选」「删除原图」会先记在这里，连上电脑后处理。"))
             } else {
                 if !deletes.isEmpty {
@@ -43,9 +43,9 @@ struct QueuedActionsView: View {
                             row(a, destructive: false)
                         }
                     } header: {
-                        Text("连上电脑后自动补上（\(others.count)）")
+                        Text("连上电脑后自动处理（\(others.count)）")
                     } footer: {
-                        Text(live ? "正在陆续补上；补不上的会留在这里。" : "连上电脑后自动补上。")
+                        Text(live ? "正在逐项处理；处理不了的会留在这里。" : "连上电脑后自动处理。")
                     }
                 }
                 Section {
@@ -55,7 +55,7 @@ struct QueuedActionsView: View {
                 }
             }
         }
-        .navigationTitle("待补操作")
+        .navigationTitle("待处理操作")
         .connectionToolbar(session)
         .confirmationDialog(
             "删除这张原图？",

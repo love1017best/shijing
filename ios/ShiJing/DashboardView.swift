@@ -261,11 +261,11 @@ struct DashboardView: View {
         }
     }
 
-    /// 离线时记下的操作：连上电脑后会自动补，只有删原图要本人确认。
+    /// 离线时记下的操作：连上电脑后会自动处理，只有删原图要本人确认。
     private var queuedNote: String {
         session.queued.isEmpty
             ? ""
-            : "记下的 \(session.queued.count) 项操作连上电脑后自动补上，删除原图要你确认。"
+            : "记下的 \(session.queued.count) 项操作会在连上电脑后处理，删除原图要你确认。"
     }
 
     /// 「3 小时前」「刚刚」：快照有多旧。
@@ -480,7 +480,7 @@ struct DashboardView: View {
                     Label {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("电脑上排队 \(desk) 张").font(.subheadline.bold())
-                            Text("图库没连上时删的，图库连上后电脑会自动删掉。不想删的，到「设置 › 待删除」里取消。")
+                            Text("这些是图库没连上时记下的，图库连上后电脑会自动删除。不想删的，到「设置 › 待删除」里取消。")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
                     } icon: {
@@ -495,8 +495,8 @@ struct DashboardView: View {
                         Label {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("这台手机记下了 \(mine) 张等你确认").font(.subheadline.bold())
-                                Text(live ? "点开看缩略图，逐张或全部确认后才会删除；取消会把那张放回列表。"
-                                          : "连上电脑后才能确认删除，点开可以先看看是哪几张。")
+                                Text(live ? "每一张都有缩略图，逐张或全部确认后才会删除；取消会把那张放回列表。"
+                                          : "连上电脑后才能确认删除；现在可以点开看看是哪几张。")
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                         } icon: {
@@ -517,7 +517,7 @@ struct DashboardView: View {
                 Label {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(SigningExpiry.isExpired ? "签名已经到期" : "签名\(text)").font(.subheadline.bold())
-                        Text("免费签名只有 7 天，到期后拾景就打不开了。连上电脑重新安装一次就能续上。")
+                        Text("免费签名 7 天到期，到期后拾景无法启动。连上电脑重新安装一次就能续上。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 } icon: {

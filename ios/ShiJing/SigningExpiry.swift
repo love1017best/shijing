@@ -34,7 +34,7 @@ enum SigningExpiry {
         center.removePendingNotificationRequests(withIdentifiers: ["signing-expiry"])
         guard let date, case let fire = date.addingTimeInterval(-86400), fire > Date() else { return }
         let c = UNMutableNotificationContent()
-        c.title = "拾景明天就打不开了"
+        c.title = "签名明天到期，拾景无法启动"
         c.body = "免费签名 7 天到期（\(date.formatted(.dateTime.month().day().hour().minute()))）。连上电脑重新安装一次就能续上。"
         c.sound = .default
         // 点开这条通知时切到概览并推开「关于」（那里有签名日期和重装的说明）

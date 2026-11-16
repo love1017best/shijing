@@ -690,7 +690,7 @@ func (a *app) remoteRun(device string, allowDelete bool) error {
 		return errors.New(reason)
 	}
 	if !a.canRun() {
-		return errors.New("图库目录都无法访问，NAS 可能没有挂载")
+		return errors.New("图库目录都无法访问，图库可能没有挂载")
 	}
 	a.startRunWith(runOpts{noDelete: !allowDelete, from: device})
 	return nil

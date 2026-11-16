@@ -21,7 +21,7 @@ func (a *app) pathInput(c *ui.Context, value *string, label, dialogTitle string)
 
 func (a *app) settingsPage(c *ui.Context) {
 	t := c.Theme()
-	pageHeader(c, "设置", "改动会立即自动保存，下次运行生效。", nil)
+	pageHeader(c, "设置", "改动会自动保存，下次运行生效。", nil)
 	a.columns(c, 24, func() {
 		group(c, "输出", "",
 			func() {
@@ -30,7 +30,7 @@ func (a *app) settingsPage(c *ui.Context) {
 				})
 			},
 			func() {
-				settingRow(c, "存放方式", "复制占用磁盘空间但可以脱离图库使用；软链接省空间，但图库没挂载时壁纸会失效。", func(ui.Element) {
+				settingRow(c, "存放方式", "复制占磁盘空间，图库没挂载时壁纸照样能用；软链接省空间，但图库没挂载时壁纸就显示不出来了。", func(ui.Element) {
 					ui.Segmented(c, &a.modeIdx, "复制", "软链接")
 				})
 			})
@@ -95,9 +95,9 @@ func (a *app) settingsPage(c *ui.Context) {
 
 		group(c, "筛选", "只作用于「筛选 + 采样」目录。",
 			func() {
-				desc := "关闭后只是模拟运行：日志里列出哪些图片不合格，但不删除文件。"
+				desc := "关闭时只模拟运行：日志里列出哪些图片不合格，不删除文件。"
 				if a.cfg.DeleteDuringFilter {
-					desc = "已开启：不合格的原图会被直接删除，不可撤销。关闭后只模拟运行。"
+					desc = "已开启：不合格的原图会被直接删除，不可撤销。关闭时只模拟运行。"
 				}
 				settingRow(c, "删除不合格原图", desc, func(l ui.Element) {
 					if a.cfg.DeleteDuringFilter {
@@ -152,7 +152,7 @@ func (a *app) settingsPage(c *ui.Context) {
 func (a *app) archiveGroup(c *ui.Context) {
 	rows := []func(){
 		func() {
-			settingRow(c, "启用归档", "把每次选中的图片在图库旁边额外留一份链接，长期保留历史而不占双倍空间。优先硬链接，不支持时降级为软链接；每次运行前清空上一批。", func(l ui.Element) {
+			settingRow(c, "启用归档", "把每次选中的图片在图库旁边额外留一份链接，历史可以长期保留，硬链接不额外占空间。优先硬链接，不支持时降级为软链接；每次运行前清空上一批。", func(l ui.Element) {
 				ui.Switch(c, &a.cfg.ArchiveEnabled).LabelledBy(l)
 			})
 		},

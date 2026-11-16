@@ -279,7 +279,7 @@ extension View {
             Button("取消", role: .cancel) {}
         } message: { w in
             if session.offline {
-                Text("会从图库里删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销。现在连不上电脑，会先记下来，连上后在「设置 › 待补操作」里再确认一次才会删除。")
+                Text("会从图库里删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销。现在连不上电脑，会先记下来，连上后在「设置 › 待处理操作」里再确认一次才会删除。")
             } else {
                 Text("会从图库里删除 \(w.source ?? w.name)，并移出壁纸文件夹。删除不可撤销，会记进电脑上的删除记录。")
             }

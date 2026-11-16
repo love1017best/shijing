@@ -248,9 +248,9 @@ func (a *app) wallsSummary(list []string) string {
 	if len(a.walls.all) == 0 {
 		return ""
 	}
-	hint := "点一张看大图，右键整理。"
+	hint := "单击查看大图，右键打开菜单。"
 	if a.wallSelecting {
-		hint = "点格子勾选，选好后用下面的按钮一次移出。"
+		hint = "单击格子勾选，选好后用下面的按钮一起移出。"
 	}
 	if len(list) == len(a.walls.all) {
 		return fmt.Sprintf("壁纸文件夹里一共 %d 张，%s", len(list), hint)

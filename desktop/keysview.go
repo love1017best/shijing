@@ -14,11 +14,11 @@ func withKey(text, key string) string {
 	return text + "（" + key + "）"
 }
 
-// keysPage 是「快捷键」页：点右边的按键开始录制，按下新的组合就改好了（自动保存）。
+// keysPage 是「快捷键」页：点右边的按键开始录制，按下新的组合即可修改（自动保存）。
 func (a *app) keysPage(c *ui.Context) {
 	a.recordKey(c)
 	changed := len(a.cfg.Shortcuts) > 0
-	pageHeader(c, "快捷键", "点右边的按键，再按下新的组合键就改好了；Esc 取消录制。改动立即生效、自动保存。", func() {
+	pageHeader(c, "快捷键", "点右边的按键，按下新的组合键即可修改；Esc 取消录制。改完立即生效并自动保存。", func() {
 		iconButton(c, iconRotateCcw, "全部恢复默认", false).Disabled(!changed).OnClick(func() {
 			a.cfg.Shortcuts = nil
 			a.recording, a.keyErr = "", ""

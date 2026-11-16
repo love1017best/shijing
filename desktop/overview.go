@@ -47,7 +47,7 @@ func (a *app) hero(c *ui.Context) {
 	box := ui.Box(c).Height(236).Radius(16).Clip().Background(duskTop)
 	if a.walls.hero != nil && a.walls.heroPath != "" && !a.running {
 		// 横幅图也是壁纸文件夹里的一张：点空白处打开它的大图（按钮各管各的）
-		box.Label("横幅壁纸").Cursor(ui.CursorPointer).Tooltip(filepath.Base(a.walls.heroPath) + "（点击查看大图，右键更多操作）").
+		box.Label("横幅壁纸").Cursor(ui.CursorPointer).Tooltip(filepath.Base(a.walls.heroPath) + "（单击查看大图，右键打开菜单）").
 			ContextMenu(func(m *ui.Menu) { a.wallMenu(m, a.walls.heroPath) })
 		if box.Clicked() {
 			a.openPreviewOf(a.walls.heroPath)
@@ -80,7 +80,7 @@ func (a *app) hero(c *ui.Context) {
 				case strings.TrimSpace(a.cfg.DestDir) == "":
 					warn = "还没有设置壁纸文件夹，先到「设置」里选一个"
 				case n > 0 && n == len(dirs):
-					warn = "图库目录都没挂载，连上 NAS 后到「图库」里重新检查"
+					warn = "图库目录都没挂载，连上图库后到「图库」里重新检查"
 				case n > 0:
 					warn = fmt.Sprintf("%d 个目录未挂载，这次会跳过它们", n)
 				}
@@ -248,7 +248,7 @@ func (a *app) thumbStrip(c *ui.Context) {
 				continue // 还在解码
 			}
 			path := paths[i]
-			cell.Cursor(ui.CursorPointer).Tooltip(filepath.Base(path) + "（空格预览，右键更多操作）").Children(func() {
+			cell.Cursor(ui.CursorPointer).Tooltip(filepath.Base(path) + "（按空格预览，右键打开菜单）").Children(func() {
 				ui.Image(c, w.thumbs[path]).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 			})
 			if a.running {
@@ -335,7 +335,7 @@ func (a *app) statStrip(c *ui.Context) {
 		// 定时自动换（设置里的「自动换壁纸」）没打开时不占一格
 		if h := a.buildConfig().AutoRunHours; h > 0 {
 			cell(2, "自动换", autoRunLabel(h), "下一次 "+a.nextAutoRun().Format("1月2日 15:04"), t.TextMuted,
-				"应用开着时按这个间隔自动换一批（不删原图），在「设置 → 自动换壁纸」里修改或关闭")
+				"应用开着时按这个间隔自动换一批（不删原图），在「设置 › 自动换壁纸」里修改或关闭")
 		}
 
 		switch r := a.last; {

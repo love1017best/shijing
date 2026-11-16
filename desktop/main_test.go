@@ -331,7 +331,7 @@ func TestRunDisabledWhenAllUnmounted(t *testing.T) {
 	if info, ok := tt.AccessByRole(ui.RoleButton, "换一批壁纸"); !ok || !info.Disabled {
 		t.Error("目录都没挂载时不能运行")
 	}
-	if !tt.HasText("图库目录都没挂载，连上 NAS 后到「图库」里重新检查") {
+	if !tt.HasText("图库目录都没挂载，连上图库后到「图库」里重新检查") {
 		t.Errorf("横幅应说明原因: %q", tt.Texts())
 	}
 }
@@ -575,7 +575,7 @@ func TestAboutPage(t *testing.T) {
 	if !tt.HasText("v0.2.101") {
 		t.Errorf("应显示版本号: %q", tt.Texts())
 	}
-	click(t, tt, "数据目录 在 Finder 中显示")
+	click(t, tt, "数据文件夹 在 Finder 中显示")
 	if !slices.Equal(f.opened, []string{filepath.Dir(f.cfgPath)}) {
 		t.Errorf("应打开数据目录: %q", f.opened)
 	}

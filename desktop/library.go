@@ -15,7 +15,7 @@ func (a *app) libraryPage(c *ui.Context) {
 	})
 	a.columns(c, 26, func() {
 		a.dirSection(c, "filter", "筛选 + 采样", iconScissors,
-			"先删除竖屏、正方形、分辨率不足的图片，再参与采样。会直接删除原图，删除记录写在数据目录的删除日志里。", &a.filter)
+			"先删除竖屏、正方形、分辨率不足的图片，再参与采样。会直接删除原图，删除会记进「删除记录」。", &a.filter)
 	}, func() {
 		a.dirSection(c, "sample", "仅采样", iconHeart,
 			"不删除任何文件，采样时跳过不合格的图片。适合收藏夹这类不想动的目录。", &a.sample)
@@ -80,7 +80,7 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 			box.Children(func() {
 				ui.Column(c).Height(84).Center().Gap(4).Children(func() {
 					ui.Text(c, "还没有目录").FontSize(13).TextColor(t.TextMuted)
-					muted(c, "点右上角的「添加目录…」，或者把文件夹拖到这里")
+					muted(c, "单击右上角的「添加目录…」，或者把文件夹拖到这里")
 				})
 			})
 			return
@@ -131,7 +131,7 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 			}).Height(listHeight(len(dirs), parent == "" || len(dirs) == 1)).Padding(4, 0)
 		})
 		if len(dirs) > 1 {
-			muted(c, "按住 ⌘ 点击可以多选；右键可以在 Finder 中打开或移除；也可以把文件夹拖进来添加").Padding(0, 4)
+			muted(c, "按住 ⌘ 单击可以多选。右键可以在 Finder 中打开或移除，文件夹也可以直接拖进来。").Padding(0, 4)
 		}
 	})
 }

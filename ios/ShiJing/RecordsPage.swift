@@ -254,7 +254,7 @@ struct LogView: View {
 
     private func load() async {
         let r = await loadRecord(session, .log,
-                                 offlineNote: "现在连不上电脑，手机上还没存过日志。连上电脑后会自动存一份，断线时就能看。") {
+                                 offlineNote: "现在连不上电脑，手机上还没存过日志。连上电脑后会自动存一份，以后断线也能看。") {
             try await $0.log()
         }
         lines = r.value
@@ -407,7 +407,7 @@ struct DeletionsView: View {
         if let f = list.filter, let m = list.manual {
             head = "记录里筛选删除 \(f) 张、手动删除 \(m) 张。"
         }
-        return head + "筛选删除是竖屏、接近正方形、分辨率不够的图；手动删除是在预览或手机上点「删除图库里的原图」的。"
+        return head + "筛选删除是竖屏、接近正方形、分辨率不够的图；手动删除是在预览里或手机上点「删除图库里的原图」删掉的。"
     }
 
     /// 把标签的选择套到记录上：没选标签就全看，选了的类型都留下。
@@ -429,7 +429,7 @@ struct DeletionsView: View {
 
     private func load() async {
         let r = await loadRecord(session, .deletions,
-                                 offlineNote: "现在连不上电脑，手机上还没存过删除记录。连上电脑后会自动存一份，断线时就能看。") {
+                                 offlineNote: "现在连不上电脑，手机上还没存过删除记录。连上电脑后会自动存一份，以后断线也能看。") {
             try await $0.deletions()
         }
         list = r.value
@@ -481,7 +481,7 @@ struct ExcludedView: View {
                         } footer: {
                             Text(session.offline
                                  ? "离线时只能查看，连上电脑后再恢复。"
-                                 : "恢复后，以后换一批时这些原图又可能被选上。左滑一张可以单独恢复。")
+                                 : "恢复以后，换一批时这些原图又可能被选上。左滑一张可以单独恢复。")
                         }
                         // 「全部恢复」放在列表末尾：原来在导航栏右下角，三栏并排后 tab 页的 toolbar
                         // 会叠到别的栏上，放在这里也更容易看见
@@ -512,7 +512,7 @@ struct ExcludedView: View {
 
     private func load() async {
         let r = await loadRecord(session, .excluded,
-                                 offlineNote: "现在连不上电脑，手机上还没存过「不再选」名单。连上电脑后会自动存一份，断线时就能看。") {
+                                 offlineNote: "现在连不上电脑，手机上还没存过「不再选」名单。连上电脑后会自动存一份，以后断线也能看。") {
             try await $0.excluded()
         }
         items = r.value

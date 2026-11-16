@@ -51,8 +51,8 @@ func (a *app) aboutPage(c *ui.Context) {
 		infoRow(iconUser, "作者", author, nil),
 		infoRow(iconTag, "版本", a.versionLabel(), nil),
 		infoRow(iconCode, "构建", "Go + MyGo 原生界面", nil),
-		infoRow(iconFolder, "数据目录", tildify(dataDir), func() {
-			iconButton(c, iconExternal, "在 Finder 中显示", false).Label("数据目录 在 Finder 中显示").
+		infoRow(iconFolder, "数据文件夹", tildify(dataDir), func() {
+			iconButton(c, iconExternal, "在 Finder 中显示", false).Label("数据文件夹 在 Finder 中显示").
 				OnClick(func() { a.openPath(dataDir) })
 		}),
 	)

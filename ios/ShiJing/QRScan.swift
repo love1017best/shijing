@@ -170,7 +170,7 @@ private final class ScannerController: UIViewController, AVCaptureMetadataOutput
         let label = UILabel()
         label.text = camera
             ? "没有相机权限。到「设置 › 隐私与安全性 › 相机」里允许拾景使用相机，或者回电脑上用手动配对码。"
-            : "这台设备用不了相机。回电脑上用手动配对码吧。"
+            : "这台设备没有可用的相机。可以回电脑上用手动配对码。"
         label.textColor = .white
         label.numberOfLines = 0
         label.textAlignment = .center

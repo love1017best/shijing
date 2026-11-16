@@ -48,7 +48,7 @@ final class RemoteSession {
     private var lastSnapshotSave = Date.distantPast
     /// 有一轮壁纸列表正在拉：状态推得很密时别每次推送都再发一个请求
     private var refreshingWalls = false
-    /// 离线时点的「移出 / 不再选」，连上电脑后自动补上（存在 UserDefaults 里，按 Mac 分开）
+    /// 离线时点的「移出 / 不再选」，连上电脑后自动处理（存在 UserDefaults 里，按 Mac 分开）
     internal(set) var queued: [OfflineAction] = []
     var flushing = false
 
@@ -266,7 +266,7 @@ final class RemoteSession {
         if let e = error as? URLError {
             switch e.code {
             case .timedOut, .cannotConnectToHost, .networkConnectionLost, .cannotFindHost:
-                return "连不上这台 Mac：确认 Mac 没有睡眠、拾景开着并打开了「允许手机遥控」，手机和 Mac 在同一个网络里。"
+                return "连不上这台 Mac：确认 Mac 没有睡眠、拾景正在运行、设置里打开了「允许手机遥控」，手机和 Mac 在同一个网络里。"
             case .notConnectedToInternet:
                 return "手机没有连上网络。"
             default:
@@ -412,7 +412,7 @@ final class RemoteSession {
         guard live || cached != nil else {
             switch connection {
             case .connecting:
-                actionError = "还在连电脑，连上后再试一次。"
+                actionError = "正在连接电脑，连上后再试一次。"
             case .offline:
                 actionError = "连不上电脑，这张原图也没存在手机上。可以在「设置 › 离线」打开「保存原图」并补齐，或者连上电脑再存。"
             case .unpaired(let msg):
@@ -555,8 +555,8 @@ final class RemoteSession {
     }
 
     /// 删除图库里的原图（界面上已经二次确认过）。离线时只登记「想删」，
-    /// 连上电脑后还要在「设置 › 待补操作」里再确认一次才真的删——不可撤销，
-    /// 不能像「移出」「不再选」那样自动补上。
+    /// 连上电脑后还要在「设置 › 待处理操作」里再确认一次才真的删——不可撤销，
+    /// 不能像「移出」「不再选」那样自动处理。
     @discardableResult
     func deleteOriginal(_ w: Wallpaper) async -> Bool {
         guard connection == .live else {

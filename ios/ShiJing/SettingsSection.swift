@@ -28,7 +28,7 @@ struct StatusSection: View {
 }
 
 /// 「设置」页：分两类——「电脑上的拾景」（改的是电脑，改完电脑上的设置页同步变、自动保存）
-/// 和「这台手机」（离线缓存、待补操作这些手机自己的东西）。顶部用分段控件切换，选过哪一类会记住。
+/// 和「这台手机」（离线缓存、待处理操作这些手机自己的东西）。顶部用分段控件切换，选过哪一类会记住。
 /// 旧版桌面端不推 settings，电脑那一类就只读显示。
 struct SettingsPage: View {
     let session: RemoteSession
@@ -48,7 +48,7 @@ struct SettingsPage: View {
             if let state = session.state {
                 #if DEBUG
                 // 截图用：-demoOfflineCache 只摆离线这一组（设置页太长，模拟器里不好滚到最下面）；
-                // -demoQueue 只摆「待补操作」这一组（点进去是专门的页面）；
+                // -demoQueue 只摆「待处理操作」这一组（点进去是专门的页面）；
                 // -demoLibrary 只摆「图库 / 待删除」两组（配 -demoPending 看电脑上排队的删除）
                 if let demo = demoPage(state) {
                     demo
@@ -194,7 +194,7 @@ struct SettingsPage: View {
             Text("版本")
         } footer: {
             if !state.version.isEmpty, state.version != AppVersion.short {
-                Text("两边版本不一致，有的功能可能用不了，最好都升到最新。")
+                Text("两边版本不一致，有的功能可能用不了，建议两边都升级到最新版本。")
             }
         }
         if let expiry = SigningExpiry.text {
@@ -203,7 +203,7 @@ struct SettingsPage: View {
             } header: {
                 Text(ThisDevice.label)
             } footer: {
-                Text("免费签名只有 7 天，到期后拾景就打不开了。连上电脑重新安装一次就能续上，设置和配对都会保留。")
+                Text("免费签名 7 天到期，到期后拾景无法启动。连上电脑重新安装一次就能续上，设置和配对都会保留。")
             }
         }
     }
@@ -212,7 +212,7 @@ struct SettingsPage: View {
         state.version.isEmpty ? "还没连上" : "v" + state.version
     }
 
-    /// 这台手机：离线缓存、离线时记下的待补操作，还有两边的版本。
+    /// 这台手机：离线缓存、离线时记下的待处理操作，还有两边的版本。
     @ViewBuilder
     private func phoneContent(_ state: RemoteState) -> some View {
         if !session.queued.isEmpty { offlineQueueLink }
@@ -283,7 +283,7 @@ struct SettingsPage: View {
                 Label {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("现在连不上电脑，设置只能查看").font(.subheadline.bold())
-                        Text("改设置、换一批都要等连上电脑。离线时记下的「移出」「不再选」连上后会自动补上；「删除原图」连上后还要再确认一次。")
+                        Text("改设置、换一批都要等连上电脑。离线时记下的「移出」「不再选」连上后会自动处理；「删除原图」连上后还要再确认一次。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 } icon: {
@@ -310,7 +310,7 @@ struct SettingsPage: View {
         } header: {
             Text("输出")
         } footer: {
-            Text("复制：每张图在壁纸文件夹里存一份，占空间，但图库没连上也能看。\n软链接：只存指向原图的链接，省空间，图库没连上时打不开。")
+            Text("复制：每张图在壁纸文件夹里存一份，占空间；图库没连上时照样能看。\n软链接：只存指向原图的链接，省空间；图库没连上时这些图无法显示。")
         }
     }
 
@@ -513,12 +513,12 @@ struct SettingsPage: View {
                         if deletes > 0 {
                             Image(systemName: "trash").foregroundStyle(.red)
                         }
-                        Text("待补操作")
+                        Text("待处理操作")
                     }
                 }
             }
         } footer: {
-            Text("离线时记下的整理：「移出」「不再选」连上电脑后自动补上；「删除原图」不可撤销，连上后还要逐张（或全部）确认才会删除。")
+            Text("离线时记下的整理：「移出」「不再选」连上电脑后自动处理；「删除原图」不可撤销，连上后还要逐张（或全部）确认才会删除。")
         }
     }
 
@@ -601,7 +601,7 @@ struct LibraryDirsView: View {
                         }
                         .disabled(session.connection != .live)
                     } footer: {
-                        Text("挂载状态由电脑检查。点「重新检查挂载」后，电脑会重新检查这些目录，结果再返回手机。目录只能在电脑上的「图库」页增删。")
+                        Text("挂载状态由电脑检查。点「重新检查挂载」后，电脑会重新检查这些目录，再把结果发回来。目录只能在电脑上的「图库」页增删。")
                     }
                 }
                 .contentWidthCap(max: 680)
@@ -759,7 +759,7 @@ private struct OfflineCacheSection: View {
         } header: {
             Text("离线")
         } footer: {
-            Text("连不上电脑时，概览和壁纸显示的是上次同步的内容，换一批后不在这批里的图会删掉。打开「保存原图」会把图库里的原文件也存下来，离线时能存到相册、分享原图。到了「缓存上限」就不再往后存。")
+            Text("连不上电脑时，概览和壁纸显示的是上次同步的内容，换一批后不在这批里的图会删掉。打开「保存原图」会把图库里的原文件也存下来，离线时能存到相册、分享原图。存到「缓存上限」为止。")
         }
     }
 

@@ -65,12 +65,12 @@ extension RemoteSession {
         }
         s.wallsRev = "demo"
         s.heroName = s.walls.first?.name // 和真的桌面一样给一张横幅图
-        // 截图用：-demoQueue / -demoQueuePage 在连着的状态下摆出「待补操作」（含待确认删除原图）和概览上的提醒
+        // 截图用：-demoQueue / -demoQueuePage 在连着的状态下摆出「待处理操作」（含待确认删除原图）和概览上的提醒
         if ProcessInfo.processInfo.arguments.contains("-demoQueue")
             || ProcessInfo.processInfo.arguments.contains("-demoQueuePage") { s.seedQueuedForDemo() }
         // 截图用：-demo -demoOffline 显示「离线，显示的是上次同步的壁纸」的样子
         if ProcessInfo.processInfo.arguments.contains("-demoOffline") {
-            s.connection = .offline("连不上这台 Mac：确认 Mac 没有睡眠、拾景开着并打开了「允许手机遥控」，手机和 Mac 在同一个网络里。")
+            s.connection = .offline("连不上这台 Mac：确认 Mac 没有睡眠、拾景正在运行、设置里打开了「允许手机遥控」，手机和 Mac 在同一个网络里。")
             s.snapshotAt = Date().addingTimeInterval(-3 * 3600 - 2400)
             // 顺便把演示图写进磁盘缓存，让「离线也能看图」这条路径真的走一遍（读的是磁盘，不是内存里的演示图）
             ImageStore.shared.seedDiskCache(names: s.walls.prefix(24).map(\.name), hero: s.heroName)

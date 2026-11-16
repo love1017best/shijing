@@ -5,7 +5,7 @@ import Foundation
 extension RemoteSession {
     // MARK: 离线时记下的整理（连上后补上）
 
-    /// 离线时点的一张整理操作：「移出」「不再选」连上后自动补上；
+    /// 离线时点的一张整理操作：「移出」「不再选」连上后自动处理；
     /// 「删除原图」不可撤销，连上后还要用户再确认一次才真的删。
     /// `wall` / `index` 用来在取消时把那张放回列表原来的位置（旧版本记下的没有，只能取消、放不回去）。
     struct OfflineAction: Codable, Identifiable, Equatable {
@@ -33,7 +33,7 @@ extension RemoteSession {
     }
 
     #if DEBUG
-    /// 截图用（-demo -demoOffline）：塞三条离线操作，看提示、「待补操作」和待确认删除是什么样
+    /// 截图用（-demo -demoOffline）：塞三条离线操作，看提示、「待处理操作」和待确认删除是什么样
     func seedQueuedForDemo() {
         guard queued.isEmpty, walls.count > 7 else { return }
         let r = walls[2]
@@ -80,9 +80,9 @@ extension RemoteSession {
         walls.removeAll { $0.name == w.name }
         remember(wallsChanged: true)
         switch kind {
-        case .exclude: showNotice("已记下：连上电脑后移出并不再选它")
-        case .remove: showNotice("已记下：连上电脑后移出")
-        case .delete: showNotice("已记下：连上电脑后确认再删除原图")
+        case .exclude: showNotice("已记下，连上电脑后移出并不再选它。")
+        case .remove: showNotice("已记下，连上电脑后移出。")
+        case .delete: showNotice("已记下，连上电脑后确认再删除原图。")
         }
     }
 
@@ -122,7 +122,7 @@ extension RemoteSession {
 
     /// 连上以后把离线时记下的「移出」「不再选」补上。
     ///
-    /// 「删除原图」不在这里补：不可撤销，要等用户在「待补操作」里确认（confirmQueuedDelete）。
+    /// 「删除原图」不在这里补：不可撤销，要等用户在「待处理操作」里确认（confirmQueuedDelete）。
     /// 注意不能拿手机上的列表判断「那张还在不在这一批」：离线记下时已经把它从本地列表去掉了，
     /// 所以先强制拉一份电脑上现在的列表——还在这一批的「不再选」照在线的做法走移出 + 加名单，
     /// 已经换掉的就只按原图路径加进名单。「移出」直接调接口，电脑返回 409（已经不在这批）才算过期。
@@ -134,7 +134,7 @@ extension RemoteSession {
         guard await refreshWalls(force: true) else { return }
         var applied = 0
         var expired = 0
-        // 一条一条消费：补之前先从队列里摘掉（设置页的「待补操作」跟着变），补不成再放回原处。
+        // 一条一条消费：处理之前先从队列里摘掉（设置页的「待处理操作」跟着变），处理不成再放回原处。
         // 不能开头拍一份快照、结束时整体写回——这一路都在 await，用户可能正在点「取消」，
         // 那样被取消的条目会被写回队列，或者本地放回了电脑上已经移出的图。
         while let i = queued.firstIndex(where: { $0.kind != .delete }) {
@@ -203,20 +203,20 @@ extension RemoteSession {
         }
         var msg = ""
         if applied == 0, expired > 0 {
-            msg = "\(expired) 项离线操作已经过期（那一批壁纸换掉了）"
+            msg = "\(expired) 项离线操作已经失效，那一批壁纸换掉了"
         } else if applied > 0 {
-            msg = expired > 0 ? "已补上 \(applied) 项离线操作，\(expired) 项已经过期" : "已补上 \(applied) 项离线操作"
+            msg = expired > 0 ? "已处理 \(applied) 项离线操作，\(expired) 项已经失效" : "已处理 \(applied) 项离线操作"
         }
-        // 删除原图不自动补：提醒去「待补操作」里确认
+        // 删除原图不自动补：提醒去「待处理操作」里确认
         if !queuedDeletes.isEmpty {
-            msg += (msg.isEmpty ? "" : "；") + "\(queuedDeletes.count) 张原图等你确认删除"
+            msg += (msg.isEmpty ? "" : "；") + "有 \(queuedDeletes.count) 张原图等你确认删除"
         }
         if !msg.isEmpty { showNotice(msg) }
     }
 
     enum QueuedDeleteResult { case deleted, queued, expired, cancelled }
 
-    /// 用户在「待补操作」里确认了离线时记下的「删除原图」：删之前会先拉一份电脑上现在的列表。
+    /// 用户在「待处理操作」里确认了离线时记下的「删除原图」：删之前会先拉一份电脑上现在的列表。
     /// 那张已经不在这一批里的：接口只能按壁纸名删，没法再删图库里的原图，只能告诉用户去电脑上删。
     /// `refresh` 为 false 时先不拉列表（批量确认时外面已经拉过一次）。
     @discardableResult

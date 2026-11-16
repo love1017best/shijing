@@ -334,7 +334,7 @@ func (a *app) willDelete() bool {
 // deleteNotice 是运行前确认删除原图时的说明（桌面的确认框和手机上的确认都用它）。
 func (a *app) deleteNotice() string {
 	return fmt.Sprintf("会先检查「筛选 + 采样」里的 %d 个目录，把竖屏、正方形和低于 %d×%d 的图片从图库里直接删除，不可撤销。"+
-		"删除记录写在数据目录的删除日志里。", len(a.cfg.FilterAndSampleDirs), int(a.minW), int(a.minH))
+		"删除会记进「删除记录」。", len(a.cfg.FilterAndSampleDirs), int(a.minW), int(a.minH))
 }
 
 // stopRun 请求停止：筛选在文件夹之间停，复制时不再开始新的图片。

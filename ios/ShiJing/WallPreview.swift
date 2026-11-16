@@ -832,7 +832,7 @@ private struct PreviewPage: View {
                 VStack(spacing: 8) {
                     Image(systemName: session.offline ? "icloud.slash" : "photo.badge.exclamationmark")
                         .font(.largeTitle)
-                    Text(session.offline ? "这张还没缓存" : "读不了这张图").font(.headline)
+                    Text(session.offline ? "这张还没缓存" : "无法读取这张图片").font(.headline)
                     if session.offline {
                         Text("连上电脑后整批图片会自动存到手机上").font(.footnote).foregroundStyle(.secondary)
                     }
