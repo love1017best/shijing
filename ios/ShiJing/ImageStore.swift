@@ -33,7 +33,7 @@ final class ImageStore {
 
     // 后台缓存的状态（设置页显示）
     private(set) var prefetching = false
-    /// 这一批已经存下来的大图张数（也就是「离线可看」的张数）
+    /// 这一批已经存下来的大图张数（设置页「大图缓存」那个数）
     private(set) var prefetchDone = 0
     /// 这一批的总张数（大图和原图各算这么多，不翻倍——用户按「一批多少张」理解）
     private(set) var prefetchTotal = 0

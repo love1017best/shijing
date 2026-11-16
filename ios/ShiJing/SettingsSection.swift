@@ -727,7 +727,7 @@ private struct OfflineCacheSection: View {
     var body: some View {
         Section {
             Group {
-                LabeledContent("离线可看") {
+                LabeledContent("大图缓存") {
                     Text(total > 0 ? "\(viewable) / \(total) 张" : "—").foregroundStyle(.secondary)
                 }
 
