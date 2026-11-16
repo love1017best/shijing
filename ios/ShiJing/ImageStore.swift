@@ -300,39 +300,53 @@ final class ImageStore {
         }
     }
 
-    /// 设置页、补齐要的磁盘统计：列一次目录、每张图 stat 一次，四个数一起算出来。
+    /// 某一档缓存的统计。
+    struct KindUsage {
+        var bytes: Int64 = 0 // 这一档占了多少
+        var count = 0        // 目录里有几个文件
+        var inBatch = 0      // 这一批里有多少张有这一档
+    }
+
+    /// 设置页、补齐要的磁盘统计：列一次目录、每张图 stat 一次，各档一起算出来。
     /// （以前分别调 diskUsage / cachedSize / viewableCount / cachedCount，一次刷新要列四遍目录）
     struct Usage {
-        var used: Int64 = 0      // 整个缓存目录占了多少
-        var originals: Int64 = 0 // 存下的原图占多少
-        var originalCount = 0
-        var viewable = 0 // 这一批里离线能看到大图的张数
+        var used: Int64 = 0 // 整个缓存目录占了多少
+        var viewable = 0    // 这一批里离线能看到大图的张数（有大图或原图都算）
+        var kinds: [ImageKind: KindUsage] = [:]
+
+        func data(_ kind: ImageKind) -> KindUsage { kinds[kind] ?? KindUsage() }
     }
 
     nonisolated static func usage(names: [String]) -> Usage {
         guard let dir = diskDir else { return Usage() }
         let items = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey])) ?? []
-        let imagePrefix = ImageKind.image.cachePrefix + "-"
-        let originalPrefix = ImageKind.original.cachePrefix + "-"
         var u = Usage()
-        var images = Set<String>()
-        var originals = Set<String>()
+        var present: [ImageKind: Set<String>] = [:]
         for f in items {
             let n = f.lastPathComponent
             let size = Int64((try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
             u.used += size
-            if n.hasPrefix(originalPrefix) {
-                u.originals += size
-                u.originalCount += 1
-                originals.insert(n)
-            } else if n.hasPrefix(imagePrefix) {
-                images.insert(n)
-            }
+            guard let kind = ImageKind.allCases.first(where: { n.hasPrefix($0.cachePrefix + "-") }) else { continue }
+            var d = u.kinds[kind] ?? KindUsage()
+            d.bytes += size
+            d.count += 1
+            u.kinds[kind] = d
+            present[kind, default: []].insert(n)
         }
-        // 这一批里离线能看到大图的：有 2732 宽的预览图或者原图都算（原图能本地缩出来）
+        // 这一批里每档存了多少张（文件名对得上才算）
+        let imageName = ImageKind.image.cachePrefix + "-"
+        let originalName = ImageKind.original.cachePrefix + "-"
         for name in names {
             let s = safeName(name)
-            if images.contains(imagePrefix + s) || originals.contains(originalPrefix + s) { u.viewable += 1 }
+            for kind in ImageKind.allCases where present[kind]?.contains(kind.cachePrefix + "-" + s) == true {
+                var d = u.kinds[kind] ?? KindUsage()
+                d.inBatch += 1
+                u.kinds[kind] = d
+            }
+            // 离线能看到大图的：有 2732 宽的预览图或者原图都算（原图能本地缩出来）
+            if present[.image]?.contains(imageName + s) == true || present[.original]?.contains(originalName + s) == true {
+                u.viewable += 1
+            }
         }
         return u
     }
@@ -386,6 +400,12 @@ final class ImageStore {
         if let hero, let img = Self.demoImage(hero, large: true),
            let data = img.jpegData(compressionQuality: 0.7) {
             Self.writeDisk(hero, .hero, data)
+        }
+        // 设置 › 离线 › 大图那一行：只种几张，看有数字的样子
+        for n in names.prefix(names.count / 3) {
+            guard let img = Self.demoImage(n, large: true),
+                  let data = img.jpegData(compressionQuality: 0.8) else { continue }
+            Self.writeDisk(n, .image, data)
         }
         // 设置 › 离线 › 原图那一行：种一半的「原图」，看有数字的样子
         for n in names.prefix(names.count / 2) {

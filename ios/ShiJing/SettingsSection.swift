@@ -6,14 +6,15 @@ enum ThisDevice {
     static var label: String { "这台 " + UIDevice.current.localizedModel }
 }
 
-/// 分组标题旁的问号：标题连问号整行都能点，点一下弹出说明。功能说明都收在这里，列表里只留标题和设置项
+/// 标题旁的问号：标题连问号整行都能点，点一下弹出说明。功能说明都收在这里，列表里只留标题和设置项
 /// （和电脑端设置页的小问号一致，v0.4.6 起）。动态的状态（监听端口、下次运行、版本不一致提醒）仍然直接显示。
-struct HelpHeader: View {
+/// 分组标题和单个设置项共用这一个组件，字号跟随所在位置。
+struct HelpLabel: View {
     let title: String
     let help: String
     @State private var open: Bool
 
-    /// 截图用：启动参数 `-demoHelp <分组标题>` 让那一组说明直接展开（模拟器里点按钮不可靠）
+    /// 截图用：启动参数 `-demoHelp <标题>` 让那一项说明直接展开（模拟器里点按钮不可靠）
     init(_ title: String, _ help: String) {
         self.title = title
         self.help = help
@@ -44,6 +45,9 @@ struct HelpHeader: View {
         .helpPopover(isPresented: $open, text: help)
     }
 }
+
+/// 分组标题旁的问号：和设置项用的是同一个组件。
+typealias HelpHeader = HelpLabel
 
 /// 小问号图标：跟随分组标题的次要颜色，别用按钮的橙色。
 struct HelpIcon: View {
@@ -714,22 +718,23 @@ enum AppVersion {
 /// 一个队列、一个上限：超过「缓存上限」就不再往后存。这些都是手机本地的设置，不用连电脑也能改。
 private struct OfflineCacheSection: View {
     let session: RemoteSession
-    @State private var used: Int64?
-    @State private var originalSize: Int64?
-    @State private var originalCount = 0
-    @State private var viewable = 0
+    @State private var usage: ImageStore.Usage?
     @AppStorage(ImageStore.cacheLimitKey) private var limitGB = ImageStore.defaultCacheLimitGB
     @AppStorage(ImageStore.cacheOriginalsKey) private var keepOriginals = false
 
     private var store: ImageStore { .shared }
     private var total: Int { session.walls.count }
+    /// 这一批里离线能看到大图的张数（有大图或原图都算）
+    private var viewable: Int { usage?.viewable ?? 0 }
 
     var body: some View {
         Section {
             Group {
-                LabeledContent("大图缓存") {
-                    Text(total > 0 ? "\(viewable) / \(total) 张" : "—").foregroundStyle(.secondary)
-                }
+                // 四档缓存各一行：这一批里存了多少张 / 这一批共多少张 · 占多少
+                cacheRow(.thumb, "缩略图缓存", "网格里每一格用的小图，宽 360 像素。")
+                cacheRow(.hero, "横幅缓存", "概览顶部的横幅图，宽 1600 像素；每批只存一张。")
+                cacheRow(.image, "大图缓存", "打开大图时用的那张，宽 2732 像素，铺满展开的 iPhone Duo 这类大屏；存了原图时也可以从原图在本地缩小，不再下载。")
+                cacheRow(.original, "原图缓存", "图库里的原文件，和电脑上那份一样大；打开「保存原图」才会存，离线时可以存到相册、分享原图。")
 
                 HStack {
                     if store.prefetching { ProgressView().controlSize(.small) }
@@ -763,13 +768,6 @@ private struct OfflineCacheSection: View {
                         refresh()
                     }
 
-                // 开关关掉后已经存下的原图还在手机上，也要能看见
-                if keepOriginals || originalCount > 0 {
-                    LabeledContent("原图") {
-                        Text(detail(originalCount, originalSize)).foregroundStyle(.secondary)
-                    }
-                }
-
                 Stepper(value: $limitGB, in: 1...50) {
                     Text("缓存上限 \(limitGB) GB")
                 }
@@ -781,13 +779,13 @@ private struct OfflineCacheSection: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("已用 \(bytes(used)) / \(limitGB) GB")
+                        Text("已用 \(bytes(usage?.used)) / \(limitGB) GB")
                         Spacer()
                         Button("清除") {
                             store.clear()
                             refresh()
                         }
-                        .disabled((used ?? 0) == 0)
+                        .disabled((usage?.used ?? 0) == 0)
                     }
                     ProgressView(value: fraction)
                 }
@@ -806,6 +804,25 @@ private struct OfflineCacheSection: View {
         }
     }
 
+    /// 一档缓存一行：标签旁的问号说明这一档多大、做什么用。
+    private func cacheRow(_ kind: ImageKind, _ title: String, _ help: String) -> some View {
+        LabeledContent {
+            Text(cacheDetail(kind)).foregroundStyle(.secondary)
+        } label: {
+            HelpLabel(title, help)
+        }
+    }
+
+    private func cacheDetail(_ kind: ImageKind) -> String {
+        guard let usage else { return "正在统计…" }
+        let d = usage.data(kind)
+        let size = bytes(d.bytes)
+        // 横幅每批只有一张，写「1 / 1」反而怪
+        if kind == .hero { return "\(d.count) 张 · \(size)" }
+        guard total > 0 else { return "—" }
+        return "\(d.inBatch) / \(total) 张 · \(size)"
+    }
+
     private var statusText: String {
         if store.prefetching {
             // 大图存完再存原图，两段各按「这一批多少张」算，别把两个数加起来（400 张的批次写 800 会让人以为存多了）
@@ -821,13 +838,8 @@ private struct OfflineCacheSection: View {
     }
 
     private var fraction: Double {
-        guard limitGB > 0, let used, used > 0 else { return 0 }
+        guard limitGB > 0, let used = usage?.used, used > 0 else { return 0 }
         return min(1, Double(used) / Double(limitGB * 1_000_000_000))
-    }
-
-    private func detail(_ count: Int, _ size: Int64?) -> String {
-        guard let size else { return "正在统计…" }
-        return "\(count) / \(total) 张 · \(bytes(size))"
     }
 
     private func bytes(_ n: Int64?) -> String {
@@ -838,14 +850,10 @@ private struct OfflineCacheSection: View {
     private func refresh() {
         let names = session.walls.map(\.name)
         Task {
-            // 一次量完：列一遍目录就有四个数，不用列四遍
-            let u = await Task.detached(priority: .utility) {
+            // 一次量完：列一遍目录就有各档的张数和大小，不用一档列一遍
+            usage = await Task.detached(priority: .utility) {
                 ImageStore.usage(names: names)
             }.value
-            used = u.used
-            originalSize = u.originals
-            viewable = u.viewable
-            originalCount = u.originalCount
         }
     }
 }
