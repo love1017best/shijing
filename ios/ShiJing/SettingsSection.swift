@@ -6,17 +6,17 @@ enum ThisDevice {
     static var label: String { "这台 " + UIDevice.current.localizedModel }
 }
 
-/// 分组标题旁边的问号：点一下弹出说明。功能说明都收在这里，列表里只留标题和设置项
+/// 分组标题旁的问号：标题连问号整行都能点，点一下弹出说明。功能说明都收在这里，列表里只留标题和设置项
 /// （和电脑端设置页的小问号一致，v0.4.6 起）。动态的状态（监听端口、下次运行、版本不一致提醒）仍然直接显示。
-struct SectionHelp: View {
-    let text: String
+struct HelpHeader: View {
     let title: String
-    /// 截图用：启动参数 `-demoHelp <分组标题>` 让那一组问号直接展开（模拟器里点按钮不可靠）
+    let help: String
     @State private var open: Bool
 
-    init(text: String, title: String) {
-        self.text = text
+    /// 截图用：启动参数 `-demoHelp <分组标题>` 让那一组说明直接展开（模拟器里点按钮不可靠）
+    init(_ title: String, _ help: String) {
         self.title = title
+        self.help = help
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "-demoHelp"), i + 1 < args.count, args[i + 1] == title {
@@ -30,39 +30,27 @@ struct SectionHelp: View {
     }
 
     var body: some View {
-        Button { open = true } label: {
+        HStack(spacing: 6) {
+            Text(title)
             Image(systemName: "questionmark.circle")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("「\(title)」的说明")
+        // 整行都能点：问号只有十几 pt，单点图标不好按中
+        .contentShape(Rectangle())
+        .onTapGesture { open = true }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title)，点按查看说明")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { open = true }
         .popover(isPresented: $open) {
-            Text(text)
+            Text(help)
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(16)
                 // 给定宽度，文字才能在气泡里正常换行、按行数撑高（只给 maxWidth 时会被截成两行）
                 .frame(width: 280, alignment: .leading)
                 .presentationCompactAdaptation(.popover)
-        }
-    }
-}
-
-/// 分组标题 + 问号说明。
-struct HelpHeader: View {
-    let title: String
-    let help: String
-
-    init(_ title: String, _ help: String) {
-        self.title = title
-        self.help = help
-    }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(title)
-            SectionHelp(text: help, title: title)
         }
     }
 }
