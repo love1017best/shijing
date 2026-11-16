@@ -4,9 +4,46 @@ extension View {
     /// 连接的异常状态（正在连接 / 重连中 / 配对失效）才在右上角显示徽标；正常连接时不占位置。
     func connectionToolbar(_ session: RemoteSession) -> some View {
         toolbar {
-            if session.connection != .live {
+            if session.offline {
                 ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
             }
+        }
+    }
+}
+
+/// 「图标 + 粗标题 + 灰色说明」的提醒行：概览的离线 / 排队 / 待确认 / 签名到期，
+/// 设置页的「仅可查看」、图库目录页的「上次同步」都用它，间距和字号只写一份。
+struct NoticeRow: View {
+    let icon: String
+    let title: String
+    /// 说明分开传，别拼成一整段：离线提示卡要保持三行（v0.3.172）
+    var details: [String]
+    var color: Color = .orange
+
+    init(icon: String, title: String, detail: String, color: Color = .orange) {
+        self.icon = icon
+        self.title = title
+        details = [detail]
+        self.color = color
+    }
+
+    init(icon: String, title: String, details: [String], color: Color = .orange) {
+        self.icon = icon
+        self.title = title
+        self.details = details
+        self.color = color
+    }
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.subheadline.bold())
+                ForEach(details.indices, id: \.self) { i in
+                    Text(details[i]).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        } icon: {
+            Image(systemName: icon).foregroundStyle(color)
         }
     }
 }

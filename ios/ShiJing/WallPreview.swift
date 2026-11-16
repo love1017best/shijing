@@ -661,9 +661,7 @@ struct WallPreview: View {
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon).font(.system(size: 20, weight: .semibold))
-                .frame(width: size, height: size)
-                .glassBackground(in: Circle(), interactive: true)
-                .contentShape(Circle())
+                .glassCircle(size: size)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -688,9 +686,7 @@ struct WallPreview: View {
             kind.perform(session, w, confirmDelete: $confirmDelete)
         } label: {
             actionIcon(kind, w)
-                .frame(width: size, height: size)
-                .glassBackground(in: Circle(), interactive: true)
-                .contentShape(Circle())
+                .glassCircle(size: size)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)

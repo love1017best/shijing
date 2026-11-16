@@ -277,6 +277,18 @@ final class RemoteSession {
         return error.localizedDescription
     }
 
+    /// 一次请求失败：令牌失效就转「未配对」；其余弹提示，网络层失败立刻转离线。
+    /// 会话里每个请求、视图层自己发请求的地方都调它，别各抄一份。
+    /// `showMessage` 为 false 时只改连接状态（页面自己有行内错误，或者后台刷新不想打扰用户）。
+    func handleRequestError(_ error: Error, showMessage: Bool = true) {
+        if case APIError.unauthorized(let msg) = error {
+            connection = .unpaired(msg)
+            return
+        }
+        if showMessage { actionError = Self.describe(error) }
+        noteNetworkFailure(error)
+    }
+
     func run(deleteOriginals: Bool) async {
         Notifications.requestOnce()
         await act { try await $0.run(deleteOriginals: deleteOriginals) }
@@ -316,11 +328,8 @@ final class RemoteSession {
         do {
             state = try await client().updateSettings(changes)
             remember()
-        } catch APIError.unauthorized(let msg) {
-            connection = .unpaired(msg)
         } catch {
-            actionError = Self.describe(error)
-            noteNetworkFailure(error)
+            handleRequestError(error)
         }
     }
 
@@ -347,11 +356,8 @@ final class RemoteSession {
             state = try await op(client())
             remember(wallsChanged: true)
             return true
-        } catch APIError.unauthorized(let msg) {
-            connection = .unpaired(msg)
         } catch {
-            actionError = Self.describe(error)
-            noteNetworkFailure(error)
+            handleRequestError(error)
         }
         return false
     }
@@ -362,11 +368,8 @@ final class RemoteSession {
         do {
             state = try await client().checkMounts()
             remember()
-        } catch APIError.unauthorized(let msg) {
-            connection = .unpaired(msg)
         } catch {
-            actionError = Self.describe(error)
-            noteNetworkFailure(error)
+            handleRequestError(error)
         }
     }
 
@@ -388,11 +391,8 @@ final class RemoteSession {
             remember(wallsChanged: true)
             await refreshWalls()
             return name
-        } catch APIError.unauthorized(let msg) {
-            connection = .unpaired(msg)
         } catch {
-            actionError = Self.describe(error)
-            noteNetworkFailure(error)
+            handleRequestError(error)
         }
         return nil
     }
@@ -598,11 +598,8 @@ final class RemoteSession {
             // 删除记录 / 不再选名单变了：顺手更新手机上存的那份，断了也能看
             if records { Task { await refreshRecordsCache() } }
             return true
-        } catch APIError.unauthorized(let msg) {
-            connection = .unpaired(msg)
         } catch {
-            actionError = Self.describe(error)
-            noteNetworkFailure(error)
+            handleRequestError(error)
         }
         return false
     }
@@ -613,11 +610,8 @@ final class RemoteSession {
         do {
             state = try await op(client())
             remember(wallsChanged: true)
-        } catch APIError.unauthorized(let msg) {
-            connection = .unpaired(msg)
         } catch {
-            actionError = Self.describe(error)
-            noteNetworkFailure(error)
+            handleRequestError(error)
         }
     }
 }

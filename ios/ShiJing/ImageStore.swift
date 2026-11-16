@@ -64,18 +64,7 @@ final class ImageStore {
     private init() {
         cache.countLimit = 400
         cache.totalCostLimit = 160 << 20
-        Self.prepareDiskDir()
-    }
-
-    /// 缓存目录建好并排除出 iCloud / 电脑备份：这里可能有十几 GB 的图，不该进备份。
-    private nonisolated static func prepareDiskDir() {
-        guard let dir = diskDir else { return }
-        let fm = FileManager.default
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        var u = dir
-        var v = URLResourceValues()
-        v.isExcludedFromBackup = true
-        try? u.setResourceValues(v)
+        AppSupport.prepare(Self.diskDir)
     }
 
     /// 内存缓存的 key。用 Mac 的 id 而不是地址或客户端：`session.client()` 要读钥匙串，
@@ -425,12 +414,7 @@ final class ImageStore {
 
     /// 缓存目录：Application Support/拾景/images/<种类>-<文件名>。
     /// 文件名里可能带中文，直接用没问题，但 "/" 要换掉。
-    private nonisolated static var diskDir: URL? {
-        let fm = FileManager.default
-        guard let base = try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        else { return nil }
-        return base.appending(path: "拾景/images", directoryHint: .isDirectory)
-    }
+    private nonisolated static var diskDir: URL? { AppSupport.path("images") }
 
     /// 文件名里可能带中文，直接用没问题，但 "/" 和 ":" 要换掉（不能做文件名）。
     private nonisolated static func safeName(_ name: String) -> String {

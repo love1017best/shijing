@@ -22,4 +22,12 @@ extension View {
             background(tint.opacity(0.55), in: shape).background(.ultraThinMaterial, in: shape)
         }
     }
+
+    /// 圆形玻璃按钮的底：定尺寸、圆形玻璃、圆形命中区。预览的关闭 / 撤销 / 整理按钮、
+    /// 分享按钮都用它，别再各写一遍这三行。
+    func glassCircle(size: CGFloat) -> some View {
+        frame(width: size, height: size)
+            .glassBackground(in: Circle(), interactive: true)
+            .contentShape(Circle())
+    }
 }

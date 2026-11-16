@@ -34,17 +34,10 @@ final class OfflineStore {
     private static let writeQueue = DispatchQueue(label: "com.love1017best.shijing.offline-write", qos: .utility)
 
     private init() {
-        let fm = FileManager.default
-        let base = try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let d = base?.appending(path: "拾景/offline", directoryHint: .isDirectory)
+        let d = AppSupport.path("offline")
         dir = d
-        guard let d else { return }
-        try? fm.createDirectory(at: d, withIntermediateDirectories: true)
         // 快照只是为了让离线时能看，不进 iCloud 备份
-        var d2 = d
-        var v = URLResourceValues()
-        v.isExcludedFromBackup = true
-        try? d2.setResourceValues(v)
+        AppSupport.prepare(d)
     }
 
     nonisolated private func file(_ id: String) -> URL? {

@@ -592,14 +592,20 @@ struct ShareOriginalButton: View {
         Button {
             Task { await load() }
         } label: {
-            ZStack {
-                Image(systemName: "square.and.arrow.up").opacity(loading ? 0 : 1)
-                if loading { ProgressView() }
+            if glass {
+                icon.glassCircle(size: size)
+            } else {
+                icon.frame(width: 36, height: 36)
             }
-            .font(.system(size: 20, weight: .semibold))
-            .frame(width: glass ? size : 36, height: glass ? size : 36)
-            .modifier(ShareGlass(glass: glass))
         }
+    }
+
+    private var icon: some View {
+        ZStack {
+            Image(systemName: "square.and.arrow.up").opacity(loading ? 0 : 1)
+            if loading { ProgressView() }
+        }
+        .font(.system(size: 20, weight: .semibold))
     }
 
     @MainActor
@@ -613,12 +619,9 @@ struct ShareOriginalButton: View {
                 let url = try await session.client().downloadOriginal(wall.name)
                 present(url, deleteAfter: true)
             }
-        } catch APIError.unauthorized(let msg) {
-            session.connection = .unpaired(msg)
         } catch {
-            session.actionError = RemoteSession.describe(error)
-            // 连不上电脑：顺手把连接状态改成离线，别让界面停在「已连接」上
-            session.noteNetworkFailure(error)
+            // 令牌失效转未配对；连不上电脑顺手转离线，别让界面停在「已连接」上
+            session.handleRequestError(error)
         }
     }
 
@@ -675,20 +678,6 @@ enum SharePresenter {
         return top
     }
     #endif
-}
-
-/// 预览底部的分享按钮：外面套一块圆形的液态玻璃
-private struct ShareGlass: ViewModifier {
-    let glass: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if glass {
-            content.glassBackground(in: Circle(), interactive: true).contentShape(Circle())
-        } else {
-            content
-        }
-    }
 }
 
 /// 「已存到相册」这类一闪而过的提示。

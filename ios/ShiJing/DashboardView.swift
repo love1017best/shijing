@@ -240,22 +240,12 @@ struct DashboardView: View {
     @ViewBuilder private var connectionSection: some View {
         if case .offline(let msg) = session.connection {
             Section {
-                Label {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let at = session.snapshotAt {
-                            Text("离线 · \(Self.ago(at))同步").font(.subheadline.bold())
-                            Text("正在重新连接，只能查看已缓存的图片。" + queuedNote)
-                                .font(.footnote).foregroundStyle(.secondary)
-                        } else {
-                            Text("连接已断开，正在重新连接").font(.subheadline.bold())
-                            Text(msg).font(.footnote).foregroundStyle(.secondary)
-                            if !queuedNote.isEmpty {
-                                Text(queuedNote).font(.footnote).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                } icon: {
-                    Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
+                if let at = session.snapshotAt {
+                    NoticeRow(icon: "wifi.exclamationmark", title: "离线 · \(Self.ago(at))同步",
+                              detail: "正在重新连接，只能查看已缓存的图片。" + queuedNote)
+                } else {
+                    NoticeRow(icon: "wifi.exclamationmark", title: "连接已断开，正在重新连接",
+                              details: queuedNote.isEmpty ? [msg] : [msg, queuedNote])
                 }
             }
         }
@@ -300,13 +290,13 @@ struct DashboardView: View {
         } label: {
             Label(s.stopping ? "正在停止…" : "停止", systemImage: "stop.circle")
         }
-        .disabled(s.stopping || session.busy || session.connection != .live)
+        .disabled(s.stopping || session.busy || session.offline)
     }
 
     /// 「换一批」按钮下面的说明：点不了的原因、目录访问不了、会删原图。
     /// 连不上时不画那块点不动的按钮，这里换成一行「连上电脑后才能换一批」——在毛玻璃上显示，叠在图上会看不清。
     private func runNote(_ s: RemoteState) -> String? {
-        if session.connection != .live { return "连接电脑后才能换一批。" }
+        if session.offline { return "连接电脑后才能换一批。" }
         if let b = s.blocked { return b }
         if s.unmounted > 0 { return "上次检查时有 \(s.unmounted) 个图库目录访问不了，换一批前会重新检查。" }
         if s.willDelete { return "此操作会删除图库中的不合格原图，执行时可以选择仅模拟。" }
@@ -337,7 +327,7 @@ struct DashboardView: View {
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.roundedRectangle(radius: 12))
                 .controlSize(.large)
-                .disabled(s.blocked != nil || session.busy || session.connection != .live)
+                .disabled(s.blocked != nil || session.busy || session.offline)
                 // 确认框挂在按钮本身上：regular 宽度（iPad、Duo）上它是 popover，会从按钮旁边弹出来，
                 // 挂在整页上会飘到屏幕中间（v0.3.170 用户反馈「离按钮很远」）。
                 .confirmationDialog("这次运行会删除不合格的原图", isPresented: $confirmDelete, titleVisibility: .visible) {
@@ -405,15 +395,16 @@ struct DashboardView: View {
 
     @ViewBuilder private func lastRunSection(_ s: RemoteState) -> some View {
         if let l = s.last {
+            let style = lastStyle(l)
             Section("上一轮对比") {
                 // 换上了几张、什么时候换的，横幅卡上已经写了；这里只列时间和对比出来的指标
                 HStack(spacing: 8) {
-                    Image(systemName: lastIcon(l)).foregroundStyle(lastColor(l))
+                    Image(systemName: style.icon).foregroundStyle(style.color)
                     Text(l.date, format: .dateTime.month().day().hour().minute())
                         .font(.subheadline)
                     Spacer()
                     if l.status != "ok" {
-                        Text(lastStatusText(l)).font(.footnote).foregroundStyle(lastColor(l))
+                        Text(style.text).font(.footnote).foregroundStyle(style.color)
                     }
                 }
                 if let e = l.error, l.status == "failed" {
@@ -440,26 +431,12 @@ struct DashboardView: View {
         }
     }
 
-    private func lastStatusText(_ l: LastRun) -> String {
+    /// 「上一轮对比」那一行的图标、颜色和右侧说法：同一个 status 只在这里分一次。
+    private func lastStyle(_ l: LastRun) -> (icon: String, color: Color, text: String) {
         switch l.status {
-        case "stopped": l.copied > 0 ? "中途停止，已更换 \(l.copied) 张" : "中途停止"
-        default: "未完成更换"
-        }
-    }
-
-    private func lastIcon(_ l: LastRun) -> String {
-        switch l.status {
-        case "ok": "checkmark.circle.fill"
-        case "stopped": "stop.circle.fill"
-        default: "exclamationmark.triangle.fill"
-        }
-    }
-
-    private func lastColor(_ l: LastRun) -> Color {
-        switch l.status {
-        case "ok": .green
-        case "stopped": .secondary
-        default: .red
+        case "ok": ("checkmark.circle.fill", .green, "")
+        case "stopped": ("stop.circle.fill", .secondary, l.copied > 0 ? "中途停止，已更换 \(l.copied) 张" : "中途停止")
+        default: ("exclamationmark.triangle.fill", .red, "未完成更换")
         }
     }
 
@@ -477,31 +454,18 @@ struct DashboardView: View {
         if desk > 0 || mine > 0 {
             Section {
                 if desk > 0 {
-                    Label {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("电脑上排队 \(desk) 张").font(.subheadline.bold())
-                            Text("这些是图库未连接时记录的，图库连接后电脑会自动删除。不想删除的，请到「设置 › 待删除」中取消。")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "clock").foregroundStyle(.orange)
-                    }
+                    NoticeRow(icon: "clock", title: "电脑上排队 \(desk) 张",
+                              detail: "这些是图库未连接时记录的，图库连接后电脑会自动删除。不想删除的，请到「设置 › 待删除」中取消。")
                 }
                 if mine > 0 {
                     let live = session.connection == .live
                     NavigationLink {
                         QueuedActionsView(session: session)
                     } label: {
-                        Label {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("这台手机有 \(mine) 张待确认").font(.subheadline.bold())
-                                Text(live ? "每张都有缩略图，逐张或全部确认后才会删除；取消会把对应的图片放回列表。"
-                                          : "连接电脑后才能确认删除；现在可以打开查看具体是哪几张。")
-                                    .font(.footnote).foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "trash").foregroundStyle(.red)
-                        }
+                        NoticeRow(icon: "trash", title: "这台手机有 \(mine) 张待确认",
+                                  detail: live ? "每张都有缩略图，逐张或全部确认后才会删除；取消会把对应的图片放回列表。"
+                                               : "连接电脑后才能确认删除；现在可以打开查看具体是哪几张。",
+                                  color: .red)
                     }
                 }
             } header: {
@@ -514,15 +478,9 @@ struct DashboardView: View {
     @ViewBuilder private var signingSection: some View {
         if SigningExpiry.isSoon, let text = SigningExpiry.text {
             Section {
-                Label {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(SigningExpiry.isExpired ? "签名已经到期" : "签名\(text)").font(.subheadline.bold())
-                        Text("免费签名 7 天到期，到期后拾景无法启动。在电脑上重新安装一次就能续上。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "clock.badge.exclamationmark").foregroundStyle(.orange)
-                }
+                NoticeRow(icon: "clock.badge.exclamationmark",
+                          title: SigningExpiry.isExpired ? "签名已经到期" : "签名\(text)",
+                          detail: "免费签名 7 天到期，到期后拾景无法启动。在电脑上重新安装一次就能续上。")
             }
         }
     }

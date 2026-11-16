@@ -194,7 +194,7 @@ struct SettingsPage: View {
     /// 三栏并排，左右滑也能切换（分段控件和翻页用同一个 selection）。
     private func pager(_ state: RemoteState) -> some View {
         TabView(selection: $groupRaw) {
-            macPage(state, built: builtGroups.contains(SettingsGroup.mac.rawValue))
+            page(builtGroups.contains(SettingsGroup.mac.rawValue)) { macContent(state) }
                 .tag(SettingsGroup.mac.rawValue)
             page(builtGroups.contains(SettingsGroup.phone.rawValue)) { phoneContent(state) }
                 .tag(SettingsGroup.phone.rawValue)
@@ -287,26 +287,11 @@ struct SettingsPage: View {
     /// 电脑上的拾景：一个列表（和系统设置一样），内容最宽 680、居中。
     /// 不做左右两栏：并排两个 List 各有各的滚动条，左栏那条落在屏幕中间、贴着右栏内容，
     /// 而原生列表没法让滚动条跑到整页最右边——宽屏统一成单栏，滚动条才和系统设置一样在右边。
-    @ViewBuilder
-    private func macPage(_ state: RemoteState, built: Bool) -> some View {
-        List {
-            if built { macContent(state) }
-        }
-        .contentWidthCap(max: 680)
-    }
-
-    /// 单栏时的顺序：离线提示 → 输出 / 采样 / 画质 / 归档 → 筛选 / 自动换 / 系统 → 图库入口 → 待删除。
+    /// 顺序：离线提示 → 输出 / 采样 / 画质 / 归档 → 筛选 / 自动换 / 系统 → 图库入口 → 待删除。
     @ViewBuilder
     private func macContent(_ state: RemoteState) -> some View {
-        macNoticeSection(state)
-        macLeftSections(state)
-        macRightSections(state)
-    }
-
-    /// 左栏：输出和采样这一路（改的是怎么选图、怎么存）。
-    @ViewBuilder
-    private func macLeftSections(_ state: RemoteState) -> some View {
-        let disabled = state.running || session.connection != .live
+        let disabled = state.running || session.offline
+        macNoticeSection
         if let set = state.settings {
             outputSection(set, state, disabled)
             samplingSection(set, disabled)
@@ -316,23 +301,15 @@ struct SettingsPage: View {
             if set.archiveEnabled != nil {
                 archiveSection(set, disabled: disabled)
             }
+            filterSection(set, disabled)
+            autoSection(set, state, disabled)
+            systemSection(set, disabled)
         } else {
             Section {
                 LabeledContent("每次换", value: "\(state.sampleCount) 张")
             } footer: {
                 Text("电脑上的拾景版本较旧，要改设置请在电脑上改。")
             }
-        }
-    }
-
-    /// 右栏：筛选、自动换、系统，以及两个入口（图库目录、待删除）。
-    @ViewBuilder
-    private func macRightSections(_ state: RemoteState) -> some View {
-        let disabled = state.running || session.connection != .live
-        if let set = state.settings {
-            filterSection(set, disabled)
-            autoSection(set, state, disabled)
-            systemSection(set, disabled)
         }
         if state.dirs != nil {
             libraryLink(state)
@@ -342,18 +319,11 @@ struct SettingsPage: View {
 
     /// 连不上电脑时最上面那条提醒。
     @ViewBuilder
-    private func macNoticeSection(_ state: RemoteState) -> some View {
-        if session.connection != .live {
+    private var macNoticeSection: some View {
+        if session.offline {
             Section {
-                Label {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("现在无法连接电脑，设置仅可查看").font(.subheadline.bold())
-                        Text("改设置、更换壁纸都需要连接电脑。离线时记录的「移出」「不再选」连接后自动处理；「删除原图」连接后还需要再确认一次。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "wifi.slash").foregroundStyle(.orange)
-                }
+                NoticeRow(icon: "wifi.slash", title: "现在无法连接电脑，设置仅可查看",
+                          detail: "改设置、更换壁纸都需要连接电脑。离线时记录的「移出」「不再选」连接后自动处理；「删除原图」连接后还需要再确认一次。")
             }
         }
     }
@@ -534,12 +504,12 @@ struct SettingsPage: View {
                         Spacer()
                         Button("取消") { Task { await session.cancelPending(it) } }
                             .buttonStyle(.borderless)
-                            .disabled(session.connection != .live)
+                            .disabled(session.offline)
                     }
                 }
                 if items.count > 1 {
                     Button("全部取消", role: .destructive) { Task { await session.cancelAllPending() } }
-                        .disabled(session.connection != .live)
+                        .disabled(session.offline)
                 }
             } header: {
                 HelpHeader("待删除（\(items.count)）", "图库未连接时，需要删除的原图会先排在电脑上，图库连接后自动删除。取消后这张原图保留；壁纸文件夹中的那一份已在手机上移出。")
@@ -626,17 +596,10 @@ struct LibraryDirsView: View {
         Group {
             if let dirs = session.state?.dirs {
                 List {
-                    if session.connection != .live {
+                    if session.offline {
                         Section {
-                            Label {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("现在无法连接电脑，下面是上次同步的信息").font(.subheadline.bold())
-                                    Text("挂载状态和张数可能已经变化，连接电脑后可以重新检查。")
-                                        .font(.footnote).foregroundStyle(.secondary)
-                                }
-                            } icon: {
-                                Image(systemName: "wifi.slash").foregroundStyle(.orange)
-                            }
+                            NoticeRow(icon: "wifi.slash", title: "现在无法连接电脑，下面是上次同步的信息",
+                                      detail: "挂载状态和张数可能已经变化，连接电脑后可以重新检查。")
                         }
                     }
                     Section {
@@ -648,7 +611,7 @@ struct LibraryDirsView: View {
                         } label: {
                             Label("重新检查挂载", systemImage: "arrow.clockwise")
                         }
-                        .disabled(session.connection != .live)
+                        .disabled(session.offline)
                     } header: {
                         HelpHeader("目录", "挂载状态由电脑检查。点「重新检查挂载」后，电脑会重新检查这些目录，再把结果发回来。目录只能在电脑上的「图库」页增删。")
                     }

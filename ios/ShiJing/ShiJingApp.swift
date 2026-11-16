@@ -253,7 +253,6 @@ enum Notifications {
                     // 签名到期：切到设置，并且选中「关于」那一栏
                     UserDefaults.standard.set("about", forKey: "settingsGroup")
                     NotificationRouter.shared.tab = .settings
-                case "settings": NotificationRouter.shared.tab = .settings
                 case "overview": NotificationRouter.shared.tab = .overview
                 default: break
                 }
