@@ -99,15 +99,35 @@ func panel(c *ui.Context) ui.Element {
 
 // group 是 macOS 系统设置风格的一组设置：标题在卡片外，卡片里一行一项、细线分隔。
 // rows 里每个函数画一行。
-// helpDot 是设置项旁边的小问号：指针悬停、键盘聚焦时浮现说明，界面上不再铺一段说明文字。
+// helpOpen 记着每个说明气泡开着没有（key 是标题）。点问号打开，点外面或按 Esc 关上。
+var helpOpen = map[string]*bool{}
+
+// helpDot 是设置项旁边的小问号：点一下弹出说明，指针悬停也会浮出提示，界面上不再铺一段说明文字。
 func helpDot(c *ui.Context, title, desc string) ui.Element {
 	t := c.Theme()
+	open, ok := helpOpen[title]
+	if !ok {
+		open = new(bool)
+		helpOpen[title] = open
+	}
 	d := ui.Box(c).Size(16, 16).Radius(8).Center().
 		Label("「" + title + "」的说明").Role(ui.RoleButton).Focusable().
-		Cursor(ui.CursorPointer).Tooltip(desc)
-	return d.Children(func() {
+		Cursor(ui.CursorPointer)
+	if !*open {
+		d = d.Tooltip(desc) // 气泡开着时不再叠一个悬停提示
+	}
+	d.Children(func() {
 		ui.Icon(c, iconHelp).FontSize(13).TextColor(t.TextMuted)
 	})
+	if d.Clicked() {
+		*open = !*open
+	}
+	ui.Popover(c, d, open, func() {
+		ui.Column(c).Padding(10, 12).Children(func() {
+			ui.Text(c, desc).FontSize(12.5).Wrap().MaxWidth(260)
+		})
+	})
+	return d
 }
 
 // group 是一个设置分组：标题、白底卡片、每行之间一条分隔线。
