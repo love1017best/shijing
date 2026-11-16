@@ -49,8 +49,6 @@ struct WallPreview: View {
     /// 前置摄像头（被占用的那块玻璃）在页面里的位置：iPhone Duo 外屏竖放时在右上，横放时跟着设备转到左边或右边。
     /// 右边那一列按钮就放在这同一侧，和摄像头、状态栏对齐（`reservedRegions(kind: .occlusion)`，iOS 27.1 起）
     @State private var cameraFrame: CGRect = CGRect(x: 0, y: 0, width: 0, height: 0)
-    /// 按钮列放右边还是左边（见 cameraFrame）
-    @State private var columnOnRight = true
     /// 顶栏下沿、底栏上沿（全局坐标）：竖屏完整显示时图片放在两者之间，不被底栏挡住
     @State private var topBarBottom: CGFloat = 0
     /// 窗口的安全区：整页 `ignoresSafeArea` 铺满之后，页面里量到的安全区是 0，所以从窗口上取。
@@ -114,6 +112,19 @@ struct WallPreview: View {
     /// 一排按钮加编号，还是底部一排。
     private var wide: Bool { layoutSize.width >= 640 }
 
+    /// 按钮列放右边还是左边（只有右边一竖列那几种版式才用得上）。
+    /// 竖放固定在右边：Duo 外屏竖放时摄像头在右上角，时间和 Wi‑Fi 也竖着排在右上；
+    /// 横放跟着前置摄像头走（Duo 外屏横放两个方向，摄像头分别转到左上、右下）。
+    /// **算出来，不要存**：以前存成 `columnOnRight`、只在遮挡区变化时重算，横放转到竖放而遮挡区
+    /// 报的还是同一块时，列会一直停在左边（v0.4.2 用户反馈外屏竖放偶尔跑到左边）。
+    /// 遮挡区比半屏还宽（量错了）也不采信，保持在右边。
+    private var columnOnRight: Bool {
+        let s = layoutSize
+        if s == .zero || s.height >= s.width { return true }
+        guard cameraFrame != .zero, cameraFrame.width < s.width / 2 else { return true }
+        return cameraFrame.midX > s.width / 2
+    }
+
     /// 右边一竖列（照系统相册）：Duo 内屏横放、外屏横放和竖放都是这样（外屏系统报的是 regular 尺寸类，
     /// 但系统相册在它上面照样用右侧一列）。只有高度够的宽屏才用顶部一排（iPad、Duo 内屏竖放），
     /// 所以按高度分：约 700 以下收成一列。按屏幕形状判断，不按机型。
@@ -160,16 +171,23 @@ struct WallPreview: View {
             .frame(width: size.width, height: size.height)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).midX } action: { screenMidX = $0 }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { if $0 != screenSize { screenSize = $0 } }
-            // 前置摄像头在哪一侧（iPhone Duo 外屏的挖孔，横放时跟着设备换边）
+            // 前置摄像头那块遮挡区（iPhone Duo 的挖孔，横放时跟着设备转到左边或右边）。
+            // 系统报的遮挡区不止一处（内屏横放时右上角那块状态栏也在里面），所以取离屏幕中线最远、
+            // 明显靠边的那一块——以前直接拿 `.first`，系统报的顺序一变按钮列就翻到另一边
+            //（v0.4.2 用户反馈外屏竖放偶尔跑到左边）。一块都量不到就报零，列保持在右边。
             .onGeometryChange(for: CGRect.self) { proxy in
                 if #available(iOS 27.1, *) {
-                    return proxy.reservedRegions(kind: .occlusion).first?.frame ?? .zero
+                    let size = proxy.size
+                    let regions = proxy.reservedRegions(kind: .occlusion)
+                    let edges = regions.map(\.frame).filter {
+                        !$0.isEmpty && $0.width < size.width / 2
+                            && abs($0.midX - size.width / 2) > size.width * 0.2
+                    }
+                    return edges.max { abs($0.midX - size.width / 2) < abs($1.midX - size.width / 2) } ?? .zero
                 }
                 return .zero
             } action: { f in
                 if f != cameraFrame { cameraFrame = f }
-                let onRight = cameraFrame == .zero || cameraFrame.midX > layoutSize.width / 2
-                if onRight != columnOnRight { columnOnRight = onRight }
             }
             .contentShape(Rectangle())
             // 双击和单击要互斥：分开挂两个 onTapGesture 的话，双击的第一下会先触发一次单击，
