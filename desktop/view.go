@@ -30,6 +30,10 @@ func (a *app) view(c *ui.Context) {
 		c.Toast(a.toast)
 		a.toast = ""
 	}
+	if a.page != a.prevPage {
+		closeHelpPopovers() // 说明气泡不跟着换页
+		a.prevPage = a.page
+	}
 	t := applyTheme(c)
 	vibrant := c.Vibrancy()
 	if vibrant {

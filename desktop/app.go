@@ -126,6 +126,7 @@ type app struct {
 	preset  int // resPresets 的下标，len(resPresets) 表示自定义
 
 	page      string
+	prevPage  string // 上一帧的页面：切页时把开着的说明气泡收起来
 	filter    dirPanel
 	sample    dirPanel
 	mounts    map[string]mountState

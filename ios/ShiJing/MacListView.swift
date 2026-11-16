@@ -32,6 +32,10 @@ struct SetupView: View {
         .onAppear {
             discovery.want("setup", true)
             #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-demoPair") {
+                flow.pairing = PairTarget(name: "MacBook Pro", serviceName: nil,
+                                          address: MacAddress(host: "192.168.1.20", port: 52819))
+            }
             if !demoScanOpened, ProcessInfo.processInfo.arguments.contains("-demoScan") {
                 demoScanOpened = true
                 // 等局域网搜索结果出来再打开：模拟「已经看到 Mac 列表后再点扫码」的时序
@@ -229,12 +233,11 @@ struct NearbySection: View {
             Button("扫描电脑上的二维码…", systemImage: "qrcode.viewfinder") { flow.scanning = true }
             Button("手动输入地址…", systemImage: "keyboard") { flow.manual = true }
         } header: {
-            Text("附近的 Mac")
+            HelpHeader("附近的 Mac", "电脑上的拾景要打开「设置 › 手机遥控」，手机和电脑连同一个网络。找不到时可以在电脑上点「显示二维码」，用手机扫码配对。")
         } footer: {
+            // 只有搜索出问题时才占一行；上面那段怎么连的说明收进了问号
             if let p = discovery.problem {
                 Text(p)
-            } else {
-                Text("电脑上的拾景要打开「设置 › 手机遥控」，手机和电脑连同一个网络。找不到时可以在电脑上点「显示二维码」，用手机扫码配对。")
             }
         }
     }

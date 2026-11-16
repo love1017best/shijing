@@ -10,7 +10,7 @@ import (
 // ── 图库 ──────────────────────────────────────────────────────────────────
 
 func (a *app) libraryPage(c *ui.Context) {
-	pageHeader(c, "图库", "两类目录都会参与采样，区别在于是否先删除不合格的图片。", func() {
+	pageHeader(c, "图库", "", func() {
 		iconButton(c, iconRefresh, "重新检查挂载", false).OnClick(a.checkMounts)
 	})
 	a.columns(c, 26, func() {

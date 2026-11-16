@@ -32,9 +32,7 @@ struct HelpHeader: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
-            Image(systemName: "questionmark.circle")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            HelpIcon()
         }
         // 整行都能点：问号只有十几 pt，单点图标不好按中
         .contentShape(Rectangle())
@@ -43,12 +41,28 @@ struct HelpHeader: View {
         .accessibilityLabel("\(title)，点按查看说明")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { open = true }
-        .popover(isPresented: $open) {
-            Text(help)
+        .helpPopover(isPresented: $open, text: help)
+    }
+}
+
+/// 小问号图标：跟随分组标题的次要颜色，别用按钮的橙色。
+struct HelpIcon: View {
+    var body: some View {
+        Image(systemName: "questionmark.circle")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+    }
+}
+
+extension View {
+    /// 说明气泡：宽固定 280，文字按行数撑高（只给 maxWidth 会被截成两行）。
+    /// 不指定 arrowEdge，让系统自己找放得下的方向：长说明从屏幕下方的行打开时往上展开。
+    func helpPopover(isPresented: Binding<Bool>, text: String) -> some View {
+        popover(isPresented: isPresented) {
+            Text(text)
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(16)
-                // 给定宽度，文字才能在气泡里正常换行、按行数撑高（只给 maxWidth 时会被截成两行）
                 .frame(width: 280, alignment: .leading)
                 .presentationCompactAdaptation(.popover)
         }

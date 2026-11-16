@@ -18,7 +18,7 @@ func withKey(text, key string) string {
 func (a *app) keysPage(c *ui.Context) {
 	a.recordKey(c)
 	changed := len(a.cfg.Shortcuts) > 0
-	pageHeader(c, "快捷键", "点右边的按键，按下新的组合键即可修改；Esc 取消录制。改完立即生效并自动保存。", func() {
+	pageHeader(c, "快捷键", "点右边的按键，按下新的组合键即可修改。", func() {
 		iconButton(c, iconRotateCcw, "全部恢复默认", false).Disabled(!changed).OnClick(func() {
 			a.cfg.Shortcuts = nil
 			a.recording, a.keyErr = "", ""
@@ -92,7 +92,7 @@ func (a *app) keyRow(c *ui.Context, act keyAction) {
 		recording := a.recording == act.id
 		text := a.keyLabel(act.id)
 		if recording {
-			text = "按下新的快捷键…"
+			text = "按下新的快捷键，Esc 取消"
 		} else if text == "" {
 			text = "未设置"
 		}

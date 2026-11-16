@@ -102,6 +102,13 @@ func panel(c *ui.Context) ui.Element {
 // helpOpen 记着每个说明气泡开着没有（key 是标题）。点问号打开，点外面或按 Esc 关上。
 var helpOpen = map[string]*bool{}
 
+// closeHelpPopovers 收起所有说明气泡：切到别的页面时调一次，回到这一页不会还浮着上次那个。
+func closeHelpPopovers() {
+	for _, open := range helpOpen {
+		*open = false
+	}
+}
+
 // helpDot 是设置项旁边的小问号：点一下弹出说明，指针悬停也会浮出提示，界面上不再铺一段说明文字。
 func helpDot(c *ui.Context, title, desc string) ui.Element {
 	t := c.Theme()

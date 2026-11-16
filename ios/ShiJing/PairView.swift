@@ -61,10 +61,16 @@ struct PairView: View {
             Form {
                 Section {
                     LabeledContent("Mac", value: target.name)
-                    TextField("设备名称", text: $device)
-                        .disabled(requested)
-                } footer: {
-                    Text("系统不向 App 提供设备名称，默认只有「iPhone」。可以改成自己的名字，会记住。这个名字显示在电脑的「设置 › 手机遥控」里，也可以在电脑上重命名。")
+                }
+                Section {
+                    LabeledContent("名称") {
+                        TextField("名称", text: $device)
+                            .multilineTextAlignment(.trailing)
+                            .labelsHidden()
+                            .disabled(requested)
+                    }
+                } header: {
+                    HelpHeader("这台设备", "系统不向 App 提供设备名称，默认只有「iPhone」。可以改成自己的名字，会记住。这个名字显示在电脑的「设置 › 手机遥控」里，也可以在电脑上重命名。")
                 }
                 if requested {
                     Section {
