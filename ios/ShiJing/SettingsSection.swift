@@ -571,7 +571,7 @@ struct SettingsPage: View {
         }
     }
 
-    /// 离线：预览图和原图各存了多少、共用哪个上限，可以暂停 / 继续 / 单独清除。和电脑上的设置无关，旧版桌面端也有。
+    /// 离线：四档缓存各存了多少、共用哪个上限，可以暂停 / 继续 / 清除。和电脑上的设置无关，旧版桌面端也有。
     private var offlineSection: some View {
         OfflineCacheSection(session: session)
     }
@@ -726,6 +726,13 @@ private struct OfflineCacheSection: View {
     private var total: Int { session.walls.count }
     /// 这一批里离线能看到大图的张数（有大图或原图都算）
     private var viewable: Int { usage?.viewable ?? 0 }
+    /// 这一批还有没存到手机上的：大图（或能本地缩的原图）缺一档算一个，开了「保存原图」时原图另算一个。
+    /// 只看 viewable 会把「大图都存好了、原图还没存完」当成存完了，这时候「补齐」是灰的、按不下去。
+    private var missing: Bool {
+        guard total > 0 else { return false }
+        if viewable < total { return true }
+        return keepOriginals && (usage?.data(.original).inBatch ?? 0) < total
+    }
 
     var body: some View {
         Section {
@@ -750,7 +757,7 @@ private struct OfflineCacheSection: View {
                             store.prefetch(session)
                             refresh()
                         }
-                        .disabled(session.offline || session.walls.isEmpty || (viewable >= total && !store.prefetchHitLimit))
+                        .disabled(session.offline || session.walls.isEmpty || (!missing && !store.prefetchHitLimit))
                     }
                 }
 
@@ -833,7 +840,7 @@ private struct OfflineCacheSection: View {
         }
         if store.prefetchHitLimit { return "已到上限，剩下的没存" }
         if store.prefetchPaused { return "已暂停" }
-        if viewable < total { return "尚未缓存完" }
+        if missing { return "尚未缓存完" }
         return "全部存好了"
     }
 
@@ -850,6 +857,8 @@ private struct OfflineCacheSection: View {
     private func refresh() {
         let names = session.walls.map(\.name)
         Task {
+            // 刚点过「清除」时等文件删完再数，不然显示的还是清之前的大小
+            await store.waitForClear()
             // 一次量完：列一遍目录就有各档的张数和大小，不用一档列一遍
             usage = await Task.detached(priority: .utility) {
                 ImageStore.usage(names: names)

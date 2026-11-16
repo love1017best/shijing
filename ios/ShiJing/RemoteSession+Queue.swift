@@ -152,12 +152,20 @@ extension RemoteSession {
                             state = try await client().removeWallpaper(act.name, exclude: true)
                             moved = true
                             excluded = true
+                            walls.removeAll { $0.name == act.name }
                         } catch APIError.server(_, let msg) where msg.contains("找不到原图") {
                             // 旧版本换上的没有原图记录：只能移出，名单按手机记下的原图路径补
                             state = try await client().removeWallpaper(act.name, exclude: false)
                             moved = true
+                            walls.removeAll { $0.name == act.name }
+                        } catch APIError.server(_, let msg) where msg.contains("正在换壁纸") {
+                            // 电脑在忙：交给外层放回队列，换完一批再补
+                            throw APIError.server(status: 409, message: msg)
+                        } catch APIError.server(let status, _) where status == 404 || status == 409 {
+                            // 刚拉完列表电脑上又没了（或者已经换了一批）：移出这一步不用做了，
+                            // 但「不再选」和批次无关，下面照样按原图路径补进名单
+                            walls.removeAll { $0.name == act.name }
                         }
-                        walls.removeAll { $0.name == act.name }
                     }
                     if !excluded, let src = act.source, !src.isEmpty {
                         // 这一批已经换掉了（或者刚才是只能移出）：至少把原图记进名单，和批次无关

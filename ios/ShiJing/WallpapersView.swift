@@ -64,12 +64,16 @@ enum WallActionKind: CaseIterable {
 extension WallActionKind {
     /// 现在能不能点。换壁纸的过程中不能整理；存原图离线时只有手机上存过那张的原图才能点。
     /// 删除原图离线时也能点：只登记「想删」，连上电脑后还要再确认一次才真的删。
+    /// 离线时「正在换壁纸」不拦整理（那份状态是断线前同步的，见下面）。
     @MainActor
     func isEnabled(_ session: RemoteSession, _ w: Wallpaper) -> Bool {
         if self == .save {
             if session.saving != nil { return false }
             return !session.offline || ImageStore.cachedOriginal(name: w.name) != nil
         }
+        // 离线时整理只是把操作记下来（连上后补），不用管电脑上是不是正在换壁纸：
+        // 那份状态是断开前同步的，可能早就结束了，按它禁用会让人一直点不了
+        if session.offline { return session.acting == nil }
         return session.acting == nil && session.state?.running != true
     }
 

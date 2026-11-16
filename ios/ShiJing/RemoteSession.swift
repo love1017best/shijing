@@ -227,8 +227,9 @@ final class RemoteSession {
                             if s.wallsRev != wallsRev {
                                 // 换了一批：refreshWalls 里先收拾缓存，再按新的列表补齐
                                 await refreshWalls()
-                            } else if !ImageStore.shared.prefetching {
-                                // 还是同一批：上一次没缓存完的接着补（已经存下的会跳过）
+                            } else if !ImageStore.shared.prefetching, !ImageStore.shared.prefetchPaused {
+                                // 还是同一批：上一次没缓存完的接着补（已经存下的会跳过）。
+                                // 用户自己点了「暂停」的就不动，等他再点「补齐」
                                 ImageStore.shared.prefetch(self)
                             }
                         }
@@ -507,7 +508,8 @@ final class RemoteSession {
     /// 连上电脑时把记录页的三份数据（运行日志、删除记录、不再选）各存一份到手机，
     /// 断线时记录页显示的就是这一份，标出是什么时候同步的。
     func refreshRecordsCache() async {
-        guard let client = try? client() else { return }
+        // 离线时发出去只会干等超时（三路各 30 秒），等连上再说
+        guard connection == .live, let client = try? client() else { return }
         let id = macID.uuidString
         async let log: [String]? = try? client.log()
         async let deletions: DeletionList? = try? client.deletions()

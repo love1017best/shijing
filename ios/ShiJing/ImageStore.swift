@@ -179,7 +179,7 @@ final class ImageStore {
         prefetching = true
         task = Task {
             // 先等还在跑的删缓存做完，再量磁盘：不然「已用」把马上要删的文件也算进去
-            if let clear = clearTask { await clear.value; clearTask = nil }
+            await waitForClear()
             var used = await Task.detached(priority: .utility) { Self.diskUsage() }.value
             let limit = Self.cacheLimitBytes
             var queue: [(String, ImageKind)] = names.map { ($0, .thumb) }
@@ -236,6 +236,12 @@ final class ImageStore {
         task = nil
         prefetching = false
         prefetchPaused = true
+    }
+
+    /// 等还在跑的「清除」做完：删文件是后台任务，量磁盘之前不等它，
+    /// 数出来的还是删之前的大小（设置页点完「清除」看着像没清掉）。
+    func waitForClear() async {
+        if let clear = clearTask { await clear.value; clearTask = nil }
     }
 
     /// 换了一批：先停掉下载中的任务（别让属于上一批的图写进来），由调用方接着 `keepOnly`。
