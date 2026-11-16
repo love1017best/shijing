@@ -23,12 +23,27 @@ struct PairView: View {
     @FocusState private var codeFocused: Bool
     @Environment(\.dismiss) private var dismiss
 
+    static let deviceNameKey = "deviceName"
+
+    /// iOS 16 起系统不再把用户设置的设备名给第三方 App（要 Apple 单独批准的授权，免费签名拿不到），
+    /// 这里读到的只有「iPhone」「iPad」。所以第一次配对时填过的名字会记住，之后默认用它。
     static var defaultDeviceName: String {
+        if let saved = UserDefaults.standard.string(forKey: deviceNameKey)?.trimmingCharacters(in: .whitespaces),
+           !saved.isEmpty {
+            return saved
+        }
         #if os(iOS)
-        UIDevice.current.name // iOS 16 起没有特殊授权只会返回「iPhone」，可以在这里改
+        return UIDevice.current.name
         #else
-        "iPhone"
+        return "iPhone"
         #endif
+    }
+
+    /// 记下这次配对用的名字：下次配对默认就是它，不用再填一遍。
+    static func rememberDeviceName(_ name: String) {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        guard !n.isEmpty else { return }
+        UserDefaults.standard.set(n, forKey: deviceNameKey)
     }
 
     /// 这台设备的固定标识（第一次用时生成）：每台手机默认名字都叫「iPhone」，
@@ -49,7 +64,7 @@ struct PairView: View {
                     TextField("设备名称", text: $device)
                         .disabled(requested)
                 } footer: {
-                    Text("名字会显示在电脑的「设置 › 手机遥控」里，以后可以在那里取消配对。")
+                    Text("系统不向 App 提供设备名称，默认只有「iPhone」。可以改成自己的名字，会记住。这个名字显示在电脑的「设置 › 手机遥控」里，也可以在电脑上重命名。")
                 }
                 if requested {
                     Section {
@@ -125,6 +140,7 @@ struct PairView: View {
         error = nil
         do {
             let r = try await APIClient(address: addr, token: nil).pairFinish(code: code, id: Self.deviceID)
+            Self.rememberDeviceName(device)
             store.add(name: r.name, serviceName: target.serviceName, address: addr, token: r.token)
             dismiss()
         } catch APIError.server(let status, let msg) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/skip2/go-qrcode"
@@ -38,6 +39,11 @@ func (a *app) remoteGroup(c *ui.Context) {
 				if d.online {
 					pill(c, "已连接", t.Success)
 				}
+				ui.Button(c, "重命名").Label("重命名「" + d.Name + "」").OnClick(func() {
+					a.renameOpen = true
+					a.renameFrom = d.Name
+					a.renameText = d.Name
+				})
 				ui.Button(c, "取消配对").Label("取消和「" + d.Name + "」的配对").OnClick(func() {
 					a.remote.unpair(d.Name)
 					a.toast = fmt.Sprintf("已取消和「%s」的配对", d.Name)
@@ -61,6 +67,35 @@ func (a *app) remoteGroup(c *ui.Context) {
 	group(c, "手机遥控",
 		"配对过的 iPhone 在同一个局域网里可以看进度、换一批壁纸、停止运行。手机上换一批时会先问要不要删除不合格原图。",
 		rows...)
+}
+
+// renameModal 改一台已配对手机在列表里显示的名字。系统不把用户设置的设备名给 App
+// （iOS 16 起要有 Apple 批准的授权），默认都是「iPhone」，只能在电脑上自己起个名字区分。
+func (a *app) renameModal(c *ui.Context) {
+	if !a.renameOpen {
+		return
+	}
+	ui.Modal(c, &a.renameOpen, func() {
+		ui.Column(c).Width(360).Gap(12).Padding(20).Children(func() {
+			ui.Text(c, "重命名手机").FontSize(15).Bold()
+			muted(c, "这个名字只在这里显示，用来区分几台手机和平板，手机上不用重新配对。")
+			ui.TextInput(c, &a.renameText).Width(300).Label("设备名称")
+			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+				ui.Button(c, "取消").OnClick(func() { a.renameOpen = false })
+				ui.Button(c, "保存").OnClick(func() {
+					name := strings.TrimSpace(a.renameText)
+					if name == "" {
+						a.toast = "名称不能为空"
+						return
+					}
+					if got, ok := a.remote.renameDevice(a.renameFrom, name); ok {
+						a.toast = fmt.Sprintf("已改名为「%s」", got)
+						a.renameOpen = false
+					}
+				})
+			})
+		})
+	}).Label("重命名手机")
 }
 
 // openQRPair 生成一个配对请求并把二维码显示出来：手机扫一扫就完成配对（配对码就在二维码里），

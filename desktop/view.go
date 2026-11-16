@@ -92,6 +92,7 @@ func (a *app) view(c *ui.Context) {
 	})
 	a.pairModal(c)
 	a.qrPairModal(c)
+	a.renameModal(c)
 	a.autosave()
 	a.publishRemote()
 }

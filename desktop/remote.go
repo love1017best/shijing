@@ -75,7 +75,7 @@ type remoteServer struct {
 	mu      sync.Mutex
 	enabled bool // 上一次 setEnabled 的值，只在变化时开关服务
 	devices []remoteDevice
-	online  map[string]int // 设备名 → 正连着的事件流个数
+	online  map[string]int // 令牌哈希 → 正连着的事件流个数（在电脑上改名不影响）
 	pair    *pairRequest
 	// pairedCode 是最近一次配对成功的 code：电脑上显示二维码的弹层靠它收起
 	pairedCode string
@@ -180,9 +180,30 @@ func (rs *remoteServer) deviceList() []deviceInfo {
 	defer rs.mu.Unlock()
 	out := make([]deviceInfo, len(rs.devices))
 	for i, d := range rs.devices {
-		out[i] = deviceInfo{d, rs.online[d.Name] > 0}
+		out[i] = deviceInfo{d, rs.online[d.TokenHash] > 0}
 	}
 	return out
+}
+
+// renameDevice 改一台已配对手机在列表里显示的名字，返回改后的名字。
+// 系统不给 App 用户的设备名（iOS 16 起要有 Apple 批准的授权），名字都是「iPhone」，
+// 所以在电脑上手动改：只动这里的记录，手机上不用重新配对。
+func (rs *remoteServer) renameDevice(old, name string) (string, bool) {
+	rs.mu.Lock()
+	i := slices.IndexFunc(rs.devices, func(d remoteDevice) bool { return d.Name == old })
+	if i < 0 {
+		rs.mu.Unlock()
+		return "", false
+	}
+	name = sanitizeDevice(name)
+	others := slices.Delete(slices.Clone(rs.devices), i, i+1)
+	name = uniqueDeviceName(others, name)
+	rs.devices[i].Name = name
+	devs := slices.Clone(rs.devices)
+	rs.mu.Unlock()
+	rs.saveDevices(devs)
+	rs.redraw()
+	return name, true
 }
 
 // unpair 取消一台手机的配对，它的令牌立刻失效（已经连着的事件流在下一次推送时断开）。
@@ -207,13 +228,21 @@ func hashToken(tok string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// deviceFor 返回令牌对应的设备名，令牌无效时返回 ""。
-func (rs *remoteServer) deviceFor(r *http.Request) string {
+// deviceKey 是设备在 online 里用的 key：令牌哈希，在电脑上改名也不变。
+func (rs *remoteServer) deviceKey(r *http.Request) string {
 	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || tok == "" {
 		return ""
 	}
-	h := hashToken(tok)
+	return hashToken(tok)
+}
+
+// deviceFor 返回令牌对应的设备名，令牌无效时返回 ""。
+func (rs *remoteServer) deviceFor(r *http.Request) string {
+	h := rs.deviceKey(r)
+	if h == "" {
+		return ""
+	}
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	for _, d := range rs.devices {
@@ -513,7 +542,7 @@ func (rs *remoteServer) handleState(w http.ResponseWriter, r *http.Request, _ st
 }
 
 // handleEvents 是 SSE 事件流：连上先发一次当前状态，之后状态变了就发，空闲时定期发注释行保活。
-func (rs *remoteServer) handleEvents(w http.ResponseWriter, r *http.Request, dev string) {
+func (rs *remoteServer) handleEvents(w http.ResponseWriter, r *http.Request, _ string) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		writeErr(w, http.StatusInternalServerError, "不支持事件流")
@@ -522,16 +551,17 @@ func (rs *remoteServer) handleEvents(w http.ResponseWriter, r *http.Request, dev
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	ch := make(chan struct{}, 1)
+	key := rs.deviceKey(r)
 	rs.mu.Lock()
 	rs.subs[ch] = struct{}{}
-	rs.online[dev]++
+	rs.online[key]++
 	rs.mu.Unlock()
 	rs.redraw()
 	defer func() {
 		rs.mu.Lock()
 		delete(rs.subs, ch)
-		if rs.online[dev]--; rs.online[dev] <= 0 {
-			delete(rs.online, dev)
+		if rs.online[key]--; rs.online[key] <= 0 {
+			delete(rs.online, key)
 		}
 		rs.mu.Unlock()
 		rs.redraw()

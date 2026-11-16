@@ -200,6 +200,9 @@ type app struct {
 	qrCode     string        // 二维码里那个配对码（配对成功后收起弹层）
 	qrBitmap   *ui.Bitmap    // 二维码图
 	qrURL      string        // 二维码里的地址（shijing://pair?…）
+	renameOpen bool          // 「重命名手机」弹层是否显示
+	renameFrom string        // 改的是列表里哪一台（改之前的名字）
+	renameText string        // 输入框里的新名字
 
 	pendMu    sync.Mutex
 	pendLog   []string

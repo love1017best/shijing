@@ -439,3 +439,43 @@ func TestRemoteHandlerRejectsBadJSON(t *testing.T) {
 		t.Fatalf("坏 JSON = %d", resp.StatusCode)
 	}
 }
+
+// 系统不把用户设置的设备名给 App（iOS 16 起要有 Apple 批准的授权），配对的手机默认都叫「iPhone」。
+// 电脑上可以直接改名：只改这里的记录，手机上不用重新配对。
+func TestRemoteRenameDevice(t *testing.T) {
+	h := newRemoteHarness(t)
+	tok := h.pairDevice(t, "iPhone", "phone-a")
+	h.pairDevice(t, "iPhone", "phone-b")
+
+	click(t, h.tt, "设置")
+	h.tt.SetSize(1040, 1800) // 遥控分组在设置页最下面
+	h.tt.Frame()
+	click(t, h.tt, "重命名「iPhone」")
+	h.tt.Frame()
+	click(t, h.tt, "设备名称")
+	h.tt.Key(ui.Cmd, ui.KeyA)
+	h.tt.Type("小明的 iPhone")
+	h.tt.Frame()
+	click(t, h.tt, "保存")
+	h.tt.Frame()
+
+	names := []string{}
+	for _, d := range h.remote.deviceList() {
+		names = append(names, d.Name)
+	}
+	if strings.Join(names, ",") != "小明的 iPhone,iPhone 2" {
+		t.Fatalf("改名后的手机 = %v", names)
+	}
+	if code, _ := h.do(t, "GET", "/api/state", tok, nil); code != 200 {
+		t.Fatalf("改名后令牌不能用了: %d", code)
+	}
+	// 存进了 remote_devices.json，重启后还是这个名字
+	raw, _ := os.ReadFile(filepath.Join(filepath.Dir(h.cfgPath), "remote_devices.json"))
+	if !strings.Contains(string(raw), "小明的 iPhone") {
+		t.Fatalf("remote_devices.json 里没有新名字: %s", raw)
+	}
+	// 名字被别的手机占了就加序号
+	if got, ok := h.remote.renameDevice("iPhone 2", "小明的 iPhone"); !ok || got != "小明的 iPhone 2" {
+		t.Fatalf("重名时 = %q %v", got, ok)
+	}
+}
