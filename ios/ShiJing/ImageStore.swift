@@ -140,9 +140,20 @@ final class ImageStore {
         let img = await t.value
         inflight[k] = nil
         if let img {
-            cache.setObject(img, forKey: k as NSString, cost: kind.isLarge ? 8 << 20 : 300 << 10)
+            cache.setObject(img, forKey: k as NSString, cost: Self.memoryCost(img))
         }
         return img
+    }
+
+    /// 一张图在内存里占多少，按解码后的像素算：2732 宽的大图一张十七八 MB，
+    /// 以前一律按 8 MB 计，NSCache 以为还装得下，实际能把 App 撑出内存警告。
+    private nonisolated static func memoryCost(_ img: PlatformImage) -> Int {
+        #if os(iOS)
+        let px = img.size.width * img.scale * img.size.height * img.scale
+        #else
+        let px = img.size.width * img.size.height
+        #endif
+        return max(1, Int(px) * 4)
     }
 
     // MARK: 后台缓存
@@ -238,10 +249,9 @@ final class ImageStore {
     /// （调用方据此停掉这一轮，别把后面几百张各等一次超时）。
     private nonisolated static func fetchOne(_ client: APIClient, _ name: String,
                                              _ kind: ImageKind) async -> (ImageKind, Int64, Error?) {
-        if readDisk(name, kind) != nil { return (kind, 0, nil) }
+        // 只 stat 不读整张图：补齐几百张时每张都按几十万字节读一遍纯属白读
+        if onDisk(name, kind) { return (kind, 0, nil) }
         if kind == .image, cachedOriginal(name: name) != nil { return (kind, 0, nil) } // 有原图能本地缩，不用再下
-        if kind == .original, let f = diskFile(name, .original),
-           FileManager.default.fileExists(atPath: f.path) { return (kind, 0, nil) }
         if kind == .original {
             let tmp: URL
             do {
@@ -290,47 +300,46 @@ final class ImageStore {
         }
     }
 
-    /// 磁盘上某种图占了多少 / 有多少张（设置页显示）。
-    nonisolated static func cachedSize(kind: ImageKind) -> Int64 {
-        guard let dir = diskDir else { return 0 }
-        let prefix = kind.cachePrefix + "-"
+    /// 设置页、补齐要的磁盘统计：列一次目录、每张图 stat 一次，四个数一起算出来。
+    /// （以前分别调 diskUsage / cachedSize / viewableCount / cachedCount，一次刷新要列四遍目录）
+    struct Usage {
+        var used: Int64 = 0      // 整个缓存目录占了多少
+        var originals: Int64 = 0 // 存下的原图占多少
+        var originalCount = 0
+        var viewable = 0 // 这一批里离线能看到大图的张数
+    }
+
+    nonisolated static func usage(names: [String]) -> Usage {
+        guard let dir = diskDir else { return Usage() }
         let items = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey])) ?? []
-        var total: Int64 = 0
-        for u in items where u.lastPathComponent.hasPrefix(prefix) {
-            total += Int64((try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        }
-        return total
-    }
-
-    nonisolated static func cachedCount(kind: ImageKind) -> Int {
-        guard let dir = diskDir else { return 0 }
-        let prefix = kind.cachePrefix + "-"
-        let items = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
-        return items.filter { $0.hasPrefix(prefix) }.count
-    }
-
-    /// 这一批里离线能看到大图的张数：有 2732 宽的预览图或者原图都算（原图能本地缩出来）。
-    nonisolated static func viewableCount(names: [String]) -> Int {
-        guard let dir = diskDir else { return 0 }
-        let files = Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
         let imagePrefix = ImageKind.image.cachePrefix + "-"
         let originalPrefix = ImageKind.original.cachePrefix + "-"
-        return names.reduce(0) { n, name in
-            let s = safeName(name)
-            return n + (files.contains(imagePrefix + s) || files.contains(originalPrefix + s) ? 1 : 0)
+        var u = Usage()
+        var images = Set<String>()
+        var originals = Set<String>()
+        for f in items {
+            let n = f.lastPathComponent
+            let size = Int64((try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            u.used += size
+            if n.hasPrefix(originalPrefix) {
+                u.originals += size
+                u.originalCount += 1
+                originals.insert(n)
+            } else if n.hasPrefix(imagePrefix) {
+                images.insert(n)
+            }
         }
+        // 这一批里离线能看到大图的：有 2732 宽的预览图或者原图都算（原图能本地缩出来）
+        for name in names {
+            let s = safeName(name)
+            if images.contains(imagePrefix + s) || originals.contains(originalPrefix + s) { u.viewable += 1 }
+        }
+        return u
     }
 
-    /// 磁盘上的图片缓存占了多少（设置页显示）。
+    /// 磁盘上的图片缓存占了多少（补齐前量「已用」）。
     nonisolated static func diskUsage() -> Int64 {
-        guard let dir = diskDir else { return 0 }
-        let fm = FileManager.default
-        guard let e = fm.enumerator(at: dir, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
-        var total: Int64 = 0
-        for case let u as URL in e {
-            total += Int64((try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        }
-        return total
+        usage(names: []).used
     }
 
     /// 清掉缓存（内存里的一起）。传空就是全部清掉。
@@ -410,6 +419,12 @@ final class ImageStore {
     private nonisolated static func readDisk(_ name: String, _ kind: ImageKind) -> Data? {
         guard let f = diskFile(name, kind) else { return nil }
         return try? Data(contentsOf: f)
+    }
+
+    /// 磁盘上有没有这一档（只看文件在不不在，不读内容）。
+    private nonisolated static func onDisk(_ name: String, _ kind: ImageKind) -> Bool {
+        guard let f = diskFile(name, kind) else { return false }
+        return FileManager.default.fileExists(atPath: f.path)
     }
 
     private nonisolated static func writeDisk(_ name: String, _ kind: ImageKind, _ data: Data) {

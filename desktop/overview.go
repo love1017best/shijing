@@ -646,13 +646,7 @@ func (a *app) errorCard(c *ui.Context) {
 func (a *app) logPanel(c *ui.Context) {
 	t := c.Theme()
 	ui.Collapsible(c, fmt.Sprintf("运行日志（%d 行）", len(a.log)), &a.logShown, func() {
-		rows := a.logView()
-		problems := 0
-		for _, e := range a.logParsed {
-			if e.isProblem() {
-				problems++
-			}
-		}
+		rows, problems := a.logFilter()
 		body := ui.Column(c).Gap(10).Padding(10, 0, 0, 0)
 		if a.logReveal { // 错误卡片里点了「查看日志」：日志在页面最下面，滚过去
 			a.logReveal = false

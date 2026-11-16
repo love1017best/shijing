@@ -814,3 +814,45 @@ func TestFitBoxKeepsImageRatio(t *testing.T) {
 		}
 	}
 }
+
+func TestLogFilterCache(t *testing.T) {
+	f, _ := newFakeApp(t)
+	f.appendLog("▶ 2026-11-09 18:58:24 开始运行\n⚠️ 出了点问题")
+	rows, problems := f.logFilter()
+	if len(rows) != 2 || problems != 1 {
+		t.Fatalf("两行应都显示、一个问题: %v 行 %d 个", rows, problems)
+	}
+	// 新追加的行接着解析，前面的结果留着
+	f.appendLog("  复制: a.jpg")
+	rows, problems = f.logFilter()
+	if len(rows) != 3 || problems != 1 {
+		t.Fatalf("追加后应三行、一个问题: %v 行 %d 个", rows, problems)
+	}
+	// 只看问题：运行那行也留着（它是每次运行的分隔），复制行不要
+	f.logProblemsOnly = true
+	rows, problems = f.logFilter()
+	if len(rows) != 2 || rows[0] != 0 || rows[1] != 1 || problems != 1 {
+		t.Fatalf("只看问题应剩开始运行和警告: %v 行 %d 个", rows, problems)
+	}
+	f.logProblemsOnly = false
+	if rows, _ := f.logFilter(); len(rows) != 3 {
+		t.Fatalf("取消筛选应恢复三行: %v", rows)
+	}
+	// 清空日志
+	f.log, f.logParsed = nil, nil
+	if rows, problems := f.logFilter(); len(rows) != 0 || problems != 0 {
+		t.Fatalf("清空后应为空: %v 行 %d 个", rows, problems)
+	}
+	// 超过上限从前面截掉：解析结果跟着重来，行号不能错位
+	f.log = nil
+	for i := range maxLogLines + 5 {
+		f.appendLog(fmt.Sprintf("  复制: %d.jpg", i))
+	}
+	rows, _ = f.logFilter()
+	if len(rows) != maxLogLines {
+		t.Fatalf("截断后应剩 %d 行: %d", maxLogLines, len(rows))
+	}
+	if e := f.logParsed[rows[len(rows)-1]]; e.text != fmt.Sprintf("%d.jpg", maxLogLines+4) {
+		t.Fatalf("最后一行应对上最新的那条: %q", e.text)
+	}
+}

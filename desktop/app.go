@@ -138,6 +138,9 @@ type app struct {
 	logParsed       []logEntry
 	logParsedFirst  string
 	logProblemsOnly bool
+	logRows         []int // 当前筛选下要显示的行号
+	logRowsOnly     bool  // logRows 是按哪种筛选算出来的
+	logProblems     int   // 解析结果里问题有几行
 	// 删除记录页的两个类型标签：都关着就是全部；delClosed 记着收起来的日期（2006-01-02）
 	delFilter   bool
 	delManual   bool

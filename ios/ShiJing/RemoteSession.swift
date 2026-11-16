@@ -531,10 +531,11 @@ final class RemoteSession {
     }
 
     /// 移出壁纸文件夹；exclude 时以后的采样也跳过这张原图。成功返回 true。
-    /// refresh 为 false 时先不在本地重新拉列表（多选批量整理时最后只拉一次）。
+    /// refresh 为 false 时先不在本地重新拉列表（多选批量整理时最后只拉一次）；
+    /// records 也是这样：批量整理时每张都刷一遍记录缓存，几十张就是几十次三个请求。
     @discardableResult
-    func removeWallpaper(_ w: Wallpaper, exclude: Bool, refresh: Bool = true) async -> Bool {
-        await wallAct(w, kind: exclude ? .exclude : .remove, refresh: refresh) { try await $0.removeWallpaper(w.name, exclude: exclude) }
+    func removeWallpaper(_ w: Wallpaper, exclude: Bool, refresh: Bool = true, records: Bool = true) async -> Bool {
+        await wallAct(w, kind: exclude ? .exclude : .remove, refresh: refresh, records: records) { try await $0.removeWallpaper(w.name, exclude: exclude) }
     }
 
     /// 一次整理多张（「全部壁纸」页多选）：逐张调接口，失败就停（错误已经弹出来了），最后只重新拉一次列表。
@@ -545,7 +546,7 @@ final class RemoteSession {
         var done = 0
         for w in items {
             if Task.isCancelled { break }
-            guard await removeWallpaper(w, exclude: exclude, refresh: false) else { break }
+            guard await removeWallpaper(w, exclude: exclude, refresh: false, records: false) else { break }
             done += 1
         }
         // 离线时记的都是队列里的操作，不用（也拉不到）列表
@@ -572,7 +573,7 @@ final class RemoteSession {
         return ok
     }
 
-    private func wallAct(_ w: Wallpaper, kind: OfflineAction.Kind, refresh: Bool = true, _ op: (APIClient) async throws -> RemoteState) async -> Bool {
+    private func wallAct(_ w: Wallpaper, kind: OfflineAction.Kind, refresh: Bool = true, records: Bool = true, _ op: (APIClient) async throws -> RemoteState) async -> Bool {
         acting = w.name
         defer { acting = nil }
         #if DEBUG
@@ -592,7 +593,7 @@ final class RemoteSession {
             remember(wallsChanged: true)
             if refresh { await refreshWalls() }
             // 删除记录 / 不再选名单变了：顺手更新手机上存的那份，断了也能看
-            Task { await refreshRecordsCache() }
+            if records { Task { await refreshRecordsCache() } }
             return true
         } catch APIError.unauthorized(let msg) {
             connection = .unpaired(msg)

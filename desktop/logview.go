@@ -133,25 +133,52 @@ func tildifyIn(s string) string {
 	return strings.ReplaceAll(s, home+string(filepath.Separator), "~/")
 }
 
-// logView 是解析后可显示的行（下标指向 a.log），按「只看问题」过滤。
-func (a *app) logView() []int {
-	if len(a.logParsed) > len(a.log) || (len(a.logParsed) > 0 && a.logParsedFirst != firstOr(a.log)) {
-		a.logParsed = nil // 日志被清空或截断过，重新解析
+// logFilter 返回当前筛选下要显示的行（下标指向 a.log），以及解析结果里问题有几行
+// （工具条上的「只看问题 N」）。每帧都会调用，所以结果存起来：只解析新追加的行，
+// 筛选条件没变就直接用上一帧的，不把几千行每帧重筛一遍。
+func (a *app) logFilter() ([]int, int) {
+	first := firstOr(a.log)
+	// 日志被清空、或者超过上限从前面截掉过：重新解析
+	if len(a.logParsed) > len(a.log) || len(a.logRows) > len(a.log) ||
+		(len(a.logParsed) > 0 && a.logParsedFirst != first) {
+		a.logParsed = nil
+		a.logRows = nil
+		a.logProblems = 0
 	}
+	if a.logRowsOnly != a.logProblemsOnly {
+		// 筛选条件变了：用已经解析好的行重筛，不用重新解析
+		a.logRows = a.logRows[:0]
+		for i, e := range a.logParsed {
+			if a.showsLog(e) {
+				a.logRows = append(a.logRows, i)
+			}
+		}
+		a.logRowsOnly = a.logProblemsOnly
+	}
+	// 新追加的行：接着解析、接着数、接着筛
 	for i := len(a.logParsed); i < len(a.log); i++ {
-		a.logParsed = append(a.logParsed, parseLogLine(a.log[i]))
-	}
-	a.logParsedFirst = firstOr(a.log)
-	var out []int
-	for i, e := range a.logParsed {
-		switch {
-		case e.kind == logSkip:
-		case a.logProblemsOnly && !e.isProblem() && e.kind != logRun:
-		default:
-			out = append(out, i)
+		e := parseLogLine(a.log[i])
+		a.logParsed = append(a.logParsed, e)
+		if e.isProblem() {
+			a.logProblems++
+		}
+		if a.showsLog(e) {
+			a.logRows = append(a.logRows, i)
 		}
 	}
-	return out
+	a.logParsedFirst = first
+	return a.logRows, a.logProblems
+}
+
+// showsLog 是当前筛选下这一行要不要显示。
+func (a *app) showsLog(e logEntry) bool {
+	switch {
+	case e.kind == logSkip:
+		return false
+	case a.logProblemsOnly && !e.isProblem() && e.kind != logRun:
+		return false
+	}
+	return true
 }
 
 func firstOr(s []string) string {

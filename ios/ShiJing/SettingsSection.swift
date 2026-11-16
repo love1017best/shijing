@@ -838,16 +838,14 @@ private struct OfflineCacheSection: View {
     private func refresh() {
         let names = session.walls.map(\.name)
         Task {
-            let (all, originals, views, origs) = await Task.detached(priority: .utility) {
-                (ImageStore.diskUsage(),
-                 ImageStore.cachedSize(kind: .original),
-                 ImageStore.viewableCount(names: names),
-                 ImageStore.cachedCount(kind: .original))
+            // 一次量完：列一遍目录就有四个数，不用列四遍
+            let u = await Task.detached(priority: .utility) {
+                ImageStore.usage(names: names)
             }.value
-            used = all
-            originalSize = originals
-            viewable = views
-            originalCount = origs
+            used = u.used
+            originalSize = u.originals
+            viewable = u.viewable
+            originalCount = u.originalCount
         }
     }
 }

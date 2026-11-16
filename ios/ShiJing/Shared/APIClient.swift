@@ -38,11 +38,14 @@ struct APIClient: Sendable {
         return URLSession(configuration: cfg)
     }()
 
-    private static let decoder: JSONDecoder = {
+    /// 每次解码新建一个：JSONDecoder 不是为并发使用设计的，而请求、事件流、
+    /// 小组件会同时在解不同的响应（事件流在轮询循环里、图片在并发任务里）。
+    /// 建一个只要几微秒，比共享一个实例安全。
+    private static func makeDecoder() -> JSONDecoder {
         let d = JSONDecoder()
         d.keyDecodingStrategy = .convertFromSnakeCase
         return d
-    }()
+    }
 
     private func request(_ method: String, _ path: String, body: [String: Any]? = nil, timeout: TimeInterval = 15) -> URLRequest {
         var req = URLRequest(url: base.appending(path: path))
@@ -60,7 +63,7 @@ struct APIClient: Sendable {
         let (data, resp) = try await Self.session.data(for: req)
         try Self.check(resp, data: data)
         do {
-            return try Self.decoder.decode(T.self, from: data)
+            return try Self.makeDecoder().decode(T.self, from: data)
         } catch {
             throw APIError.badResponse
         }
@@ -226,7 +229,7 @@ struct APIClient: Sendable {
                     for try await line in bytes.lines {
                         guard line.hasPrefix("data: ") else { continue } // 「: ping」保活行
                         let json = Data(line.dropFirst(6).utf8)
-                        guard let s = try? Self.decoder.decode(RemoteState.self, from: json) else {
+                        guard let s = try? Self.makeDecoder().decode(RemoteState.self, from: json) else {
                             throw APIError.badResponse
                         }
                         continuation.yield(s)
