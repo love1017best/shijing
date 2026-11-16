@@ -67,11 +67,11 @@ func (a *app) keysPage(c *ui.Context) {
 // keyRow 是一行可改的快捷键：名称、录制按钮，改过的话再加一个「恢复默认」。
 func (a *app) keyRow(c *ui.Context, act keyAction) {
 	t := c.Theme()
-	desc := act.desc
+	note, noteColor := "", t.TextMuted
 	if a.keyErrFor == act.id && a.keyErr != "" {
-		desc = a.keyErr
+		note, noteColor = a.keyErr, t.Danger
 	}
-	settingRow(c, act.label, desc, func(ui.Element) {
+	settingRowNoteColor(c, act.label, act.desc, note, noteColor, func(ui.Element) {
 		_, custom := a.cfg.Shortcuts[act.id]
 		if custom {
 			reset := ui.Button(c, "").Label(act.label + " 恢复默认").Tooltip("恢复默认（" + defaultLabel(act) + "）").

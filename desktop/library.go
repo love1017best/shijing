@@ -52,6 +52,12 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 				ui.Icon(c, icon).FontSize(15).TextColor(t.Accent)
 			})
 			ui.Text(c, title).FontSize(16).Bold()
+			help := desc
+			if len(dirs) > 1 {
+				help += "\n按住 ⌘ 单击可以多选。"
+			}
+			help += "右键可以在 Finder 中打开或移除，文件夹也可以直接拖进来。"
+			helpDot(c, title, help)
 			ui.Text(c, fmt.Sprint(len(dirs))).FontSize(12).TextColor(t.TextMuted)
 			ui.Spacer(c)
 			if n := p.chosen.Len(); n > 0 {
@@ -63,7 +69,6 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 			}
 			iconButton(c, iconPlus, "添加目录…", false).Label(title + " 添加").OnClick(func() { a.addDir(p) })
 		})
-		muted(c, desc).Padding(0, 0, 2, 38)
 		// 共同的上级目录单独一行、不折行：拼进说明文字里，长路径会在中间断开
 		if parent != "" && len(dirs) > 1 {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(0, 0, 0, 38).Children(func() {
@@ -130,9 +135,6 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 				})
 			}).Height(listHeight(len(dirs), parent == "" || len(dirs) == 1)).Padding(4, 0)
 		})
-		if len(dirs) > 1 {
-			muted(c, "按住 ⌘ 单击可以多选。右键可以在 Finder 中打开或移除，文件夹也可以直接拖进来。").Padding(0, 4)
-		}
 	})
 }
 

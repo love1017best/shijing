@@ -99,11 +99,29 @@ func panel(c *ui.Context) ui.Element {
 
 // group 是 macOS 系统设置风格的一组设置：标题在卡片外，卡片里一行一项、细线分隔。
 // rows 里每个函数画一行。
+// helpDot 是设置项旁边的小问号：指针悬停、键盘聚焦时浮现说明，界面上不再铺一段说明文字。
+func helpDot(c *ui.Context, title, desc string) ui.Element {
+	t := c.Theme()
+	d := ui.Box(c).Size(16, 16).Radius(8).Center().
+		Label("「" + title + "」的说明").Role(ui.RoleButton).Focusable().
+		Cursor(ui.CursorPointer).Tooltip(desc)
+	return d.Children(func() {
+		ui.Icon(c, iconHelp).FontSize(13).TextColor(t.TextMuted)
+	})
+}
+
+// group 是一个设置分组：标题、白底卡片、每行之间一条分隔线。
+// footnote 放在标题旁边的小问号里，不占页面高度。
 func group(c *ui.Context, title, footnote string, rows ...func()) {
 	t := c.Theme()
 	ui.Column(c).Gap(8).Children(func() {
 		if title != "" {
-			ui.Text(c, title).FontSize(13).Bold().TextColor(t.TextMuted).Padding(0, 4)
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(0, 4).Children(func() {
+				ui.Text(c, title).FontSize(13).Bold().TextColor(t.TextMuted)
+				if footnote != "" {
+					helpDot(c, title, footnote)
+				}
+			})
 		}
 		panel(c).Children(func() {
 			for i, row := range rows {
@@ -113,20 +131,32 @@ func group(c *ui.Context, title, footnote string, rows ...func()) {
 				row()
 			}
 		})
-		if footnote != "" {
-			muted(c, footnote).Padding(0, 4)
-		}
 	})
 }
 
-// settingRow 是一行设置：左边名称和说明，右边控件。返回名称文字，方便控件 LabelledBy。
+// settingRow 是一行设置：左边名称（说明收进旁边的小问号）和控件。返回名称文字，方便控件 LabelledBy。
 func settingRow(c *ui.Context, title, desc string, control func(label ui.Element)) {
+	settingRowNote(c, title, desc, "", control)
+}
+
+// settingRowNote 和 settingRow 一样，note 是始终显示的一行小字，只放当下状态（如端口号、下次运行时间），不放功能说明。
+func settingRowNote(c *ui.Context, title, desc, note string, control func(label ui.Element)) {
+	settingRowNoteColor(c, title, desc, note, c.Theme().TextMuted, control)
+}
+
+// settingRowNoteColor 和 settingRowNote 一样，note 用指定颜色（录制快捷键被拒绝之类的提示要显眼）。
+func settingRowNoteColor(c *ui.Context, title, desc, note string, color ui.Color, control func(label ui.Element)) {
 	ui.Row(c).Gap(20).AlignItems(ui.Center).Padding(13, 16).Children(func() {
 		var label ui.Element
 		ui.Column(c).Grow(1).Shrink(1).Gap(3).MinWidth(0).Children(func() {
-			label = ui.Text(c, title).FontSize(13.5)
-			if desc != "" {
-				muted(c, desc)
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				label = ui.Text(c, title).FontSize(13.5)
+				if desc != "" {
+					helpDot(c, title, desc)
+				}
+			})
+			if note != "" {
+				ui.Text(c, note).TextColor(color).FontSize(12).Wrap()
 			}
 		})
 		ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(8).Children(func() { control(label) })
@@ -136,10 +166,10 @@ func settingRow(c *ui.Context, title, desc string, control func(label ui.Element
 // wideRow 是控件需要整行宽度的设置（路径输入框等）：名称在上，控件在下。
 func wideRow(c *ui.Context, title, desc string, control func()) {
 	ui.Column(c).Gap(8).Padding(13, 16).Children(func() {
-		ui.Column(c).Gap(3).Children(func() {
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, title).FontSize(13.5)
 			if desc != "" {
-				muted(c, desc)
+				helpDot(c, title, desc)
 			}
 		})
 		control()

@@ -162,11 +162,11 @@ func (a *app) excludedSection(c *ui.Context) {
 				ui.Icon(c, iconXCircle).FontSize(15).TextColor(t.TextMuted)
 			})
 			ui.Text(c, "不再选的图片").FontSize(16).Bold()
+			helpDot(c, "不再选的图片", "在概览页或壁纸页选了「移出并不再选它」的原图，采样时会跳过。原图没有删除。")
 			ui.Text(c, fmt.Sprint(len(a.cfg.Excluded))).FontSize(12).TextColor(t.TextMuted)
 			ui.Spacer(c)
 			ui.Button(c, "全部恢复").OnClick(func() { a.cfg.Excluded = []string{} })
 		})
-		muted(c, "在概览页或壁纸页选了「移出并不再选它」的原图，采样时会跳过。原图没有删除。").Padding(0, 0, 2, 38)
 		panel(c).Padding(4, 0).Children(func() {
 			for i, p := range a.cfg.Excluded {
 				c.Key(p)

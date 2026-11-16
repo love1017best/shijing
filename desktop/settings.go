@@ -37,11 +37,11 @@ func (a *app) settingsPage(c *ui.Context) {
 
 		group(c, "采样", "",
 			func() {
-				desc := ""
+				note := ""
 				if per, total := a.estimateBytes(int(a.num)); total > 0 && a.modeIdx == 0 {
-					desc = fmt.Sprintf("按上一轮平均每张 %s 算，大约占 %s", humanBytes(per), humanBytes(total))
+					note = fmt.Sprintf("按上一轮平均每张 %s 算，大约占 %s", humanBytes(per), humanBytes(total))
 				}
-				settingRow(c, "每次张数", desc, func(ui.Element) {
+				settingRowNote(c, "每次张数", "", note, func(ui.Element) {
 					ui.NumberInput(c, &a.num, 1, 9999, 10).Width(150).Label("每次张数")
 				})
 			},
@@ -51,24 +51,25 @@ func (a *app) settingsPage(c *ui.Context) {
 				})
 			},
 			func() {
-				desc := "优先选择本轮未更换过的图片；整个图库都更换过一遍后再开始新一轮，减少和前几次重复。"
+				note := ""
 				if g := a.lastGood; g != nil && g.Copy.Rotated > 0 && g.Copy.Candidates > 0 {
-					desc += fmt.Sprintf("\n本轮已更换 %s / %s 张（%.0f%%）。", humanCount(g.Copy.Rotated), humanCount(g.Copy.Candidates),
+					note = fmt.Sprintf("本轮已更换 %s / %s 张（%.0f%%）", humanCount(g.Copy.Rotated), humanCount(g.Copy.Candidates),
 						float64(g.Copy.Rotated)/float64(g.Copy.Candidates)*100)
 				}
-				settingRow(c, "优先选未更换过的", desc, func(l ui.Element) {
-					ui.Switch(c, &a.cfg.PreferUnseen).LabelledBy(l)
-				})
+				settingRowNote(c, "优先选未更换过的",
+					"优先选择本轮未更换过的图片；整个图库都更换过一遍后再开始新一轮，减少和前几次重复。", note, func(l ui.Element) {
+						ui.Switch(c, &a.cfg.PreferUnseen).LabelledBy(l)
+					})
 			})
 
 		custom := a.preset >= len(resPresets)
 		resRows := []func(){
 			func() {
-				desc := fmt.Sprintf("%d × %d", int(a.minW), int(a.minH))
+				note := fmt.Sprintf("%d × %d", int(a.minW), int(a.minH))
 				if custom {
-					desc = "在下面填写宽和高"
+					note = "在下面填写宽和高"
 				}
-				settingRow(c, "最低分辨率", desc, func(ui.Element) {
+				settingRowNote(c, "最低分辨率", "", note, func(ui.Element) {
 					labels := make([]string, 0, len(resPresets)+1)
 					for _, p := range resPresets {
 						labels = append(labels, p.label)
@@ -95,11 +96,11 @@ func (a *app) settingsPage(c *ui.Context) {
 
 		group(c, "筛选", "只作用于「筛选 + 采样」目录。",
 			func() {
-				desc := "关闭时只模拟运行：日志里列出哪些图片不合格，不删除文件。"
+				note, noteColor := "", t.TextMuted
 				if a.cfg.DeleteDuringFilter {
-					desc = "已开启：不合格的原图会被直接删除，不可撤销。关闭时只模拟运行。"
+					note, noteColor = "不合格的原图会被删除，不可撤销", t.Warning
 				}
-				settingRow(c, "删除不合格原图", desc, func(l ui.Element) {
+				settingRowNoteColor(c, "删除不合格原图", "关闭时只模拟运行：日志里列出哪些图片不合格，不删除文件。", note, noteColor, func(l ui.Element) {
 					if a.cfg.DeleteDuringFilter {
 						ui.Icon(c, iconAlert).FontSize(14).TextColor(t.Warning)
 					}
@@ -114,11 +115,11 @@ func (a *app) settingsPage(c *ui.Context) {
 
 		group(c, "自动换壁纸", "应用开着时（关掉窗口后会在后台继续运行）按这个间隔自动换一批。自动运行不会删除原图，筛选只模拟；删除只在手动点「换一批壁纸」时发生。",
 			func() {
-				desc := "从上次运行开始计时。"
+				note := ""
 				if next := a.nextAutoRun(); !next.IsZero() {
-					desc = "下一次：" + next.Format("1月2日 15:04")
+					note = "下一次：" + next.Format("1月2日 15:04")
 				}
-				settingRow(c, "间隔", desc, func(ui.Element) {
+				settingRowNote(c, "间隔", "从上次运行开始计时。", note, func(ui.Element) {
 					labels := make([]string, len(autoRunHours))
 					for i, h := range autoRunHours {
 						labels[i] = autoRunLabel(h)
@@ -136,7 +137,7 @@ func (a *app) settingsPage(c *ui.Context) {
 
 		group(c, "配置文件", "",
 			func() {
-				settingRow(c, "config.json", a.cfgPath, func(ui.Element) {
+				settingRowNote(c, "config.json", "", a.cfgPath, func(ui.Element) {
 					iconButton(c, iconExternal, "在 Finder 中显示", false).OnClick(func() {
 						a.openPath(filepath.Dir(a.cfgPath))
 					})

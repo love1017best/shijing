@@ -6,6 +6,67 @@ enum ThisDevice {
     static var label: String { "这台 " + UIDevice.current.localizedModel }
 }
 
+/// 分组标题旁边的问号：点一下弹出说明。功能说明都收在这里，列表里只留标题和设置项
+/// （和电脑端设置页的小问号一致，v0.4.6 起）。动态的状态（监听端口、下次运行、版本不一致提醒）仍然直接显示。
+struct SectionHelp: View {
+    let text: String
+    let title: String
+    /// 截图用：启动参数 `-demoHelp <分组标题>` 让那一组问号直接展开（模拟器里点按钮不可靠）
+    @State private var open: Bool
+
+    init(text: String, title: String) {
+        self.text = text
+        self.title = title
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-demoHelp"), i + 1 < args.count, args[i + 1] == title {
+            _open = State(initialValue: true)
+        } else {
+            _open = State(initialValue: false)
+        }
+        #else
+        _open = State(initialValue: false)
+        #endif
+    }
+
+    var body: some View {
+        Button { open = true } label: {
+            Image(systemName: "questionmark.circle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("「\(title)」的说明")
+        .popover(isPresented: $open) {
+            Text(text)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(16)
+                // 给定宽度，文字才能在气泡里正常换行、按行数撑高（只给 maxWidth 时会被截成两行）
+                .frame(width: 280, alignment: .leading)
+                .presentationCompactAdaptation(.popover)
+        }
+    }
+}
+
+/// 分组标题 + 问号说明。
+struct HelpHeader: View {
+    let title: String
+    let help: String
+
+    init(_ title: String, _ help: String) {
+        self.title = title
+        self.help = help
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+            SectionHelp(text: help, title: title)
+        }
+    }
+}
+
 /// 概览里的「状态」：只读，和电脑概览顶部的摘要条对应（壁纸文件夹、张数、图库、下次自动换）。改设置去「设置」页。
 struct StatusSection: View {
     let state: RemoteState
@@ -201,9 +262,7 @@ struct SettingsPage: View {
             Section {
                 LabeledContent("签名", value: expiry)
             } header: {
-                Text(ThisDevice.label)
-            } footer: {
-                Text("免费签名 7 天到期，到期后拾景无法启动。在电脑上重新安装一次就能续上，设置和配对都会保留。")
+                HelpHeader(ThisDevice.label, "免费签名 7 天到期，到期后拾景无法启动。在电脑上重新安装一次就能续上，设置和配对都会保留。")
             }
         }
     }
@@ -308,9 +367,7 @@ struct SettingsPage: View {
                 .disabled(disabled)
             }
         } header: {
-            Text("输出")
-        } footer: {
-            Text("复制：每张图在壁纸文件夹里存一份，占空间；图库未连接时仍可查看。\n软链接：只存指向原图的链接，省空间；图库未连接时这些图片无法显示。")
+            HelpHeader("输出", "复制：每张图在壁纸文件夹里存一份，占空间；图库未连接时仍可查看。\n软链接：只存指向原图的链接，省空间；图库未连接时这些图片无法显示。")
         }
     }
 
@@ -329,9 +386,7 @@ struct SettingsPage: View {
             }
             toggle("优先选未更换过的", set.preferUnseen, key: "prefer_unseen", disabled: disabled)
         } header: {
-            Text("采样")
-        } footer: {
-            Text("平衡采样：优先让每个子文件夹至少入选一张，避免少数几个大文件夹占满名额。\n优先选未更换过的：本轮尚未更换过的图片优先入选，整个图库都更换过一遍后再从头开始。")
+            HelpHeader("采样", "平衡采样：优先让每个子文件夹至少入选一张，避免少数几个大文件夹占满名额。\n优先选未更换过的：本轮尚未更换过的图片优先入选，整个图库都更换过一遍后再从头开始。")
         }
     }
 
@@ -343,9 +398,7 @@ struct SettingsPage: View {
                 toggle("增量筛选", incremental, key: "incremental", disabled: disabled)
             }
         } header: {
-            Text("筛选")
-        } footer: {
-            Text("打开后，更换壁纸时会删除图库中竖屏、接近正方形、分辨率不够的原图，且不可撤销。从手机更换时会先确认，也可以选择本次仅模拟。\n增量筛选会跳过上次检查后没有变化的文件夹。")
+            HelpHeader("筛选", "打开后，更换壁纸时会删除图库中竖屏、接近正方形、分辨率不够的原图，且不可撤销。从手机更换时会先确认，也可以选择本次仅模拟。\n增量筛选会跳过上次检查后没有变化的文件夹。")
         }
     }
 
@@ -368,9 +421,7 @@ struct SettingsPage: View {
                 }
             }
         } header: {
-            Text("自动换壁纸")
-        } footer: {
-            Text("电脑上的拾景开着时按这个间隔自动换一批。自动运行不会删除原图。")
+            HelpHeader("自动换壁纸", "电脑上的拾景开着时按这个间隔自动换一批。自动运行不会删除原图。")
         }
     }
 
@@ -379,9 +430,7 @@ struct SettingsPage: View {
         Section {
             toggle("刷新系统壁纸", set.refreshWallpaper, key: "refresh_wallpaper", disabled: disabled)
         } header: {
-            Text("系统")
-        } footer: {
-            Text("更换一批后重启 macOS 的壁纸服务，否则系统会继续轮换已经删掉的旧图。图库目录的添加和移除、归档位置等在电脑上修改。")
+            HelpHeader("系统", "更换一批后重启 macOS 的壁纸服务，否则系统会继续轮换已经删掉的旧图。图库目录的添加和移除、归档位置等在电脑上修改。")
         }
     }
 
@@ -422,9 +471,7 @@ struct SettingsPage: View {
                 .disabled(disabled)
             }
         } header: {
-            Text("画质要求")
-        } footer: {
-            Text("只选横图（宽高比大于 1.1），分辨率不低于这里设定的值。")
+            HelpHeader("画质要求", "只选横图（宽高比大于 1.1），分辨率不低于这里设定的值。")
         }
     }
 
@@ -441,9 +488,7 @@ struct SettingsPage: View {
                 }
             }
         } header: {
-            Text("归档")
-        } footer: {
-            Text("每次选中的图片会在图库旁边留一份链接，每次运行前清掉上一批。位置和文件夹名在电脑上改。")
+            HelpHeader("归档", "每次选中的图片会在图库旁边留一份链接，每次运行前清掉上一批。位置和文件夹名在电脑上改。")
         }
     }
 
@@ -460,8 +505,8 @@ struct SettingsPage: View {
             } label: {
                 LabeledContent("图库目录", value: "\(state.libraryDirs) 个")
             }
-        } footer: {
-            Text("筛选 + 采样会先删掉不合格的原图；仅采样不动文件。目录只能在电脑上的「图库」页增删，手机上是只读的。")
+        } header: {
+            HelpHeader("图库", "筛选 + 采样会先删掉不合格的原图；仅采样不动文件。目录只能在电脑上的「图库」页增删，手机上是只读的。")
         }
     }
 
@@ -491,9 +536,7 @@ struct SettingsPage: View {
                         .disabled(session.connection != .live)
                 }
             } header: {
-                Text("待删除（\(items.count)）")
-            } footer: {
-                Text("图库未连接时，需要删除的原图会先排在电脑上，图库连接后自动删除。取消后这张原图保留；壁纸文件夹中的那一份已在手机上移出。")
+                HelpHeader("待删除（\(items.count)）", "图库未连接时，需要删除的原图会先排在电脑上，图库连接后自动删除。取消后这张原图保留；壁纸文件夹中的那一份已在手机上移出。")
             }
         }
     }
@@ -513,12 +556,12 @@ struct SettingsPage: View {
                         if deletes > 0 {
                             Image(systemName: "trash").foregroundStyle(.red)
                         }
-                        Text("待处理操作")
+                        Text("查看")
                     }
                 }
             }
-        } footer: {
-            Text("离线时记录的整理：「移出」「不再选」连接电脑后自动处理；「删除原图」不可撤销，连接后还要逐张（或全部）确认才会删除。")
+        } header: {
+            HelpHeader("待处理操作", "离线时记录的整理：「移出」「不再选」连接电脑后自动处理；「删除原图」不可撤销，连接后还要逐张（或全部）确认才会删除。")
         }
     }
 
@@ -600,8 +643,8 @@ struct LibraryDirsView: View {
                             Label("重新检查挂载", systemImage: "arrow.clockwise")
                         }
                         .disabled(session.connection != .live)
-                    } footer: {
-                        Text("挂载状态由电脑检查。点「重新检查挂载」后，电脑会重新检查这些目录，再把结果发回来。目录只能在电脑上的「图库」页增删。")
+                    } header: {
+                        HelpHeader("目录", "挂载状态由电脑检查。点「重新检查挂载」后，电脑会重新检查这些目录，再把结果发回来。目录只能在电脑上的「图库」页增删。")
                     }
                 }
                 .contentWidthCap(max: 680)
@@ -757,9 +800,7 @@ private struct OfflineCacheSection: View {
                 if store.prefetchOriginalDone % 20 == 0 { refresh() }
             }
         } header: {
-            Text("离线")
-        } footer: {
-            Text("无法连接电脑时，概览和壁纸显示的是上次同步的内容；更换一批后，不在这批里的图片会删除。打开「保存原图」会把图库中的原文件也保存下来，离线时可以存到相册、分享原图，直到达到「缓存上限」。")
+            HelpHeader("离线", "无法连接电脑时，概览和壁纸显示的是上次同步的内容；更换一批后，不在这批里的图片会删除。打开「保存原图」会把图库中的原文件也保存下来，离线时可以存到相册、分享原图，直到达到「缓存上限」。")
         }
     }
 

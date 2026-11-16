@@ -13,20 +13,20 @@ func (a *app) remoteGroup(c *ui.Context) {
 	t := c.Theme()
 	rows := []func(){
 		func() {
-			desc := "关闭时不监听任何端口。"
+			help := "打开后，同一局域网里配对过的 iPhone 可以看进度、换一批壁纸、停止运行。关闭时不监听任何端口。"
+			note := ""
 			if a.cfg.RemoteEnabled {
 				switch port, errText := a.remote.status(); {
 				case errText != "":
-					desc = "无法监听端口：" + errText + "。关掉再打开可以重试。"
+					note = "无法监听端口：" + errText + "。关掉再打开可以重试。"
 				case port > 0:
-					desc = fmt.Sprintf("正在监听端口 %d。iPhone 上打开拾景 App 会自动找到这台 Mac", port)
+					note = fmt.Sprintf("正在监听端口 %d", port)
 					if ips := localIPs(); len(ips) > 0 {
-						desc += fmt.Sprintf("；找不到时手动填 %s:%d", ips[0], port)
+						help += fmt.Sprintf("iPhone 上打开拾景 App 会自动找到这台 Mac；找不到时可以手动填 %s:%d。", ips[0], port)
 					}
-					desc += "。"
 				}
 			}
-			settingRow(c, "允许手机遥控", desc, func(l ui.Element) {
+			settingRowNote(c, "允许手机遥控", help, note, func(l ui.Element) {
 				ui.Switch(c, &a.cfg.RemoteEnabled).LabelledBy(l)
 			})
 		},
@@ -34,8 +34,8 @@ func (a *app) remoteGroup(c *ui.Context) {
 	devs := a.remote.deviceList()
 	for _, d := range devs {
 		rows = append(rows, func() {
-			desc := "配对于 " + d.PairedAt.Format("2006年1月2日 15:04")
-			settingRow(c, d.Name, desc, func(ui.Element) {
+			note := "配对于 " + d.PairedAt.Format("2006年1月2日 15:04")
+			settingRowNote(c, d.Name, "", note, func(ui.Element) {
 				if d.online {
 					pill(c, "已连接", t.Success)
 				}
@@ -53,7 +53,7 @@ func (a *app) remoteGroup(c *ui.Context) {
 	}
 	if len(devs) == 0 && a.cfg.RemoteEnabled {
 		rows = append(rows, func() {
-			settingRow(c, "暂无已配对的手机", "在 iPhone 上打开拾景 App、选这台 Mac，这里会弹出 6 位配对码。", func(ui.Element) {})
+			settingRowNote(c, "暂无已配对的手机", "", "在 iPhone 上打开拾景 App、选这台 Mac，这里会弹出 6 位配对码。", func(ui.Element) {})
 		})
 	}
 	if a.cfg.RemoteEnabled {
