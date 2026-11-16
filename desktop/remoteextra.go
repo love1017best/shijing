@@ -110,8 +110,7 @@ func (rs *remoteServer) handleSettings(w http.ResponseWriter, r *http.Request, d
 		MinHeight    *int    `json:"min_height"`
 		Archive      *bool   `json:"archive_enabled"`
 	}
-	if err := readBody(r, &body); err != nil {
-		writeErr(w, http.StatusBadRequest, "请求格式不对")
+	if !readBodyOrFail(w, r, &body) {
 		return
 	}
 	if n := body.SampleCount; n != nil && (*n < 1 || *n > remoteMaxSampleCnt) {
@@ -139,7 +138,7 @@ func (rs *remoteServer) handleSettings(w http.ResponseWriter, r *http.Request, d
 		}
 	}
 	var changed []string
-	ok := rs.onMain(func() {
+	if !rs.onMainOrFail(w, func() {
 		a := rs.a
 		if n := body.SampleCount; n != nil && int(a.num) != *n {
 			a.num = float64(*n)
@@ -164,12 +163,7 @@ func (rs *remoteServer) handleSettings(w http.ResponseWriter, r *http.Request, d
 			if int(a.minW) != w || int(a.minH) != h {
 				a.minW, a.minH = float64(w), float64(h)
 				// 桌面设置页的预设选择跟着变（对不上任何预设就是「自定义」）
-				a.preset = len(resPresets)
-				for i, p := range resPresets {
-					if p.w == w && p.h == h {
-						a.preset = i
-					}
-				}
+				a.preset = presetFor(w, h)
 				changed = append(changed, fmt.Sprintf("最低分辨率 %d×%d", w, h))
 			}
 		}
@@ -188,9 +182,7 @@ func (rs *remoteServer) handleSettings(w http.ResponseWriter, r *http.Request, d
 		if len(changed) > 0 {
 			a.appendLog("📱 「" + dev + "」改了设置：" + joinCN(changed))
 		}
-	})
-	if !ok {
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
+	}) {
 		return
 	}
 	rs.writeSnapshot(w)
@@ -225,10 +217,9 @@ func joinCN(s []string) string {
 // handleLog 给最近的运行日志（和电脑上「日志」里看到的一样，按行）。
 func (rs *remoteServer) handleLog(w http.ResponseWriter, r *http.Request, _ string) {
 	var lines []string
-	if !rs.onMain(func() {
+	if !rs.onMainOrFail(w, func() {
 		lines = slices.Clone(rs.a.log[max(0, len(rs.a.log)-remoteLogLines):])
 	}) {
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
 		return
 	}
 	if lines == nil {
@@ -240,7 +231,7 @@ func (rs *remoteServer) handleLog(w http.ResponseWriter, r *http.Request, _ stri
 // handleUndo 撤销最近一次移出（电脑上 ⌘Z 的同一个操作）。
 func (rs *remoteServer) handleUndo(w http.ResponseWriter, r *http.Request, dev string) {
 	var msg string
-	ok := rs.onMain(func() {
+	if !rs.onMainOrFail(w, func() {
 		a := rs.a
 		switch {
 		case a.running:
@@ -261,15 +252,14 @@ func (rs *remoteServer) handleUndo(w http.ResponseWriter, r *http.Request, dev s
 				a.appendLog("📱 「" + dev + "」撤销了移出 " + name)
 			}
 		}
-	})
-	switch {
-	case !ok:
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
-	case msg != "":
-		writeErr(w, http.StatusConflict, msg)
-	default:
-		rs.writeSnapshot(w)
+	}) {
+		return
 	}
+	if msg != "" {
+		writeErr(w, http.StatusConflict, msg)
+		return
+	}
+	rs.writeSnapshot(w)
 }
 
 type remoteExcluded struct {
@@ -277,18 +267,22 @@ type remoteExcluded struct {
 	Display string `json:"display"` // ~ 缩写的路径
 }
 
+// excludedList 是「不再选」名单的手机版本：完整路径加 ~ 缩写。只在主线程上调。
+// 返回非 nil，JSON 里是 [] 而不是 null。
+func (rs *remoteServer) excludedList() []remoteExcluded {
+	list := make([]remoteExcluded, 0, len(rs.a.cfg.Excluded))
+	for _, p := range rs.a.cfg.Excluded {
+		list = append(list, remoteExcluded{Path: p, Display: tildify(p)})
+	}
+	return list
+}
+
 func (rs *remoteServer) handleExcluded(w http.ResponseWriter, r *http.Request, _ string) {
 	var list []remoteExcluded
-	if !rs.onMain(func() {
-		for _, p := range rs.a.cfg.Excluded {
-			list = append(list, remoteExcluded{Path: p, Display: tildify(p)})
-		}
+	if !rs.onMainOrFail(w, func() {
+		list = rs.excludedList()
 	}) {
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
 		return
-	}
-	if list == nil {
-		list = []remoteExcluded{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": list})
 }
@@ -304,7 +298,7 @@ func (rs *remoteServer) handleExcludedAdd(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var list []remoteExcluded
-	ok := rs.onMain(func() {
+	if !rs.onMainOrFail(w, func() {
 		a := rs.a
 		added := 0
 		for _, p := range body.Paths {
@@ -317,16 +311,9 @@ func (rs *remoteServer) handleExcludedAdd(w http.ResponseWriter, r *http.Request
 		if added > 0 {
 			a.appendLog("📱 「" + dev + "」离线时记下的 " + strconv.Itoa(added) + " 张「不再选」已补上")
 		}
-		for _, p := range a.cfg.Excluded {
-			list = append(list, remoteExcluded{Path: p, Display: tildify(p)})
-		}
-	})
-	if !ok {
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
+		list = rs.excludedList()
+	}) {
 		return
-	}
-	if list == nil {
-		list = []remoteExcluded{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": list})
 }
@@ -342,7 +329,7 @@ func (rs *remoteServer) handleExcludedRestore(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var list []remoteExcluded
-	ok := rs.onMain(func() {
+	if !rs.onMainOrFail(w, func() {
 		a := rs.a
 		before := len(a.cfg.Excluded)
 		if body.All {
@@ -353,16 +340,9 @@ func (rs *remoteServer) handleExcludedRestore(w http.ResponseWriter, r *http.Req
 		if n := before - len(a.cfg.Excluded); n > 0 {
 			a.appendLog("📱 「" + dev + "」恢复了 " + strconv.Itoa(n) + " 张不再选的图片")
 		}
-		for _, p := range a.cfg.Excluded {
-			list = append(list, remoteExcluded{Path: p, Display: tildify(p)})
-		}
-	})
-	if !ok {
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
+		list = rs.excludedList()
+	}) {
 		return
-	}
-	if list == nil {
-		list = []remoteExcluded{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": list})
 }

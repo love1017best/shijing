@@ -14,13 +14,6 @@ import (
 
 // ── 概览 ──────────────────────────────────────────────────────────────────
 
-func (a *app) modeLabel() string {
-	if a.modeIdx == 1 {
-		return "软链接"
-	}
-	return "复制"
-}
-
 func (a *app) overviewPage(c *ui.Context) {
 	pageHeader(c, "概览", "", nil)
 	a.hero(c)
@@ -92,7 +85,7 @@ func (a *app) hero(c *ui.Context) {
 					})
 				} else {
 					ui.Row(c).Gap(6).AlignItems(ui.Center).MinWidth(0).Children(func() {
-						ui.Text(c, a.modeLabel()+"到 "+a.cfg.DestDir).
+						ui.Text(c, modeLabel(modes[a.modeIdx])+"到 "+a.cfg.DestDir).
 							FontSize(12.5).TextColor(white.Alpha(0.82)).SingleLine().Shrink(1)
 						// 会删原图时在这里说一句（点「换一批」时还会再确认一次）
 						if a.willDelete() {

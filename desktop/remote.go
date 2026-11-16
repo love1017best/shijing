@@ -343,6 +343,16 @@ func (rs *remoteServer) snapshot() []byte {
 	return rs.state
 }
 
+// onMainOrFail 在主线程上执行 fn，主线程太久没反应时回 503 并返回 false。
+// 接口里改状态的操作用它，别每处各写一遍「电脑上的拾景没有响应」。
+func (rs *remoteServer) onMainOrFail(w http.ResponseWriter, fn func()) bool {
+	if rs.onMain(fn) {
+		return true
+	}
+	writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
+	return false
+}
+
 // onMain 在主线程上执行 fn 并等它跑完；主线程太久没反应时返回 false。
 func (rs *remoteServer) onMain(fn func()) bool {
 	done := make(chan struct{})
@@ -394,6 +404,15 @@ func readBody(r *http.Request, v any) error {
 	return json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(v)
 }
 
+// readBodyOrFail 读请求体；格式不对时回 400 并返回 false。
+func readBodyOrFail(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := readBody(r, v); err != nil {
+		writeErr(w, http.StatusBadRequest, "请求格式不对")
+		return false
+	}
+	return true
+}
+
 func (rs *remoteServer) authed(h func(w http.ResponseWriter, r *http.Request, device string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		dev := rs.deviceFor(r)
@@ -422,8 +441,7 @@ func (rs *remoteServer) handlePairStart(w http.ResponseWriter, r *http.Request) 
 		// ID 是手机的固定标识，旧版手机端不带
 		ID string `json:"id"`
 	}
-	if err := readBody(r, &body); err != nil {
-		writeErr(w, http.StatusBadRequest, "请求格式不对")
+	if !readBodyOrFail(w, r, &body) {
 		return
 	}
 	rs.startPair(sanitizeDevice(body.Device), sanitizeDeviceID(body.ID), false)
@@ -484,8 +502,7 @@ func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request)
 		Device string `json:"device"`
 		ID     string `json:"id"`
 	}
-	if err := readBody(r, &body); err != nil {
-		writeErr(w, http.StatusBadRequest, "请求格式不对")
+	if !readBodyOrFail(w, r, &body) {
 		return
 	}
 	rs.mu.Lock()
@@ -537,8 +554,7 @@ func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request)
 }
 
 func (rs *remoteServer) handleState(w http.ResponseWriter, r *http.Request, _ string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_, _ = w.Write(rs.snapshot())
+	rs.writeSnapshot(w)
 }
 
 // handleEvents 是 SSE 事件流：连上先发一次当前状态，之后状态变了就发，空闲时定期发注释行保活。
@@ -603,13 +619,11 @@ func (rs *remoteServer) handleRun(w http.ResponseWriter, r *http.Request, dev st
 	var body struct {
 		Delete bool `json:"delete"`
 	}
-	if err := readBody(r, &body); err != nil {
-		writeErr(w, http.StatusBadRequest, "请求格式不对")
+	if !readBodyOrFail(w, r, &body) {
 		return
 	}
 	var dirs []string
-	if !rs.onMain(func() { dirs = rs.a.allDirs() }) {
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
+	if !rs.onMainOrFail(w, func() { dirs = rs.a.allDirs() }) {
 		return
 	}
 	states := make([]mountState, len(dirs))
@@ -620,45 +634,40 @@ func (rs *remoteServer) handleRun(w http.ResponseWriter, r *http.Request, dev st
 	wg.Wait()
 
 	var runErr error
-	ok := rs.onMain(func() {
+	if !rs.onMainOrFail(w, func() {
 		for i, d := range dirs {
 			rs.a.mounts[d] = states[i]
 		}
 		runErr = rs.a.remoteRun(dev, body.Delete)
-	})
-	switch {
-	case !ok:
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
-	case runErr != nil:
-		writeErr(w, http.StatusConflict, runErr.Error())
-	default:
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_, _ = w.Write(rs.snapshot())
+	}) {
+		return
 	}
+	if runErr != nil {
+		writeErr(w, http.StatusConflict, runErr.Error())
+		return
+	}
+	rs.writeSnapshot(w)
 }
 
 func (rs *remoteServer) handleStop(w http.ResponseWriter, r *http.Request, dev string) {
-	if !rs.onMain(func() {
+	if !rs.onMainOrFail(w, func() {
 		if rs.a.running && !rs.a.stopReq.Load() {
 			rs.a.appendLog(fmt.Sprintf("📱 「%s」请求停止", dev))
 		}
 		rs.a.stopRun()
 	}) {
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_, _ = w.Write(rs.snapshot())
+	rs.writeSnapshot(w)
 }
 
 // handleMountsCheck 让电脑重新检查每个图库目录能不能访问（手机上的「重新检查挂载」）。
 // 检查在后台做（网络卷卡住时 stat 会阻塞），结果随状态快照推给手机。
 func (rs *remoteServer) handleMountsCheck(w http.ResponseWriter, r *http.Request, dev string) {
-	if !rs.onMain(func() {
+	if !rs.onMainOrFail(w, func() {
 		rs.a.appendLog("📱 「" + dev + "」重新检查了图库挂载")
 		rs.a.checkMounts()
 	}) {
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
 		return
 	}
 	rs.writeSnapshot(w)
@@ -676,7 +685,7 @@ func (rs *remoteServer) handlePendingCancel(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var removed int
-	ok := rs.onMain(func() {
+	if !rs.onMainOrFail(w, func() {
 		a := rs.a
 		if body.All {
 			removed = len(a.pending)
@@ -690,9 +699,7 @@ func (rs *remoteServer) handlePendingCancel(w http.ResponseWriter, r *http.Reque
 		if removed > 0 {
 			a.appendLog(fmt.Sprintf("📱 「%s」取消了 %d 项排队删除", dev, removed))
 		}
-	})
-	if !ok {
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
+	}) {
 		return
 	}
 	rs.writeSnapshot(w)

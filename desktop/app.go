@@ -48,6 +48,16 @@ var resPresets = []struct {
 	{"1080p", 1920, 1080},
 }
 
+// presetFor 是最低分辨率对应的预设下标；对不上任何预设时返回 len(resPresets)（界面上是「自定义」）。
+func presetFor(minW, minH int) int {
+	for i, p := range resPresets {
+		if p.w == minW && p.h == minH {
+			return i
+		}
+	}
+	return len(resPresets)
+}
+
 // mountState 是一个源目录当前能不能访问。
 type mountState int
 
@@ -258,12 +268,7 @@ func (a *app) setConfig(cfg core.Config) {
 	a.modeIdx = max(0, slices.Index(modes, cfg.Mode))
 	a.autoIdx = slices.Index(autoRunHours, cfg.AutoRunHours)
 	a.prevDelete = cfg.DeleteDuringFilter
-	a.preset = len(resPresets)
-	for i, p := range resPresets {
-		if p.w == cfg.MinWidth && p.h == cfg.MinHeight {
-			a.preset = i
-		}
-	}
+	a.preset = presetFor(cfg.MinWidth, cfg.MinHeight)
 }
 
 // buildConfig 从界面状态生成配置（目录列表复制一份，后台运行不受界面编辑影响）。

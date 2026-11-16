@@ -133,7 +133,7 @@ func (rs *remoteServer) handleWallImage(width int, cached bool) func(http.Respon
 func (rs *remoteServer) wallAction(w http.ResponseWriter, r *http.Request, act func(path string) string) {
 	name := r.PathValue("name")
 	var msg string
-	ok := rs.onMain(func() {
+	if !rs.onMainOrFail(w, func() {
 		a := rs.a
 		if a.running {
 			msg = "正在换壁纸，等换完再整理"
@@ -150,24 +150,21 @@ func (rs *remoteServer) wallAction(w http.ResponseWriter, r *http.Request, act f
 		if m := act(path); m != "" && msg == "" {
 			msg = m
 		}
-	})
-	switch {
-	case !ok:
-		writeErr(w, http.StatusServiceUnavailable, "电脑上的拾景没有响应")
-	case msg != "":
-		writeErr(w, http.StatusConflict, msg)
-	default:
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_, _ = w.Write(rs.snapshot())
+	}) {
+		return
 	}
+	if msg != "" {
+		writeErr(w, http.StatusConflict, msg)
+		return
+	}
+	rs.writeSnapshot(w)
 }
 
 func (rs *remoteServer) handleWallRemove(w http.ResponseWriter, r *http.Request, dev string) {
 	var body struct {
 		Exclude bool `json:"exclude"`
 	}
-	if err := readBody(r, &body); err != nil {
-		writeErr(w, http.StatusBadRequest, "请求格式不对")
+	if !readBodyOrFail(w, r, &body) {
 		return
 	}
 	rs.wallAction(w, r, func(path string) string {
