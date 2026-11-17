@@ -1,2 +1,5 @@
 .DS_Store
 .claude/
+
+# 本地看的架构笔记，不进公开仓库
+docs/ARCHITECTURE.md
