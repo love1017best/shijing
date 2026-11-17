@@ -84,14 +84,11 @@ func loadState(path string) sorterState {
 }
 
 func saveState(path string, s sorterState) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return WriteFileAtomic(path, data, 0o644)
 }
 
 // SortOptions 对应 image_sorter.scan_and_process_directories 的参数。

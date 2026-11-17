@@ -17,6 +17,9 @@ type Paths struct {
 	Selection string // 上一轮选中了哪些原图，用来算两轮之间的重合
 	History   string // 这一轮轮换里换上过哪些原图（PreferUnseen）
 	Pending   string // 图库没连上时排队的「删除原图」（pending.go）
+	// Lock 是运行锁：桌面和命令行共用数据目录，同时跑会一起写增量状态、轮换历史和壁纸文件夹。
+	// 为空时不加锁。
+	Lock string
 }
 
 // PathsIn 返回数据目录下的默认文件路径。
@@ -27,6 +30,7 @@ func PathsIn(dataDir string) Paths {
 		Selection: filepath.Join(dataDir, "last_selection.json"),
 		History:   filepath.Join(dataDir, "selection_history.json"),
 		Pending:   filepath.Join(dataDir, "pending_deletes.json"),
+		Lock:      filepath.Join(dataDir, "run.lock"),
 	}
 }
 
@@ -61,6 +65,14 @@ func RunPipeline(cfg Config, paths Paths, rep Reporter, r *rand.Rand) (Summary, 
 	start := time.Now()
 	logf := rep.logf
 	var sum Summary
+
+	if paths.Lock != "" {
+		unlock, err := lockRun(paths.Lock)
+		if err != nil {
+			return sum, err
+		}
+		defer unlock()
+	}
 
 	cfg = cfg.expanded()
 	filterDirs := cfg.FilterAndSampleDirs

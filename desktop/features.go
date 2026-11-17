@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -155,20 +156,54 @@ func (a *app) copyETA(now time.Time) string {
 
 // ── 缩略图上的操作 ────────────────────────────────────────────────────────
 
+// 整理操作（移出、删除原图、撤销）出错时返回下面两种错误，不自己弹框：
+// 桌面的按钮、菜单、快捷键用 a.report 提示，手机遥控把 err.Error() 写进 409 响应。
+
+// opErr 是要弹错误框的失败，Error() 是「标题：原因」（手机上显示的就是这一句）。
+type opErr struct {
+	title string
+	err   error
+}
+
+func (e *opErr) Error() string { return e.title + "：" + e.err.Error() }
+func (e *opErr) Unwrap() error { return e.err }
+
+func actionErr(title string, err error) error { return &opErr{title, err} }
+
+// softErr 是不值得弹框的失败（比如同名文件挡着放不回去）：桌面显示成 toast。
+type softErr string
+
+func (e softErr) Error() string { return string(e) }
+
+// report 在桌面上提示整理操作的错误；err 为 nil 时什么都不做。只在主线程调用。
+func (a *app) report(err error) {
+	var op *opErr
+	var soft softErr
+	switch {
+	case err == nil:
+	case errors.As(err, &soft):
+		a.toast = soft.Error()
+	case errors.As(err, &op):
+		a.showErr(op.title, op.err.Error())
+	default:
+		a.showErr("操作失败", err.Error())
+	}
+}
+
 // wallSource 是壁纸文件夹里这张图对应的原图；没有记录（旧版本换上的）时返回 ""。
 func (a *app) wallSource(wall string) string {
 	return a.walls.sources[filepath.Base(wall)]
 }
 
 // removeWallpaper 从壁纸文件夹里移除一张（不动原图），exclude 时还把原图加进排除名单。
-func (a *app) removeWallpaper(wall string, exclude bool) {
+// 失败返回错误，由调用方决定怎么提示：桌面 a.report 弹框，手机遥控写进响应。
+func (a *app) removeWallpaper(wall string, exclude bool) error {
 	r := removedWall{wall: wall, idx: slices.Index(a.walls.all, wall), thumb: a.walls.thumbs[wall]}
 	stash, err := a.stashWall(wall)
 	if os.IsNotExist(err) {
 		stash = "" // 文件已经不在了：照样从列表里去掉，只是没法撤销
 	} else if err != nil {
-		a.showErr("移除失败", err.Error())
-		return
+		return actionErr("移除失败", err)
 	}
 	if exclude {
 		if src := a.wallSource(wall); src != "" && !slices.Contains(a.cfg.Excluded, src) {
@@ -186,37 +221,35 @@ func (a *app) removeWallpaper(wall string, exclude bool) {
 		r.stash = stash
 		a.pushUndo(r)
 	}
+	return nil
 }
 
 // deleteOriginal 删除原图（记进删除日志）并从壁纸文件夹移除。调用前已经确认过。
 // 图库（NAS）现在连不上时不报错，而是把这一条排进待办队列，连上后自动执行（pending.go）。
-func (a *app) deleteOriginal(wall string) {
+func (a *app) deleteOriginal(wall string) error {
 	src := a.wallSource(wall)
 	if src == "" {
-		return
+		return nil
 	}
 	if a.sourceUnmounted(src) {
-		a.queueDelete(wall, src)
-		return
+		return a.queueDelete(wall, src)
 	}
 	if err := os.Remove(src); err != nil && !os.IsNotExist(err) {
 		if !os.IsPermission(err) { // 删不掉多半是网络卷临时断开：排队等下次
-			a.queueDelete(wall, src)
-			return
+			return a.queueDelete(wall, src)
 		}
-		a.showErr("删除原图失败", err.Error())
-		return
+		return actionErr("删除原图失败", err)
 	}
 	// 路径不存在要分清「文件真的没了」和「整个卷没挂上」：后者报的也是 ENOENT
 	if _, err := os.Lstat(filepath.Dir(src)); os.IsNotExist(err) {
-		a.queueDelete(wall, src)
-		return
+		return a.queueDelete(wall, src)
 	}
 	core.LogDeletion(a.paths.DeleteLog, src, int(a.minW), int(a.minH), core.ReasonManual)
 	a.appendLog(fmt.Sprintf("🔥 手动删除原图: %s", src))
 	_ = os.Remove(wall)
 	a.dropWall(wall)
 	a.toast = "已删除图库中的原图，并记进删除记录"
+	return nil
 }
 
 // dropWall 把一张从列表里去掉（不重新扫描，其余缩略图不变）。

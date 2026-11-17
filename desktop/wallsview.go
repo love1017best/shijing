@@ -232,14 +232,20 @@ func (a *app) removeSelectedWalls(exclude bool) {
 	if len(todo) == 0 {
 		return
 	}
+	done := 0
 	for _, p := range todo {
-		a.removeWallpaper(p, exclude)
+		if err := a.removeWallpaper(p, exclude); err != nil {
+			a.endWallSelection()
+			a.report(err) // 出错就停，已经移出的照样能 ⌘Z
+			return
+		}
+		done++
 	}
 	a.endWallSelection()
 	if exclude {
-		a.toast = fmt.Sprintf("已移出 %d 张，图库中的原图未删除；后续采样将跳过这些图片", len(todo))
+		a.toast = fmt.Sprintf("已移出 %d 张，图库中的原图未删除；后续采样将跳过这些图片", done)
 	} else {
-		a.toast = fmt.Sprintf("已移出 %d 张，图库中的原图未删除（⌘Z 一次撤回一张）", len(todo))
+		a.toast = fmt.Sprintf("已移出 %d 张，图库中的原图未删除（⌘Z 一次撤回一张）", done)
 	}
 }
 

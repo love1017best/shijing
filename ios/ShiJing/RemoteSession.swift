@@ -112,8 +112,21 @@ final class RemoteSession {
         return false
     }
 
+    /// 会话内部和图片缓存用的底层客户端。视图里发请求别直接拿它，走 `request`。
     func client() throws -> APIClient {
         try APIClient(address: mac.address, token: store.token(for: macID))
+    }
+
+    /// 视图层发请求统一走这里：网络层失败立刻转离线、令牌失效转未配对（`handleRequestError` 不弹提示的那半），
+    /// 错误照样抛给调用方，由调用方决定显示在页面上还是弹 `actionError`。
+    /// 以前每个页面自己 `client()` 再 catch，要靠人记得补上连接状态的处理，漏过（恢复「不再选」）。
+    func request<T>(_ body: (APIClient) async throws -> T) async throws -> T {
+        do {
+            return try await body(client())
+        } catch {
+            handleRequestError(error, showMessage: false)
+            throw error
+        }
     }
 
     /// 开始（或重新开始）保持连接。App 回到前台时调用。

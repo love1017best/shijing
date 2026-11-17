@@ -246,7 +246,12 @@ func newApp(cfgPath string, paths core.Paths) *app {
 	case errors.Is(err, os.ErrNotExist):
 		// 第一次运行：用默认值，有改动时自动保存
 	default:
-		a.appendLog("⚠️ 读取配置失败，已使用默认值: " + err.Error())
+		// 坏文件先改名留着：下一次自动保存会用默认值写 config.json，不备份就丢了
+		msg := "⚠️ 读取配置失败，已使用默认值: " + err.Error()
+		if bak := core.BackupBadConfig(cfgPath); bak != "" {
+			msg += "（原文件已另存为 " + filepath.Base(bak) + "）"
+		}
+		a.appendLog(msg)
 	}
 	a.setConfig(cfg)
 	a.saved = a.buildConfig()

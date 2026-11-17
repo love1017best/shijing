@@ -43,7 +43,8 @@ func (a *app) sourceUnmounted(src string) bool {
 }
 
 // queueDelete 把一张原图记进待办队列，并把壁纸文件夹里的那份移出（可以 ⌘Z 撤销）。
-func (a *app) queueDelete(wall, src string) {
+// 移出失败时队列照样记着（连上后照样删原图），把移出的错误返回给调用方。
+func (a *app) queueDelete(wall, src string) error {
 	if !slices.ContainsFunc(a.pending, func(e core.PendingDelete) bool { return e.Path == src }) {
 		e := core.PendingDelete{Path: src, Wall: filepath.Base(wall), AddedAt: time.Now()}
 		// 排队时一般拿不到文件信息，记零值：执行时只确认文件还在，不比对指纹
@@ -54,8 +55,11 @@ func (a *app) queueDelete(wall, src string) {
 		a.savePending()
 	}
 	a.appendLog(fmt.Sprintf("🕓 图库未连接，原图删除已排队（连接后自动执行）: %s", src))
-	a.removeWallpaper(wall, false)
+	if err := a.removeWallpaper(wall, false); err != nil {
+		return err
+	}
 	a.toast = "图库未连接，删除已排队：连接后自动删除这张原图（⌘Z 撤销移出，队列在概览页查看）"
+	return nil
 }
 
 // maybeProcessPending 尝试执行队列：只在图库目录全都挂上时动手（对着断掉/卡住的卷逐个 stat 会一直卡着），

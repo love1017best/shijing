@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Config 与 Python 版 config.json 的字段一一对应，两个版本可以互相读写同一份文件。
@@ -98,14 +99,25 @@ func LoadConfig(path string) (Config, error) {
 
 // SaveConfig 以与 Python 版相同的格式（2 空格缩进、不转义中文）写回配置。
 func SaveConfig(path string, cfg Config) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return WriteFileAtomic(path, data, 0o644)
+}
+
+// BackupBadConfig 把读不了的配置文件改名成 config.json.bad-<时间> 留着：
+// 读失败后界面用的是默认值，下一次自动保存就会把原文件覆盖掉，图库目录、排除名单都会丢。
+// 返回备份的路径；文件不存在或改名失败返回空字符串。
+func BackupBadConfig(path string) string {
+	if !exists(path) {
+		return ""
+	}
+	bak := path + ".bad-" + time.Now().Format("20060102-150405")
+	if err := os.Rename(path, bak); err != nil {
+		return ""
+	}
+	return bak
 }
 
 // ExpandUser 等价于 os.path.expanduser：只展开开头的 ~ 或 ~/。

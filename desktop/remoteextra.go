@@ -240,15 +240,9 @@ func (rs *remoteServer) handleUndo(w http.ResponseWriter, r *http.Request, dev s
 			msg = "没有可以撤销的移出"
 		default:
 			name := a.undoName()
-			show := a.showErr
-			a.showErr = func(title, message string) { msg = title + "：" + message }
-			before := len(a.walls.all)
-			a.undoRemove()
-			a.showErr = show
-			if msg == "" && len(a.walls.all) == before {
-				msg = a.toast // 同名文件已经在壁纸文件夹里之类
-			}
-			if msg == "" {
+			if err := a.undoRemove(); err != nil {
+				msg = err.Error() // 包括「同名文件已经在壁纸文件夹里」
+			} else {
 				a.appendLog("📱 「" + dev + "」撤销了移出 " + name)
 			}
 		}

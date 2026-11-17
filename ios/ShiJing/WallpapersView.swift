@@ -616,7 +616,7 @@ struct ShareOriginalButton: View {
             if let cached, session.offline {
                 present(cached, deleteAfter: false) // 手机上缓存的那份不能删
             } else {
-                let url = try await session.client().downloadOriginal(wall.name)
+                let url = try await session.request { try await $0.downloadOriginal(wall.name) }
                 present(url, deleteAfter: true)
             }
         } catch {

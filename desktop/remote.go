@@ -220,7 +220,7 @@ func (rs *remoteServer) saveDevices(devs []remoteDevice) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(rs.file, data, 0o600)
+	_ = core.WriteFileAtomic(rs.file, data, 0o600)
 }
 
 func hashToken(tok string) string {

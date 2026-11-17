@@ -128,11 +128,10 @@ func loadRecord<T: Codable>(
 ) async -> RecordLoad<T> {
     if !session.offline {
         do {
-            return RecordLoad(value: try await online(session.client()), syncedAt: nil, error: nil)
+            return RecordLoad(value: try await session.request(online), syncedAt: nil, error: nil)
         } catch {
-            // 刚连不上：顺手把连接状态改成离线，接着看有没有存下来的副本。
+            // 刚连不上：`request` 已经把连接状态改成离线，接着看有没有存下来的副本。
             // 错误写进 RecordLoad.error 显示在页面上，不再额外弹全局提示
-            session.handleRequestError(error, showMessage: false)
             if let c: OfflineStore.Cached<T> = await OfflineStore.shared.loadRecord(session.macID.uuidString, kind) {
                 return RecordLoad(value: c.value, syncedAt: c.at, error: nil)
             }
@@ -524,7 +523,7 @@ struct ExcludedView: View {
         }
         do {
             withAnimation { items = nil == paths ? [] : items?.filter { !paths!.contains($0.path) } }
-            items = try await session.client().restoreExcluded(paths)
+            items = try await session.request { try await $0.restoreExcluded(paths) }
             Task { await session.refreshRecordsCache() } // 名单变了，离线时看的那份也跟着更新
         } catch {
             session.actionError = RemoteSession.describe(error)

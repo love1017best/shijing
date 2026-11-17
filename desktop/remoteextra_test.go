@@ -72,6 +72,21 @@ func TestRemoteUndoAndExcluded(t *testing.T) {
 		t.Fatal("没放回壁纸文件夹")
 	}
 
+	// 放不回去（同名文件挡着）：错误带回手机，不在桌面上弹框
+	h.do(t, "POST", "/api/wallpapers/c.jpg/remove", tok, map[string]bool{"exclude": false})
+	if err := os.WriteFile(filepath.Join(dest, "c.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	popped := false
+	h.showErr = func(string, string) { popped = true }
+	if code, data := h.do(t, "POST", "/api/undo", tok, nil); code != 409 || !strings.Contains(data["error"].(string), "同名文件") {
+		t.Fatalf("同名文件时撤销 = %d %v", code, data)
+	}
+	if popped {
+		t.Fatal("遥控撤销失败不应在桌面弹错误框")
+	}
+	_ = os.Remove(filepath.Join(dest, "c.jpg"))
+
 	// 排除名单：列出、恢复一张、全部恢复
 	h.do(t, "POST", "/api/wallpapers/风景-a.jpg/remove", tok, map[string]bool{"exclude": true})
 	h.do(t, "POST", "/api/wallpapers/风景-b.jpg/remove", tok, map[string]bool{"exclude": true})

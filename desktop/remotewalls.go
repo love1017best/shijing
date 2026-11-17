@@ -7,7 +7,7 @@ package main
 //   - 图片在请求的 goroutine 里解码：缩略图和桌面共用磁盘缓存（cachedScaled，同样的宽度），
 //     大图不缓存，同时最多解码 remoteDecodeWorkers 张（原图可能几千万像素）。
 //   - 操作回主线程调桌面现成的 removeWallpaper / deleteOriginal，桌面上照样能 ⌘Z 撤销移出。
-//     那两个函数出错时弹桌面的错误框，这里临时换掉 showErr，把错误带回给手机。
+//     它们返回的错误直接写进响应（409），不弹桌面的错误框。
 
 import (
 	"fmt"
@@ -129,8 +129,8 @@ func (rs *remoteServer) handleWallImage(width int, cached bool) func(http.Respon
 	}
 }
 
-// wallAction 在主线程上对一张壁纸做操作：确认它还在列表里，桌面的错误框临时改成把错误带回来。
-func (rs *remoteServer) wallAction(w http.ResponseWriter, r *http.Request, act func(path string) string) {
+// wallAction 在主线程上对一张壁纸做操作：确认它还在列表里，act 返回的错误带回手机。
+func (rs *remoteServer) wallAction(w http.ResponseWriter, r *http.Request, act func(path string) error) {
 	name := r.PathValue("name")
 	var msg string
 	if !rs.onMainOrFail(w, func() {
@@ -144,11 +144,8 @@ func (rs *remoteServer) wallAction(w http.ResponseWriter, r *http.Request, act f
 			msg = "这张壁纸已经不在壁纸文件夹里了"
 			return
 		}
-		show := a.showErr
-		a.showErr = func(title, message string) { msg = title + "：" + message }
-		defer func() { a.showErr = show }()
-		if m := act(path); m != "" && msg == "" {
-			msg = m
+		if err := act(path); err != nil {
+			msg = err.Error()
 		}
 	}) {
 		return
@@ -167,13 +164,13 @@ func (rs *remoteServer) handleWallRemove(w http.ResponseWriter, r *http.Request,
 	if !readBodyOrFail(w, r, &body) {
 		return
 	}
-	rs.wallAction(w, r, func(path string) string {
+	rs.wallAction(w, r, func(path string) error {
 		a := rs.a
 		if body.Exclude && a.wallSource(path) == "" {
-			return "这张由旧版本更换，找不到原图，无法删除，只能移出"
+			return softErr("这张由旧版本更换，找不到原图，无法删除，只能移出")
 		}
 		before := len(a.walls.all)
-		a.removeWallpaper(path, body.Exclude)
+		err := a.removeWallpaper(path, body.Exclude)
 		if len(a.walls.all) < before {
 			what := "移出了"
 			if body.Exclude {
@@ -181,21 +178,21 @@ func (rs *remoteServer) handleWallRemove(w http.ResponseWriter, r *http.Request,
 			}
 			a.appendLog(fmt.Sprintf("📱 「%s」%s %s", dev, what, filepath.Base(path)))
 		}
-		return ""
+		return err
 	})
 }
 
 func (rs *remoteServer) handleWallDelete(w http.ResponseWriter, r *http.Request, dev string) {
-	rs.wallAction(w, r, func(path string) string {
+	rs.wallAction(w, r, func(path string) error {
 		a := rs.a
 		if a.wallSource(path) == "" {
-			return "这张由旧版本更换，找不到原图"
+			return softErr("这张由旧版本更换，找不到原图")
 		}
 		before := len(a.walls.all)
-		a.deleteOriginal(path)
+		err := a.deleteOriginal(path)
 		if len(a.walls.all) < before {
 			a.appendLog(fmt.Sprintf("📱 「%s」删除了原图（%s）", dev, filepath.Base(path)))
 		}
-		return ""
+		return err
 	})
 }

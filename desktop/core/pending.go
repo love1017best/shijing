@@ -53,10 +53,7 @@ func SavePending(path string, list []PendingDelete) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o644)
+	return WriteFileAtomic(path, data, 0o644)
 }
 
 // RunPending 逐条校验并删除。mounted 判断某个原图所在的图库目录现在能不能访问

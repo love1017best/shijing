@@ -673,8 +673,7 @@ func compareSelection(file, destDir string, prev *prevSelection, selected []sour
 	}
 	data, err := json.Marshal(savedSelection{Dest: destDir, Sources: cur, Dests: dests})
 	if err == nil {
-		_ = os.MkdirAll(filepath.Dir(file), 0o755)
-		err = os.WriteFile(file, data, 0o644)
+		err = WriteFileAtomic(file, data, 0o644)
 	}
 	if err != nil {
 		logf("⚠️ 记录本轮选中的图片失败: %v", err)
@@ -765,8 +764,5 @@ func saveHistory(file string, history map[string]bool) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(file, data, 0o644)
+	return WriteFileAtomic(file, data, 0o644)
 }

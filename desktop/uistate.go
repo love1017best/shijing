@@ -74,6 +74,5 @@ func (a *app) saveUIState() {
 	if err != nil {
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(a.uiStatePath()), 0o755)
-	_ = os.WriteFile(a.uiStatePath(), data, 0o644)
+	_ = core.WriteFileAtomic(a.uiStatePath(), data, 0o644)
 }

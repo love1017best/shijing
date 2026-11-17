@@ -27,9 +27,9 @@ func (a *app) previewKeys(c *ui.Context, wall string, hasSrc bool, step func(int
 	case a.pressed(c, "next", false), c.Shortcut(0, ui.KeySpace):
 		step(1)
 	case a.pressed(c, "remove", true):
-		a.removeWallpaper(wall, false)
+		a.report(a.removeWallpaper(wall, false))
 	case hasSrc && a.pressed(c, "exclude", true):
-		a.removeWallpaper(wall, true)
+		a.report(a.removeWallpaper(wall, true))
 	case hasSrc && a.pressed(c, "delete", true):
 		a.askDeleteOriginal(wall)
 	case a.pressed(c, "open", true):
@@ -119,11 +119,11 @@ func (a *app) wallMenu(m *ui.Menu, wall string) {
 	}
 	m.Separator()
 	if m.Item(actRemove + "（原图保留）").Chosen() {
-		a.removeWallpaper(wall, false)
+		a.report(a.removeWallpaper(wall, false))
 	}
 	if src != "" {
 		if m.Item(actExclude + "（原图保留）").Chosen() {
-			a.removeWallpaper(wall, true)
+			a.report(a.removeWallpaper(wall, true))
 		}
 		m.Separator()
 		if m.Item(actDelete).Danger().Chosen() {
@@ -338,9 +338,9 @@ func (a *app) previewModal(c *ui.Context) {
 					keyButton(c, nil, "显示原图", a.keyLabel("reveal")).Tooltip(withKey("在 Finder 中显示原图（在图库里选中它）", a.keyLabel("reveal"))).OnClick(func() { a.revealPath(src) })
 				}
 				ui.Spacer(c)
-				keyButton(c, nil, actRemove, a.keyLabel("remove")).Tooltip(actRemoveTip).OnClick(func() { a.removeWallpaper(wall, false) })
+				keyButton(c, nil, actRemove, a.keyLabel("remove")).Tooltip(actRemoveTip).OnClick(func() { a.report(a.removeWallpaper(wall, false)) })
 				if src != "" {
-					keyButton(c, nil, actExclude, a.keyLabel("exclude")).Tooltip(actExcludeTip).OnClick(func() { a.removeWallpaper(wall, true) })
+					keyButton(c, nil, actExclude, a.keyLabel("exclude")).Tooltip(actExcludeTip).OnClick(func() { a.report(a.removeWallpaper(wall, true)) })
 					keyButton(c, nil, actDelete, a.keyLabel("delete")).TextColor(t.Danger).Tooltip(actDeleteTip).OnClick(func() { a.askDeleteOriginal(wall) })
 				}
 			})
@@ -366,7 +366,7 @@ func (a *app) previewModal(c *ui.Context) {
 		src := a.wallSource(a.pendingDelWall)
 		msg := fmt.Sprintf("会从图库里删除原图 %s，并移出壁纸文件夹。删除不可撤销，会记进删除记录。", tildify(src))
 		if ui.AlertDialog(c, &a.confirmDelSrc, "删除图库里的这张原图？", msg, "取消", "删除原图") == 1 {
-			a.deleteOriginal(a.pendingDelWall)
+			a.report(a.deleteOriginal(a.pendingDelWall))
 		}
 	}
 }

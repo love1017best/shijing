@@ -84,19 +84,18 @@ func (a *app) pushUndo(r removedWall) {
 }
 
 // undoRemove 撤销最近一次移出：文件放回壁纸文件夹、回到原来的位置，预览开着时跳到它。
-func (a *app) undoRemove() {
+// 没有可撤销的或正在运行时什么都不做、返回 nil；放不回去时返回错误。
+func (a *app) undoRemove() error {
 	if len(a.undo) == 0 || a.running {
-		return
+		return nil
 	}
 	r := a.undo[len(a.undo)-1]
 	a.undo = a.undo[:len(a.undo)-1]
 	if _, err := os.Stat(r.wall); err == nil {
-		a.toast = "壁纸文件夹里已经有同名文件，没法放回 " + filepath.Base(r.wall)
-		return
+		return softErr("壁纸文件夹里已经有同名文件，没法放回 " + filepath.Base(r.wall))
 	}
 	if err := moveFile(r.stash, r.wall); err != nil {
-		a.showErr("撤销失败", err.Error())
-		return
+		return actionErr("撤销失败", err)
 	}
 	if r.excluded != "" {
 		a.cfg.Excluded = slices.DeleteFunc(a.cfg.Excluded, func(p string) bool { return p == r.excluded })
@@ -115,12 +114,13 @@ func (a *app) undoRemove() {
 		msg = "已撤销，放回了壁纸文件夹，也不再跳过它"
 	}
 	a.toast = msg
+	return nil
 }
 
 // undoKey 在有可撤销的移出时接 ⌘Z。注册了快捷键，「编辑」菜单的「撤销」才会亮、按键才会传到这里。
 // 预览开着时要在 Modal 里面调（外面收不到），所以 view 和 previewKeys 各调一次，按 a.preview 分开。
 func (a *app) undoKey(c *ui.Context) {
 	if len(a.undo) > 0 && !a.running && c.Shortcut(ui.Cmd, ui.KeyZ) {
-		a.undoRemove()
+		a.report(a.undoRemove())
 	}
 }
