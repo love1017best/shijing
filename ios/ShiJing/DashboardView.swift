@@ -14,6 +14,8 @@ struct DashboardView: View {
     @State private var previewing: Wallpaper?
     /// 「全部壁纸」页；同理用状态推页面，不用放在分组标题里的 NavigationLink（转屏时它被重建，推出去的页面会被弹回来）
     @State private var showAll = false
+    /// 横幅轮播现在显示的那张（nil = 电脑指定的横幅 `session.hero`）。见 `rotateHero`
+    @State private var slideName: String?
 
     /// 内容区宽于这个值时分两栏（按实际宽度判断，不按机型写死）
     private static let twoColumnWidth: CGFloat = 680
@@ -29,6 +31,8 @@ struct DashboardView: View {
                 WallPreview(session: session, startName: w.name)
             }
             .navigationDestination(isPresented: $showAll) { AllWallpapersView(session: session) }
+            .task { await rotateHero() }
+            .onChange(of: session.wallsRev) { slideName = nil } // 换了一批：从电脑指定的横幅重新开始
             // 小组件点进来：要看的那张（壁纸列表可能还没拉到，拉到了再打开）
             .onChange(of: session.openRequest, initial: true) { openRequested() }
             .onChange(of: session.walls) { openRequested() }
@@ -134,7 +138,7 @@ struct DashboardView: View {
     /// 宽屏：图片铺满整张卡，左下角浮一块毛玻璃放状态，右下角是按钮；运行中毛玻璃撑满整行放步骤和进度。
     @ViewBuilder
     private func heroCard(_ s: RemoteState, wide: Bool) -> some View {
-        let hero = session.hero
+        let hero = shownHero
         let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
         if wide && !s.running {
             HStack(alignment: .bottom, spacing: 16) {
@@ -174,12 +178,56 @@ struct DashboardView: View {
     @ViewBuilder
     private func heroBackground(_ hero: Wallpaper?) -> some View {
         if let hero {
-            WallImage(session: session, wall: hero, kind: session.heroName != nil ? .hero : .image)
+            WallImage(session: session, wall: hero, kind: heroKind(hero))
+                .id(hero.name) // 轮播换图时整张淡入淡出，不复用上一张的视图
+                .transition(.opacity)
                 .contentShape(Rectangle())
                 .onTapGesture { previewing = hero }
         } else {
             Color.groupedCell
         }
+    }
+
+    /// 横幅现在显示的那张：轮播换过就是 `slideName`（被移出了就退回电脑指定的那张）。
+    private var shownHero: Wallpaper? {
+        if let slideName, let w = session.walls.first(where: { $0.name == slideName }) { return w }
+        return session.hero
+    }
+
+    /// 电脑指定的横幅用 1600 宽的横幅图；轮播到的其他图用大图档（整批都预先缓存在手机上，不另外下载）。
+    private func heroKind(_ w: Wallpaper) -> ImageKind {
+        w.name == session.hero?.name && session.heroName != nil ? .hero : .image
+    }
+
+    /// 横幅轮播：每 10 秒换到壁纸列表里的下一张。先把下一张载好再换，换的时候淡入淡出，不闪灰底。
+    /// App 在后台、正在看大图或「全部壁纸」、电脑正在换壁纸、低电量模式时不换；载不出来的（离线且没缓存）跳过。
+    private func rotateHero() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(10))
+            if Task.isCancelled { return }
+            let walls = session.walls
+            guard appActive, previewing == nil, !showAll, session.state?.running != true,
+                  !ProcessInfo.processInfo.isLowPowerModeEnabled, walls.count > 1 else { continue }
+            let start = shownHero.flatMap { cur in walls.firstIndex { $0.name == cur.name } } ?? 0
+            for step in 1...min(5, walls.count - 1) {
+                let next = walls[(start + step) % walls.count]
+                guard await ImageStore.shared.load(session, next.name, heroKind(next)) != nil else { continue }
+                if Task.isCancelled { return }
+                withAnimation(.easeInOut(duration: 0.8)) {
+                    slideName = next.name == session.hero?.name ? nil : next.name
+                }
+                break
+            }
+        }
+    }
+
+    /// App 在前台。轮播的循环一直跑着，`@Environment(\.scenePhase)` 在里面读到的是任务开始时的值，所以直接问系统。
+    private var appActive: Bool {
+        #if os(iOS)
+        UIApplication.shared.applicationState == .active
+        #else
+        true
+        #endif
     }
 
     /// 横幅卡上的信息块：有横幅图时是一块液态玻璃（iOS 26 起），没图时退回内容区底色
@@ -238,7 +286,17 @@ struct DashboardView: View {
     /// 已经拿到过状态、之后断开了：顶部提示一下，下面显示的是断开前的样子。
     /// 显示的是磁盘上的快照（这次打开还没连上过）时说明数据是什么时候的。
     @ViewBuilder private var connectionSection: some View {
-        if case .offline(let msg) = session.connection {
+        if case .offline(let msg) = session.connection, let hold = session.hold {
+            Section {
+                NoticeRow(icon: "wifi.slash",
+                          title: session.snapshotAt.map { "离线模式 · \(Self.ago($0))同步" } ?? "离线模式",
+                          detail: msg + "只能查看已缓存的图片。" + queuedNote,
+                          color: .secondary)
+                if hold == .manual {
+                    Button("退出离线模式") { OfflineMode.shared.manual = false }
+                }
+            }
+        } else if case .offline(let msg) = session.connection {
             Section {
                 if let at = session.snapshotAt {
                     NoticeRow(icon: "wifi.exclamationmark", title: "离线 · \(Self.ago(at))同步",
@@ -524,12 +582,14 @@ struct StepsView: View {
 /// 工具栏上的连接状态小圆点。只在断开 / 重连 / 配对失效时出现（调用处已经挡掉了正常连接）。
 struct ConnectionBadge: View {
     let connection: RemoteSession.Connection
+    /// 离线模式（手动或蜂窝网络）：没有在重连
+    var held = false
 
     var body: some View {
         let (color, text): (Color, String) = switch connection {
         case .live: (.green, "已连接") // 走不到，调用方只在异常时放它
         case .connecting: (.orange, "正在连接")
-        case .offline: (.orange, "重新连接中")
+        case .offline: held ? (.gray, "离线模式") : (.orange, "重新连接中")
         case .unpaired: (.red, "未配对")
         }
         Label {

@@ -49,6 +49,9 @@ struct WallPreview: View {
     /// 前置摄像头（被占用的那块玻璃）在页面里的位置：iPhone Duo 外屏竖放时在右上，横放时跟着设备转到左边或右边。
     /// 右边那一列按钮就放在这同一侧，和摄像头、状态栏对齐（`reservedRegions(kind: .occlusion)`，iOS 27.1 起）
     @State private var cameraFrame: CGRect = CGRect(x: 0, y: 0, width: 0, height: 0)
+    /// 右上角被占用的区域的下沿：前置摄像头、竖排的状态栏、灵动岛里正在显示的实时活动，取所有遮挡区里最低的那条。
+    /// Duo 外屏竖放时右边那一列按钮从它下面开始排（见 sideButtons）；量不到时为 nil
+    @State private var occlusionBottom: CGFloat?
     /// 顶栏下沿、底栏上沿（全局坐标）：竖屏完整显示时图片放在两者之间，不被底栏挡住
     @State private var topBarBottom: CGFloat = 0
     /// 窗口的安全区：整页 `ignoresSafeArea` 铺满之后，页面里量到的安全区是 0，所以从窗口上取。
@@ -188,6 +191,21 @@ struct WallPreview: View {
                 return .zero
             } action: { f in
                 if f != cameraFrame { cameraFrame = f }
+            }
+            // 右半屏上半部分所有遮挡区的最低处。Duo 外屏竖放时，状态栏竖着排在右上角，灵动岛里有实时活动
+            //（比如在放音乐）时那块会往下伸长；只看摄像头那一小块的话，按钮列居中后上面几颗会压在状态栏下面
+            //（v0.4.18 用户反馈关闭按钮被电量图标挡住）。
+            .onGeometryChange(for: CGFloat?.self) { proxy in
+                if #available(iOS 27.1, *) {
+                    let size = proxy.size
+                    let bottoms = proxy.reservedRegions(kind: .occlusion).map(\.frame).filter {
+                        !$0.isEmpty && $0.midX > size.width / 2 && $0.minY < size.height / 2
+                    }.map(\.maxY)
+                    return bottoms.max()
+                }
+                return nil
+            } action: { b in
+                if b != occlusionBottom { occlusionBottom = b }
             }
             .contentShape(Rectangle())
             // 双击和单击要互斥：分开挂两个 onTapGesture 的话，双击的第一下会先触发一次单击，
@@ -628,12 +646,16 @@ struct WallPreview: View {
         let tallScreen = layoutSize.height >= 640
         let camOnColumnSide = cameraFrame != .zero
             && (columnOnRight ? cameraFrame.midX > layoutSize.width / 2 : cameraFrame.midX < layoutSize.width / 2)
+        // 竖放：状态栏竖着排在右上角，整列放在它下面那段里居中。量不到遮挡区（iOS 27.1 以前）时按
+        // 外屏竖放状态栏的高度留（模拟器量到 174）。以前整屏居中，列一高（有撤销按钮）或者灵动岛里有实时活动，
+        // 关闭按钮就落到电量图标下面、点不到（v0.4.18 用户反馈）。
+        let statusBottom = occlusionBottom ?? 174
         let topInset: CGFloat = landscape
             ? (tallScreen
                 ? (camNearTop && camOnColumnSide ? cameraFrame.maxY : max(windowSafe.top + button, 28))
                 : (camNearTop && camOnColumn ? max(cameraFrame.maxY + 8, 28) : max(windowSafe.top + 8, 28)))
-            : 0
-        // 竖放：上下两个 Spacer 夹住，整列垂直居中；横放：上面不留、下面用 Spacer 撑开，贴顶。
+            : max(statusBottom + 12, windowSafe.top + 8, 28)
+        // 竖放：状态栏下面那段里，上下两个 Spacer 夹住、垂直居中；横放：上面不留、下面用 Spacer 撑开，贴顶。
         // 不用 `.frame(maxHeight: .infinity, alignment: .top)`：overlay 里给的高度提案不一定是整屏，
         // 横向那一版对齐偶尔没生效、整列被顶到中间偏下（v0.3.168 内屏横放踩过）。
         return VStack(spacing: 0) {
@@ -646,9 +668,13 @@ struct WallPreview: View {
                 actionCircle(.delete, w, size: button)
                     .deleteOriginalDialog(session: session, wall: $confirmDelete)
             }
-            .padding(.top, topInset)
+            .padding(.top, landscape ? topInset : 0)
             Spacer(minLength: 0)
         }
+        // 竖放时上面让开状态栏（topInset），底部让开小横条；用 padding，别用 Color.clear 占位：
+        // 它横向会撑满，整列就跑到屏幕中间了
+        .padding(.top, landscape ? 0 : topInset)
+        .padding(.bottom, landscape ? 0 : max(24, windowSafe.bottom + 12))
         .frame(maxHeight: .infinity)
         // 离屏幕边 24：和状态栏同一条竖线（对着系统相册量的：外屏竖放 457 宽时按钮中心 408.5、
         // 时间也在这条线上；内屏横放 951 宽时按钮中心 903）。列里最宽的是胶囊 48，所以 951−24−24=903。
@@ -994,11 +1020,18 @@ private struct WindowMetrics: UIViewRepresentable {
         override func layoutSubviews() { super.layoutSubviews(); report() }
         override func safeAreaInsetsDidChange() { super.safeAreaInsetsDidChange(); report() }
 
+        /// 在下一轮主线程循环里再读窗口：布局进行中读到的可能还是转屏前的大小和安全区。
+        /// 转屏动画结束后再读一次，外屏从横放转回竖放时，只读一次偶尔停在横放的尺寸上，
+        /// 整列按横放贴顶、压到状态栏和摄像头上（v0.4.18 用户反馈）。
         private func report() {
+            guard window != nil else { return }
+            DispatchQueue.main.async { [weak self] in self?.send() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.send() }
+        }
+
+        private func send() {
             guard let window else { return }
-            let insets = window.safeAreaInsets
-            let size = window.bounds.size
-            DispatchQueue.main.async { [weak self] in self?.onChange?(insets, size) }
+            onChange?(window.safeAreaInsets, window.bounds.size)
         }
     }
 }

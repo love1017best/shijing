@@ -199,6 +199,9 @@ func (a *app) previewBitmap(wall string) *ui.Bitmap {
 	if wall != "" && wall == a.walls.heroPath {
 		return a.walls.hero
 	}
+	if wall != "" && wall == a.walls.slidePath {
+		return a.walls.slide
+	}
 	return nil
 }
 

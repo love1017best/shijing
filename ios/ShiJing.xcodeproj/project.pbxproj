@@ -17,6 +17,7 @@
 		32FAC1FD1E3F25C80AC63004 /* PairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F148DFA81C0AF1A9841A39B7 /* PairView.swift */; };
 		36635EB138FF8A4B6698EC3A /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B88ED75230843E7FF61E79A /* APIClient.swift */; };
 		3C9BB507068538CA83EED149 /* ShiJingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51973C6B54D5C302A82E3E3F /* ShiJingWidget.swift */; };
+		3DC7076E29C0DD7B94D20F4D /* OfflinePrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64A1FE1104D0236E89D7D58 /* OfflinePrefs.swift */; };
 		3E45D53F7AFBDF56529446CF /* AppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37262552F84556E74C66F4C5 /* AppShortcuts.swift */; };
 		48728754CEFE662B227D566E /* RemoteSession+Queue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 910C0E6B6E878D4E095EBB5F /* RemoteSession+Queue.swift */; };
 		4BF86FE7CE0BC9485AD18F1C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA83EAF792D5624EEA3CE11 /* Models.swift */; };
@@ -30,6 +31,7 @@
 		94215927670239EE363E48CE /* ShiJingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04551D48684EF104173433F5 /* ShiJingApp.swift */; };
 		964F2B423059D88E93FE60F2 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B88ED75230843E7FF61E79A /* APIClient.swift */; };
 		99B8B378D455A9AF7560A572 /* QueuedActionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF4AF9CF2058B681076FAE56 /* QueuedActionsView.swift */; };
+		A7A0B1BFE267C1B704117E74 /* OfflinePrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64A1FE1104D0236E89D7D58 /* OfflinePrefs.swift */; };
 		B3974E68230A70F75046BBA6 /* QRScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A75E638475F79200CF9DB6D /* QRScan.swift */; };
 		BD12CD4B6997209CA3570CAB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EBBECD2386D5DFE983684B8F /* Assets.xcassets */; };
 		C1D57C628AAC10FA1D1BF907 /* RunNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */; };
@@ -42,6 +44,7 @@
 		DA6264799C3CF66C5F9F9994 /* MacStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */; };
 		DCBBD1C38B5665384A54DF8F /* SigningExpiry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08A32667B20E7EAE1496A917 /* SigningExpiry.swift */; };
 		E3961E29F87DF6C22878B7BB /* OfflineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37DE3185BEF88948B31C589F /* OfflineStore.swift */; };
+		E48D8E1F726C81B1CF91C390 /* OfflineMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2096EFEA0EAB82559959DE56 /* OfflineMode.swift */; };
 		ED3B0A4451922C1D686A69E1 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA83EAF792D5624EEA3CE11 /* Models.swift */; };
 		F223669D3393FCDE9438804C /* MacListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FB9144ACC689795E105A27 /* MacListView.swift */; };
 		F3413348AA26794612633F8A /* Glass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B664321E5DAC9977CDA08D4 /* Glass.swift */; };
@@ -80,6 +83,7 @@
 		15FB9144ACC689795E105A27 /* MacListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacListView.swift; sourceTree = "<group>"; };
 		1A75E638475F79200CF9DB6D /* QRScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScan.swift; sourceTree = "<group>"; };
 		1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
+		2096EFEA0EAB82559959DE56 /* OfflineMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineMode.swift; sourceTree = "<group>"; };
 		22FA460C376FBA22B55E217F /* WidgetViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetViews.swift; sourceTree = "<group>"; };
 		27D8BD3049F3539DD7DA7537 /* WallpapersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpapersView.swift; sourceTree = "<group>"; };
 		2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunNotifier.swift; sourceTree = "<group>"; };
@@ -107,6 +111,8 @@
 		D312A6D521567C089FF18F3E /* ConnectionUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionUI.swift; sourceTree = "<group>"; };
 		D86F178096ED4F9BDCD820EE /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		DB7F89AA01677C0EB4EEDE4A /* WallPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallPreview.swift; sourceTree = "<group>"; };
+		E64A1FE1104D0236E89D7D58 /* OfflinePrefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflinePrefs.swift; sourceTree = "<group>"; };
+		E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 		EBBECD2386D5DFE983684B8F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		EF4AF9CF2058B681076FAE56 /* QueuedActionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuedActionsView.swift; sourceTree = "<group>"; };
 		F148DFA81C0AF1A9841A39B7 /* PairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
@@ -131,6 +137,7 @@
 				6B88ED75230843E7FF61E79A /* APIClient.swift */,
 				B5FA3660DB88F64E7D64A4B9 /* Intents.swift */,
 				BCA83EAF792D5624EEA3CE11 /* Models.swift */,
+				E64A1FE1104D0236E89D7D58 /* OfflinePrefs.swift */,
 				2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */,
 				2EDDF3D91E21A5E5D546ED41 /* SharedKeychain.swift */,
 				442B2E2EDAFCEC723F7A4D25 /* WidgetReload.swift */,
@@ -168,8 +175,10 @@
 				5B664321E5DAC9977CDA08D4 /* Glass.swift */,
 				A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */,
 				6AC7C4670660D49C3BD8F942 /* Info.plist */,
+				E941F8F3E061AA13DD8CA2E7 /* Local.xcconfig */,
 				15FB9144ACC689795E105A27 /* MacListView.swift */,
 				35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */,
+				2096EFEA0EAB82559959DE56 /* OfflineMode.swift */,
 				37DE3185BEF88948B31C589F /* OfflineStore.swift */,
 				F148DFA81C0AF1A9841A39B7 /* PairView.swift */,
 				1A75E638475F79200CF9DB6D /* QRScan.swift */,
@@ -295,6 +304,8 @@
 				F223669D3393FCDE9438804C /* MacListView.swift in Sources */,
 				DA6264799C3CF66C5F9F9994 /* MacStore.swift in Sources */,
 				4BF86FE7CE0BC9485AD18F1C /* Models.swift in Sources */,
+				E48D8E1F726C81B1CF91C390 /* OfflineMode.swift in Sources */,
+				A7A0B1BFE267C1B704117E74 /* OfflinePrefs.swift in Sources */,
 				E3961E29F87DF6C22878B7BB /* OfflineStore.swift in Sources */,
 				32FAC1FD1E3F25C80AC63004 /* PairView.swift in Sources */,
 				B3974E68230A70F75046BBA6 /* QRScan.swift in Sources */,
@@ -322,6 +333,7 @@
 				36635EB138FF8A4B6698EC3A /* APIClient.swift in Sources */,
 				6360079382418D5385977F25 /* Intents.swift in Sources */,
 				ED3B0A4451922C1D686A69E1 /* Models.swift in Sources */,
+				3DC7076E29C0DD7B94D20F4D /* OfflinePrefs.swift in Sources */,
 				C1D57C628AAC10FA1D1BF907 /* RunNotifier.swift in Sources */,
 				D30F6878DC0FD0D245B8FDE3 /* SharedKeychain.swift in Sources */,
 				3C9BB507068538CA83EED149 /* ShiJingWidget.swift in Sources */,

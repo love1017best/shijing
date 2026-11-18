@@ -108,6 +108,9 @@ struct StatusView: View {
     /// App 里的演示页用：环境里的 widgetFamily 只有小组件进程才有
     var familyOverride: WidgetFamily?
     @Environment(\.widgetFamily) private var envFamily
+    /// 主屏幕用着色或透明图标（iOS 18 的着色、iOS 26 起的透明）时为 false：系统去掉背景图，
+    /// 文字和图标按系统的颜色统一渲染。这时文字用系统的主色、去掉阴影，阴影在玻璃上会糊成一片。
+    @Environment(\.showsWidgetContainerBackground) private var showsBackground
     private var family: WidgetFamily { familyOverride ?? envFamily }
 
     private var big: Bool { family.isBig }
@@ -134,8 +137,8 @@ struct StatusView: View {
                 Text(entry.problem ?? "正在读取…").font(.footnote.weight(.medium))
             }
         }
-        .foregroundStyle(.white)
-        .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+        .foregroundStyle(showsBackground ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+        .shadow(color: .black.opacity(showsBackground ? 0.35 : 0), radius: 3, y: 1)
         .padding(padding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
@@ -143,6 +146,7 @@ struct StatusView: View {
     private var header: some View {
         HStack(spacing: 6) {
             Image(systemName: entry.offlineSince == nil ? "photo.on.rectangle.angled" : "wifi.slash")
+                .widgetAccentable()
             Text(entry.mac ?? "拾景").lineLimit(1)
             Spacer(minLength: 0)
             if let since = entry.offlineSince {
@@ -163,7 +167,7 @@ struct StatusView: View {
             Text(s.running ? (s.label ?? "正在换壁纸…") : "\(s.wallpapers) 张壁纸")
                 .font(.headline).lineLimit(2).minimumScaleFactor(0.8)
             if s.running, s.fraction >= 0 {
-                ProgressView(value: s.fraction).tint(.white)
+                ProgressView(value: s.fraction).tint(showsBackground ? .white : nil)
             } else if !s.running {
                 subtitle(s).font(.caption2).opacity(0.85).lineLimit(1)
             }
@@ -192,7 +196,7 @@ struct StatusView: View {
         Text(s.title).font(titleFont).lineLimit(2).minimumScaleFactor(0.8)
         if s.running {
             if s.fraction >= 0 {
-                ProgressView(value: s.fraction).tint(.white)
+                ProgressView(value: s.fraction).tint(showsBackground ? .white : nil)
             }
             Text(s.label ?? "").font(.caption).opacity(0.9).lineLimit(1)
         } else {
@@ -303,6 +307,9 @@ struct PhotoView: View {
     let entry: Entry
     var familyOverride: WidgetFamily?
     @Environment(\.widgetFamily) private var envFamily
+    /// 着色 / 透明图标模式下系统会去掉 containerBackground，图就没了、只剩一块玻璃。
+    /// 这时把图画在内容里，并按原色显示（`fullColor`），否则系统会把整张图染成单色。
+    @Environment(\.showsWidgetContainerBackground) private var showsBackground
     private var family: WidgetFamily { familyOverride ?? envFamily }
 
     /// 没有图时的一句话：离线（还没缓存）和「壁纸文件夹是空的」要说清楚，别让人以为壁纸被删了。
@@ -334,27 +341,48 @@ struct PhotoView: View {
             }
         } else {
             // 根视图自己撑满容器：靠 Color.clear 撑尺寸在某些尺寸下会让内容被裁成 0
-            VStack(alignment: .leading, spacing: 0) {
-                Spacer(minLength: 0)
-                if !hasImage {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Image(systemName: "photo.on.rectangle.angled").font(.title3)
-                        Text(emptyText)
-                            .font(.footnote.weight(.medium))
+            ZStack(alignment: .bottomLeading) {
+                if !showsBackground, hasImage, let image = entry.image {
+                    Color.clear.overlay {
+                        Image(uiImage: image).resizable().fullColorInAccentedMode()
+                            .aspectRatio(contentMode: .fill)
                     }
-                    .foregroundStyle(.white)
-                    .padding(14)
-                } else if entry.showName, family != .systemSmall, let name = entry.wallName {
-                    Text(name)
-                        .font(.caption2.weight(.medium))
-                        .lineLimit(1).truncationMode(.middle)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.black.opacity(0.35), in: Capsule())
-                        .padding(10)
+                    .clipped()
                 }
+                photoLabels
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
+    }
+
+    private var photoLabels: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer(minLength: 0)
+            if !hasImage {
+                VStack(alignment: .leading, spacing: 4) {
+                    Image(systemName: "photo.on.rectangle.angled").font(.title3)
+                    Text(emptyText)
+                        .font(.footnote.weight(.medium))
+                }
+                .foregroundStyle(showsBackground ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                .padding(14)
+            } else if entry.showName, family != .systemSmall, let name = entry.wallName {
+                Text(name)
+                    .font(.caption2.weight(.medium))
+                    .lineLimit(1).truncationMode(.middle)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.black.opacity(0.35), in: Capsule())
+                    .padding(10)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+    }
+}
+
+extension Image {
+    /// 着色 / 透明图标模式下按原色显示这张图（iOS 18 起）；更早的系统没有这两种模式，原样返回。
+    @ViewBuilder func fullColorInAccentedMode() -> some View {
+        if #available(iOS 18.0, *) { widgetAccentedRenderingMode(.fullColor) } else { self }
     }
 }

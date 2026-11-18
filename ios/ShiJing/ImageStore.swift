@@ -233,6 +233,13 @@ final class ImageStore {
         if let clear = clearTask { await clear.value; clearTask = nil }
     }
 
+    /// 进入离线模式：停掉这一轮缓存。和「暂停」不同，退出离线模式、重新连上后会自动接着补。
+    func cancelPrefetch() {
+        task?.cancel()
+        task = nil
+        prefetching = false
+    }
+
     /// 换了一批：先停掉下载中的任务（别让属于上一批的图写进来），由调用方接着 `keepOnly`。
     func stopForNewBatch() {
         task?.cancel()

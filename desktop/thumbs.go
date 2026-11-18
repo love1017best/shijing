@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"time"
 
 	"desktop/core"
 
@@ -25,6 +26,9 @@ const (
 	heroWidth     = 1600 // 横幅图缩到的宽度（像素，Retina 下约 800 DIP）
 	previewWidth  = 3200 // 大图预览解码到的宽度（像素）：全屏预览时也不糊
 	thumbWidth    = 360  // 缩略图宽度（像素）
+
+	heroInterval = 10 * time.Second // 概览横幅轮播的间隔
+	heroTries    = 8                // 轮播时往后最多试几张（太窄、读不了的跳过）
 )
 
 // wallpapers 是壁纸文件夹的快照。all 是全部图片（shuffleStable 排过的固定顺序，横幅图也在内），大图预览按它翻；
@@ -33,13 +37,66 @@ type wallpapers struct {
 	dir      string
 	hero     *ui.Bitmap // 横幅背景；没有图片时为 nil
 	heroPath string     // 横幅图对应的文件，点横幅打开它的大图
-	all      []string
-	thumbs   map[string]*ui.Bitmap // 解码过的缩略图；值为 nil 表示读不了
-	browse   map[string]*ui.Bitmap // 壁纸页用的更小的缩略图（browseThumbWidth），按需分批解码
-	sources  map[string]string     // 壁纸文件名 → 原图路径（core.WallpaperSources）；旧版本换上的为 nil
-	loading  bool
-	more     bool // 正在后台解码更多缩略图
-	browsing bool // 正在后台解码壁纸页的缩略图
+	// 轮播换上的那张（advanceHero）。heroPath 保持不变：手机遥控的横幅、缩略图网格都按它；
+	// 轮回到 heroPath 时清空，显示 hero。
+	slide     *ui.Bitmap
+	slidePath string
+	sliding   bool // 后台正在解码下一张
+	all       []string
+	thumbs    map[string]*ui.Bitmap // 解码过的缩略图；值为 nil 表示读不了
+	browse    map[string]*ui.Bitmap // 壁纸页用的更小的缩略图（browseThumbWidth），按需分批解码
+	sources   map[string]string     // 壁纸文件名 → 原图路径（core.WallpaperSources）；旧版本换上的为 nil
+	loading   bool
+	more      bool // 正在后台解码更多缩略图
+	browsing  bool // 正在后台解码壁纸页的缩略图
+}
+
+// shownHero 是横幅现在显示的那张：轮播换过就是 slide，否则是 hero。
+func (w *wallpapers) shownHero() (*ui.Bitmap, string) {
+	if w.slide != nil && w.slidePath != "" {
+		return w.slide, w.slidePath
+	}
+	return w.hero, w.heroPath
+}
+
+// advanceHero 轮播概览横幅：按 all 的顺序换到当前这张后面第一张够宽的图（读不了、太窄的跳过）。
+// 在后台解码（有磁盘缓存，第二次起几毫秒），解好再换上。只在概览页、没在运行、没开大图预览时换；
+// 窗口隐藏时 main.go 不调它。
+func (a *app) advanceHero() {
+	w := &a.walls
+	if a.page != pageOverview || a.running || a.preview || w.loading || w.sliding || w.heroPath == "" || len(w.all) < 2 {
+		return
+	}
+	_, cur := w.shownHero()
+	start := max(slices.Index(w.all, cur), 0)
+	var candidates []string
+	for i := 1; i < len(w.all) && len(candidates) < heroTries; i++ {
+		candidates = append(candidates, w.all[(start+i)%len(w.all)])
+	}
+	dir, gen := w.dir, a.wallsGen
+	w.sliding = true
+	go func() {
+		var img image.Image
+		var path string
+		for _, f := range candidates {
+			if im := cachedScaled(f, heroWidth); im != nil && im.Bounds().Dx() >= thumbWidth*2 {
+				img, path = im, f
+				break
+			}
+		}
+		a.update(func() {
+			w := &a.walls
+			w.sliding = false
+			if w.dir != dir || a.wallsGen != gen || img == nil || !slices.Contains(w.all, path) {
+				return // 期间换了一批、移出了这张，或者后面几张都读不了
+			}
+			if path == w.heroPath {
+				w.slide, w.slidePath = nil, ""
+				return
+			}
+			w.slide, w.slidePath = ui.NewBitmap(img), path
+		})
+	}()
 }
 
 // grid 是缩略图网格里的图片：all 去掉横幅图和读不了的。

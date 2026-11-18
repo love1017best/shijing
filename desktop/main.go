@@ -59,6 +59,16 @@ func main() {
 				})
 			}
 		}()
+		// 概览横幅轮播：窗口显示着才换（隐藏时不解码、不重画）
+		go func() {
+			for range time.Tick(heroInterval) {
+				win.Update(func() {
+					if win.IsVisible() {
+						a.advanceHero()
+					}
+				})
+			}
+		}()
 		a.version = mygo.App.Version()
 		a.pickDir = func(title string) string {
 			paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{

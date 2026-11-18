@@ -281,7 +281,22 @@ struct SettingsPage: View {
     @ViewBuilder
     private func phoneContent(_ state: RemoteState) -> some View {
         if !session.queued.isEmpty { offlineQueueLink }
+        offlineModeSection
         offlineSection
+    }
+
+    /// 离线模式：打开后停止连接电脑（事件流、后台缓存、小组件刷新都不发请求），只看手机上的缓存。
+    private var offlineModeSection: some View {
+        @Bindable var mode = OfflineMode.shared
+        return Section {
+            Toggle("离线模式", isOn: $mode.manual)
+            Toggle("使用蜂窝网络时离线", isOn: $mode.onCellular)
+            if let hold = session.hold {
+                Text(hold.message).font(.footnote).foregroundStyle(.secondary)
+            }
+        } header: {
+            HelpHeader("离线模式", "打开后拾景和小组件停止连接电脑，只显示手机上缓存的状态和图片，不发网络请求。这期间的「移出」「不再选」「删除原图」会记下来，退出离线模式、连接电脑后处理。「使用蜂窝网络时离线」：手机只有蜂窝网络时自动进入离线模式，连接 Wi‑Fi 后自动连接电脑。")
+        }
     }
 
     /// 电脑上的拾景：一个列表（和系统设置一样），内容最宽 680、居中。

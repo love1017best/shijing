@@ -38,17 +38,19 @@ func (a *app) hero(c *ui.Context) {
 	white := ui.RGB(255, 255, 255)
 
 	box := ui.Box(c).Height(236).Radius(16).Clip().Background(duskTop)
-	if a.walls.hero != nil && a.walls.heroPath != "" && !a.running {
+	// 轮播（advanceHero，main.go 每 heroInterval 调一次）换上的那张，没换过就是 walls.hero
+	heroBmp, heroPath := a.walls.shownHero()
+	if heroBmp != nil && heroPath != "" && !a.running {
 		// 横幅图也是壁纸文件夹里的一张：点空白处打开它的大图（按钮各管各的）
-		box.Label("横幅壁纸").Cursor(ui.CursorPointer).Tooltip(filepath.Base(a.walls.heroPath) + "（单击查看大图，右键打开菜单）").
-			ContextMenu(func(m *ui.Menu) { a.wallMenu(m, a.walls.heroPath) })
+		box.Label("横幅壁纸").Cursor(ui.CursorPointer).Tooltip(filepath.Base(heroPath) + "（单击查看大图，右键打开菜单）").
+			ContextMenu(func(m *ui.Menu) { a.wallMenu(m, heroPath) })
 		if box.Clicked() {
-			a.openPreviewOf(a.walls.heroPath)
+			a.openPreviewOf(heroPath)
 		}
 	}
 	box.Children(func() {
-		if a.walls.hero != nil {
-			ui.Image(c, a.walls.hero).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
+		if heroBmp != nil {
+			ui.Image(c, heroBmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
 		} else {
 			sceneArt(c)
 		}

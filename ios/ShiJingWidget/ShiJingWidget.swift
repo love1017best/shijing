@@ -156,7 +156,10 @@ enum TimelineMaker {
         var offlineSince: Date?
         var problem: String?
         var client: APIClient?
+        // App 里打开了离线模式（或只有蜂窝网络且打开了「使用蜂窝网络时离线」）：不发请求，直接用缓存
+        let held = await OfflinePrefs.holdNow()
         do {
+            if held { throw CancellationError() }
             let c = try mac.client()
             let state = try await c.state(timeout: fastTimeout)
             // 锁定屏幕上的功能小组件不用图，不拉列表
@@ -171,7 +174,9 @@ enum TimelineMaker {
         } catch {
             snap = WidgetCache.load(key)
             offlineSince = snap?.at
-            if snap == nil { problem = "连不上 \(mac.name)，Mac 可能睡着了或不在同一个网络" }
+            if snap == nil {
+                problem = held ? "离线模式：手机上还没有缓存" : "连不上 \(mac.name)，Mac 可能睡着了或不在同一个网络"
+            }
         }
 
         var base = Entry(date: now, mac: mac.name, state: snap?.state, problem: problem)

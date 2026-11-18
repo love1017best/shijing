@@ -74,6 +74,10 @@ private struct MacTitleMenu: ViewModifier {
                     }
                     Divider()
                 }
+                Toggle(isOn: Binding(get: { OfflineMode.shared.manual }, set: { OfflineMode.shared.manual = $0 })) {
+                    Label("离线模式", systemImage: "wifi.slash")
+                }
+                Divider()
                 Button("添加其他 Mac…", systemImage: "plus") { adding = true }
                 Button("管理已配对的 Mac…", systemImage: "list.bullet") { managing = true }
             }

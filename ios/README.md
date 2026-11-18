@@ -72,6 +72,7 @@ cd ios && xcodegen
 | `WallpapersView.swift` / `WallPreview.swift` | 缩略图网格、「全部壁纸」页、撤销移出、分享原图 / 大图预览 |
 | `RemoteSession.swift` | 和一台 Mac 的连接：事件流（SSE）、断线重连、Mac 换 IP 后按 Bonjour 名称重新查找、运行中切到后台时延长连接；视图通过 `request` 发请求；写离线快照和记录缓存 |
 | `RemoteSession+Queue.swift` | 离线操作队列：保存、连接后逐条处理、确认删除原图 |
+| `OfflineMode.swift` / `Shared/OfflinePrefs.swift` | 离线模式：手动离线、使用蜂窝网络时离线；设置存在共享钥匙串，小组件也读 |
 | `ConnectionUI.swift` | 连接异常时的整页提示、断开 / 重连时的状态徽标 |
 | `OfflineStore.swift` | 离线快照（最后一次连接时的状态和壁纸列表）和记录页的三份缓存，带同步时间 |
 | `ImageStore.swift` | 图片的内存缓存和磁盘缓存：缩略图、横幅、整批大图、原图（可选）在连接时后台预取，受缓存上限限制（默认 10 GB）；离线时从磁盘读取；设置页「离线」分组显示占用、进度并提供清除 |

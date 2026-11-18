@@ -44,6 +44,10 @@ final class RemoteSession {
     /// 手机自己的网络断了（飞行模式、关了 Wi‑Fi）：不用等事件流报错，立刻显示离线
     private let pathMonitor = NWPathMonitor()
     private var networkDown = false
+    /// 手机现在只有蜂窝网络（没有 Wi‑Fi、有线）
+    internal(set) var cellularOnly = false
+    /// 因离线模式断开的（不是连不上）：退出离线模式时要重新连
+    private var held = false
     /// 上次把快照写到磁盘的时间（运行中状态更新很密，最多 5 秒写一次）
     private var lastSnapshotSave = Date.distantPast
     /// 有一轮壁纸列表正在拉：状态推得很密时别每次推送都再发一个请求
@@ -70,9 +74,38 @@ final class RemoteSession {
         // 系统网络状态变了立刻反映到连接状态：飞行模式、关掉 Wi‑Fi 时事件流可能要等很久才报错
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let ok = path.status == .satisfied
-            Task { @MainActor [weak self] in self?.networkChanged(ok) }
+            let cellular = OfflinePrefs.cellularOnly(path)
+            Task { @MainActor [weak self] in self?.networkChanged(ok, cellular: cellular) }
         }
         pathMonitor.start(queue: .global(qos: .utility))
+        NotificationCenter.default.addObserver(forName: OfflineMode.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyHold() }
+        }
+    }
+
+    /// 现在为什么不连接电脑：手动打开了离线模式，或者只有蜂窝网络且打开了「使用蜂窝网络时离线」。
+    var hold: OfflineHold? {
+        let prefs = OfflineMode.shared.prefs
+        if prefs.manual { return .manual }
+        if prefs.onCellular, cellularOnly { return .cellular }
+        return nil
+    }
+
+    /// 离线模式开关、网络类型变了：该离线就停掉事件流和后台缓存；不再需要离线时重新连。
+    private func applyHold() {
+        guard !isUnpaired else { return }
+        if let hold {
+            task?.cancel()
+            task = nil
+            if !held { ImageStore.shared.cancelPrefetch() }
+            held = true
+            connection = .offline(hold.message)
+        } else if held {
+            held = false
+            if paused || networkDown { return }
+            connection = .connecting
+            start()
+        }
     }
 
     /// 用磁盘上的快照先顶着一屏；已经连上、拿到实时状态了就不再覆盖。
@@ -90,10 +123,18 @@ final class RemoteSession {
     }
 
     /// 手机的网络状态变了：断了就立刻显示离线并停掉卡住的事件流；恢复后重新连。
-    private func networkChanged(_ ok: Bool) {
+    private func networkChanged(_ ok: Bool, cellular: Bool) {
+        if cellularOnly != cellular {
+            cellularOnly = cellular
+            if ok, !networkDown {
+                applyHold()
+                return
+            }
+        }
         if ok {
             guard networkDown else { return }
             networkDown = false
+            if hold != nil { applyHold(); return }
             if paused { return } // 后台时不主动连，回前台再 start
             guard !isUnpaired else { return }
             connection = .connecting
@@ -114,7 +155,8 @@ final class RemoteSession {
 
     /// 会话内部和图片缓存用的底层客户端。视图里发请求别直接拿它，走 `request`。
     func client() throws -> APIClient {
-        try APIClient(address: mac.address, token: store.token(for: macID))
+        if hold != nil { throw OfflineHoldError() }
+        return try APIClient(address: mac.address, token: store.token(for: macID))
     }
 
     /// 视图层发请求统一走这里：网络层失败立刻转离线、令牌失效转未配对（`handleRequestError` 不弹提示的那半），
@@ -132,6 +174,8 @@ final class RemoteSession {
     /// 开始（或重新开始）保持连接。App 回到前台时调用。
     func start() {
         paused = false
+        if hold != nil { applyHold(); return }
+        held = false
         // 回到前台、点了「重试」：事件流连上、收到第一份状态之前都按「正在连接」算。
         // 以前这里不动连接状态，手机在后台时 Mac 走了、回前台后还显示着「已连接」，
         // 这期间点「下载原图 / 分享原图」会对着一个连不上的地址干等到超时。
@@ -272,7 +316,9 @@ final class RemoteSession {
                 }
             }
             try? await Task.sleep(for: .seconds(delay))
-            delay = min(delay * 2, 15)
+            // 前几次 15 秒内重试（Mac 刚醒、拾景刚打开时很快能连上）；连续失败 8 次以上（约 2 分钟）
+            // 多半是不在同一个网络，改成 1 分钟一次，少耗电
+            delay = min(delay * 2, failures >= 8 ? 60 : 15)
         }
     }
 

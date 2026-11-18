@@ -5,7 +5,9 @@ extension View {
     func connectionToolbar(_ session: RemoteSession) -> some View {
         toolbar {
             if session.offline {
-                ToolbarItem(placement: .primaryAction) { ConnectionBadge(connection: session.connection) }
+                ToolbarItem(placement: .primaryAction) {
+                    ConnectionBadge(connection: session.connection, held: session.hold != nil)
+                }
             }
         }
     }
@@ -66,6 +68,16 @@ struct ConnectionFallback: View {
                 if let onRemoveMac {
                     Button("移除这台 Mac", role: .destructive, action: onRemoveMac)
                         .buttonStyle(.borderedProminent)
+                }
+            }
+        case .offline(let msg) where session.hold != nil:
+            ContentUnavailableView {
+                Label("离线模式", systemImage: "wifi.slash")
+            } description: {
+                Text(msg + "\n手机上还没有这台 Mac 的缓存。")
+            } actions: {
+                if session.hold == .manual {
+                    Button("退出离线模式") { OfflineMode.shared.manual = false }.buttonStyle(.bordered)
                 }
             }
         case .offline(let msg):

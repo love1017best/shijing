@@ -258,6 +258,9 @@ func (a *app) dropWall(wall string) {
 	w.all = slices.DeleteFunc(w.all, func(p string) bool { return p == wall })
 	delete(w.thumbs, wall)
 	delete(w.browse, wall)
+	if wall == w.slidePath {
+		w.slide, w.slidePath = nil, "" // 轮播显示的是这张：退回 hero，下一轮接着往后换
+	}
 	if wall == w.heroPath {
 		// 横幅图被移出 / 删掉了：横幅不能继续显示这张已经不在文件夹里的图。
 		// 先清掉，再在后台挑一张够宽的重新当横幅（只解这一张，不整库重扫）。
