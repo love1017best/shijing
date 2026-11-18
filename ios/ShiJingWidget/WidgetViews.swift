@@ -108,9 +108,12 @@ struct StatusView: View {
     /// App 里的演示页用：环境里的 widgetFamily 只有小组件进程才有
     var familyOverride: WidgetFamily?
     @Environment(\.widgetFamily) private var envFamily
+    @Environment(\.showsWidgetContainerBackground) private var showsContainer
+    @Environment(\.widgetRenderingMode) private var renderingMode
     /// 主屏幕用着色或透明图标（iOS 18 的着色、iOS 26 起的透明）时为 false：系统去掉背景图，
     /// 文字和图标按系统的颜色统一渲染。这时文字用系统的主色、去掉阴影，阴影在玻璃上会糊成一片。
-    @Environment(\.showsWidgetContainerBackground) private var showsBackground
+    /// 两个环境值都看：透明模式下实测 `showsWidgetContainerBackground` 仍可能是 true（v0.4.18 只看它，没生效）
+    private var showsBackground: Bool { showsContainer && renderingMode == .fullColor }
     private var family: WidgetFamily { familyOverride ?? envFamily }
 
     private var big: Bool { family.isBig }
@@ -239,8 +242,46 @@ struct StatusView: View {
             }
         }
         .font((big ? Font.subheadline : .caption).bold())
-        .buttonStyle(.borderedProminent)
+        .modifier(ActionButtonLook(plain: !showsBackground, dimmed: s.running
+            ? (s.stopping || entry.offlineSince != nil)
+            : (s.blocked != nil || entry.offlineSince != nil)))
         .shadow(radius: 0)
+    }
+
+    /// 正常模式用系统的实心按钮；着色 / 透明模式下实心按钮会被渲染成一整块白色、文字看不见，
+    /// 改成半透明底 + 描边的胶囊，文字用系统主色。
+    private struct ActionButtonLook: ViewModifier {
+        let plain: Bool
+        /// 按钮不能点（`.disabled` 挂在里面的 Button 上，这一层读不到）
+        let dimmed: Bool
+
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if plain {
+                content
+                    .labelStyle(PlainActionLabel())
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
+                    .opacity(dimmed ? 0.5 : 1)
+            } else {
+                content.buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private struct PlainActionLabel: LabelStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            HStack(spacing: 4) {
+                configuration.icon
+                configuration.title
+            }
+            .lineLimit(1)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity)
+            .background(Capsule().fill(.primary.opacity(0.15)))
+            .overlay(Capsule().strokeBorder(.primary.opacity(0.45), lineWidth: 1))
+        }
     }
 
     // MARK: 锁定屏幕
@@ -309,7 +350,10 @@ struct PhotoView: View {
     @Environment(\.widgetFamily) private var envFamily
     /// 着色 / 透明图标模式下系统会去掉 containerBackground，图就没了、只剩一块玻璃。
     /// 这时把图画在内容里，并按原色显示（`fullColor`），否则系统会把整张图染成单色。
-    @Environment(\.showsWidgetContainerBackground) private var showsBackground
+    /// 两个环境值都看：透明模式下实测 `showsWidgetContainerBackground` 仍可能是 true（v0.4.18 只看它，没生效）
+    @Environment(\.showsWidgetContainerBackground) private var showsContainer
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    private var showsBackground: Bool { showsContainer && renderingMode == .fullColor }
     private var family: WidgetFamily { familyOverride ?? envFamily }
 
     /// 没有图时的一句话：离线（还没缓存）和「壁纸文件夹是空的」要说清楚，别让人以为壁纸被删了。

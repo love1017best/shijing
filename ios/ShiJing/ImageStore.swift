@@ -173,6 +173,11 @@ final class ImageStore {
             let limit = Self.cacheLimitBytes
             var queue: [(String, ImageKind)] = names.map { ($0, .thumb) }
             if let hero = session.heroName ?? names.first { queue.append((hero, .hero)) }
+            // 概览横幅会轮播整批：其余每张也存一份横幅图（1600 宽，每张约 200–300 KB）。
+            // 旧版桌面端没给 hero 时手机横幅用大图，不存这一档
+            if let hero = session.heroName {
+                queue.append(contentsOf: names.filter { $0 != hero }.map { ($0, .hero) })
+            }
             queue.append(contentsOf: names.map { ($0, .image) })
             if wantOriginals { queue.append(contentsOf: names.map { ($0, .original) }) }
             var next = 0

@@ -709,6 +709,8 @@ private struct OfflineCacheSection: View {
     private var missing: Bool {
         guard total > 0 else { return false }
         if viewable < total { return true }
+        // 横幅图也按整批存（轮播用）；旧版桌面端没有横幅档，只看大图和原图
+        if session.heroName != nil, (usage?.data(.hero).inBatch ?? 0) < total { return true }
         return keepOriginals && (usage?.data(.original).inBatch ?? 0) < total
     }
 
@@ -717,7 +719,7 @@ private struct OfflineCacheSection: View {
             Group {
                 // 四档缓存各一行：这一批里存了多少张 / 这一批共多少张 · 占多少
                 cacheRow(.thumb, "缩略图缓存", "网格里每一格用的小图，宽 360 像素。")
-                cacheRow(.hero, "横幅缓存", "概览顶部的横幅图，宽 1600 像素；每批只存一张。")
+                cacheRow(.hero, "横幅缓存", "概览顶部轮播的横幅图，宽 1600 像素；这一批每张存一份。")
                 cacheRow(.image, "大图缓存", "打开大图时用的那张，宽 2732 像素，铺满展开的 iPhone Duo 这类大屏；存了原图时也可以从原图在本地缩小，不再下载。")
                 cacheRow(.original, "原图缓存", "图库里的原文件，和电脑上那份一样大；打开「保存原图」才会存，离线时可以存到相册、分享原图。")
 
@@ -802,8 +804,6 @@ private struct OfflineCacheSection: View {
         guard let usage else { return "正在统计…" }
         let d = usage.data(kind)
         let size = bytes(d.bytes)
-        // 横幅每批只有一张，写「1 / 1」反而怪
-        if kind == .hero { return "\(d.count) 张 · \(size)" }
         guard total > 0 else { return "—" }
         return "\(d.inBatch) / \(total) 张 · \(size)"
     }

@@ -344,16 +344,17 @@ func TestThumbnailOpensItsImage(t *testing.T) {
 		all = append(all, fmt.Sprintf("/w/%c%d.jpg", 'a'+i%26, i))
 	}
 	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), heroPath: "/w/hero.jpg", all: all,
-		thumbs: map[string]*ui.Bitmap{all[1]: img, all[2]: img}}
+		thumbs: map[string]*ui.Bitmap{all[0]: img, all[1]: img}}
 	f.wallsLoadedGen = f.wallsGen
 	tt.Frame()
 	click(t, tt, "壁纸 2")
 	tt.Frame()
-	if !f.preview || !tt.HasText(filepath.Base(all[2])) || !tt.HasText("3 / 41") {
+	// 网格从第一张（横幅图）开始，「壁纸 2」是 all[1]
+	if !f.preview || !tt.HasText(filepath.Base(all[1])) || !tt.HasText("2 / 41") {
 		t.Errorf("点缩略图应打开大图预览，能翻看文件夹里的全部图片: %q", tt.Texts())
 	}
 	click(t, tt, "下一张")
-	if !tt.HasText(filepath.Base(all[3])) || !tt.HasText("正在载入…") {
+	if !tt.HasText(filepath.Base(all[2])) || !tt.HasText("正在载入…") {
 		t.Errorf("没有缩略图的图片也能预览: %q", tt.Texts())
 	}
 	f.previewIdx = len(all) - 1
@@ -368,7 +369,7 @@ func TestThumbnailOpensItsImage(t *testing.T) {
 	f.preview = false
 	tt.Frame()
 	shown := f.stripCols*f.stripRows - 1
-	if !tt.HasText(fmt.Sprintf("+%d", 40-shown)) {
+	if !tt.HasText(fmt.Sprintf("+%d", 41-shown)) {
 		t.Fatalf("最后一格应显示剩下的张数（%d 格）: %q", shown, tt.Texts())
 	}
 	click(t, tt, "查看全部壁纸")

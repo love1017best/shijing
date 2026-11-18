@@ -32,7 +32,7 @@ const (
 )
 
 // wallpapers 是壁纸文件夹的快照。all 是全部图片（shuffleStable 排过的固定顺序，横幅图也在内），大图预览按它翻；
-// 缩略图网格按 all 的顺序排、去掉横幅图和读不了的（grid）。缩略图按路径存在 thumbs 里，还没解码的不在里面。
+// 缩略图网格按 all 的顺序排、去掉读不了的（grid）。缩略图按路径存在 thumbs 里，还没解码的不在里面。
 type wallpapers struct {
 	dir      string
 	hero     *ui.Bitmap // 横幅背景；没有图片时为 nil
@@ -99,11 +99,11 @@ func (a *app) advanceHero() {
 	}()
 }
 
-// grid 是缩略图网格里的图片：all 去掉横幅图和读不了的。
+// grid 是缩略图网格里的图片：all 去掉读不了的，从第一张开始。横幅会轮播整批，所以横幅图也在网格里。
 func (w *wallpapers) grid() []string {
 	g := make([]string, 0, len(w.all))
 	for _, p := range w.all {
-		if bmp, tried := w.thumbs[p]; p != w.heroPath && (!tried || bmp != nil) {
+		if bmp, tried := w.thumbs[p]; !tried || bmp != nil {
 			g = append(g, p)
 		}
 	}
@@ -141,6 +141,7 @@ func scanWallpapers(dir string) scannedWallpapers {
 		img := cachedScaled(f, heroWidth)
 		if img != nil && img.Bounds().Dx() >= thumbWidth*2 {
 			res.hero, res.heroPath = img, f
+			res.thumbs[f] = shrink(img, thumbWidth) // 横幅图也在网格里，缩略图直接从它缩
 			break
 		}
 		if img != nil {
@@ -150,7 +151,7 @@ func scanWallpapers(dir string) scannedWallpapers {
 	}
 	var todo []string
 	for _, f := range files {
-		if _, tried := res.thumbs[f]; !tried && f != res.heroPath && len(todo) < initialThumbs {
+		if _, tried := res.thumbs[f]; !tried && len(todo) < initialThumbs {
 			todo = append(todo, f)
 		}
 	}

@@ -194,9 +194,9 @@ struct DashboardView: View {
         return session.hero
     }
 
-    /// 电脑指定的横幅用 1600 宽的横幅图；轮播到的其他图用大图档（整批都预先缓存在手机上，不另外下载）。
+    /// 横幅用 1600 宽的横幅图（整批都预先缓存在手机上）；旧版桌面端没给 hero 时用大图。
     private func heroKind(_ w: Wallpaper) -> ImageKind {
-        w.name == session.hero?.name && session.heroName != nil ? .hero : .image
+        session.heroName != nil ? .hero : .image
     }
 
     /// 横幅轮播：每 10 秒换到壁纸列表里的下一张。先把下一张载好再换，换的时候淡入淡出，不闪灰底。
