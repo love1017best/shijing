@@ -73,7 +73,7 @@ extension RemoteSession {
             s.connection = .offline("无法连接到这台 Mac：确认 Mac 未休眠、拾景正在运行、设置中已打开「允许手机遥控」，手机与 Mac 处于同一网络。")
             s.snapshotAt = Date().addingTimeInterval(-3 * 3600 - 2400)
             // 顺便把演示图写进磁盘缓存，让「离线也能看图」这条路径真的走一遍（读的是磁盘，不是内存里的演示图）
-            ImageStore.shared.seedDiskCache(names: s.walls.prefix(24).map(\.name), hero: s.heroName)
+            ImageStore.shared.seedDiskCache(macID: mac.id.uuidString, names: s.walls.prefix(24).map(\.name), hero: s.heroName)
             s.seedQueuedForDemo()
             // 记录页：存一份演示数据，断线时记录页显示的就是它
             let at = Date().addingTimeInterval(-3 * 3600 - 2400)

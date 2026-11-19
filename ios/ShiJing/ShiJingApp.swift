@@ -87,6 +87,7 @@ struct RootView: View {
             deliverPendingWall()
         }
         .onChange(of: store.selectedID) { syncSession() }
+        .onChange(of: store.pairRevision) { syncSession(force: true) }
         // 点开「换完了」「签名快到期」这些通知：切到对应的标签（通知里带 target）
         .onChange(of: NotificationRouter.shared.tab, initial: true) { _, target in
             guard let target else { return }
@@ -178,8 +179,8 @@ struct RootView: View {
         NavigationStack { RecordsPage(session: session) }
     }
 
-    /// 选中的 Mac 变了：换一个连接。
-    private func syncSession() {
+    /// 选中的 Mac 变了或重新配对了：换一个连接。
+    private func syncSession(force: Bool = false) {
         #if DEBUG
         if let mode = RemoteSession.demoMode {
             if session == nil { session = RemoteSession.demo(mode, store: store) }
@@ -187,11 +188,13 @@ struct RootView: View {
         }
         #endif
         guard let mac = store.selected else {
+            ImageStore.shared.cancelPrefetch()
             session?.pause()
             session = nil
             return
         }
-        if session?.macID == mac.id { return }
+        if !force, session?.macID == mac.id { return }
+        ImageStore.shared.cancelPrefetch()
         session?.pause()
         let s = RemoteSession(mac: mac, store: store)
         session = s

@@ -64,7 +64,7 @@ final class ImageStore {
     private init() {
         cache.countLimit = 400
         cache.totalCostLimit = 160 << 20
-        AppSupport.prepare(Self.diskDir)
+        AppSupport.prepare(Self.rootDiskDir)
     }
 
     /// 内存缓存的 key。用 Mac 的 id 而不是地址或客户端：`session.client()` 要读钥匙串，
@@ -86,6 +86,7 @@ final class ImageStore {
         if let t = inflight[k] { return await t.value }
         let demo = demo
         let offline = session.offline
+        let macID = session.macID.uuidString
         let client = try? session.client()
         let t = Task<PlatformImage?, Never> {
             var data: Data?
@@ -93,10 +94,10 @@ final class ImageStore {
             var originalWidth = 0
             if demo {
                 data = nil
-            } else if let d = await Task.detached(priority: .userInitiated, operation: { Self.readDisk(name, kind) }).value {
+            } else if let d = await Task.detached(priority: .userInitiated, operation: { Self.readDisk(macID, name, kind) }).value {
                 data = d
             } else if let w = (offline || kind == .image) ? kind.targetWidth : nil,
-                      let f = ImageStore.cachedOriginal(name: name) {
+                      let f = ImageStore.cachedOriginal(macID: macID, name: name) {
                 // 手机上存过这张的原图：大图不用再下载（离线时缩略图、横幅也拿原图缩）。
                 // 在线时网格的缩略图还是照常下载，一张才几十 KB，从几十 MB 的原图现缩反而拖慢滚动
                 original = f
@@ -111,7 +112,7 @@ final class ImageStore {
                     let d = try await client.imageData(name, kind: kind)
                     data = d
                     if !offline {
-                        await Task.detached(priority: .utility) { Self.writeDisk(name, kind, d) }.value
+                        await Task.detached(priority: .utility) { Self.writeDisk(macID, name, kind, d) }.value
                     }
                 } catch {
                     // 连不上电脑了：顺手把连接状态改成离线，别让后面每张图都各等一次超时
@@ -159,6 +160,7 @@ final class ImageStore {
         let g = gen
         prefetchPaused = false
         prefetchHitLimit = false
+        let macID = session.macID.uuidString
         let names = session.walls.map(\.name)
         let wantOriginals = Self.originalsEnabled
         // 进度按壁纸算：这一批多少张就是多少（缩略图、横幅很小，不算；大图和原图各走一遍这个数）
@@ -169,7 +171,7 @@ final class ImageStore {
         task = Task {
             // 先等还在跑的删缓存做完，再量磁盘：不然「已用」把马上要删的文件也算进去
             await waitForClear()
-            var used = await Task.detached(priority: .utility) { Self.diskUsage() }.value
+            var used = await Task.detached(priority: .utility) { Self.totalDiskUsage() }.value
             let limit = Self.cacheLimitBytes
             var queue: [(String, ImageKind)] = names.map { ($0, .thumb) }
             if let hero = session.heroName ?? names.first { queue.append((hero, .hero)) }
@@ -189,7 +191,7 @@ final class ImageStore {
                     guard next < queue.count, !hitLimit else { return false }
                     let (n, kind) = queue[next]
                     next += 1
-                    group.addTask { await Self.fetchOne(client, n, kind) }
+                    group.addTask { await Self.fetchOne(client, macID: macID, n, kind) }
                     return true
                 }
                 for _ in 0..<workers where addNext() {}
@@ -254,11 +256,11 @@ final class ImageStore {
 
     /// 下载一张存到磁盘；已经有了就不动。返回写下的字节数，以及「连不上电脑」时的那个错误
     /// （调用方据此停掉这一轮，别把后面几百张各等一次超时）。
-    private nonisolated static func fetchOne(_ client: APIClient, _ name: String,
+    private nonisolated static func fetchOne(_ client: APIClient, macID: String, _ name: String,
                                              _ kind: ImageKind) async -> (ImageKind, Int64, Error?) {
         // 只 stat 不读整张图：补齐几百张时每张都按几十万字节读一遍纯属白读
-        if onDisk(name, kind) { return (kind, 0, nil) }
-        if kind == .image, cachedOriginal(name: name) != nil { return (kind, 0, nil) } // 有原图能本地缩，不用再下
+        if onDisk(macID, name, kind) { return (kind, 0, nil) }
+        if kind == .image, cachedOriginal(macID: macID, name: name) != nil { return (kind, 0, nil) } // 有原图能本地缩，不用再下
         if kind == .original {
             let tmp: URL
             do {
@@ -268,7 +270,7 @@ final class ImageStore {
             }
             defer { try? FileManager.default.removeItem(at: tmp) }
             if Task.isCancelled { return (kind, 0, nil) }
-            guard let f = diskFile(name, .original) else { return (kind, 0, nil) }
+            guard let f = diskFile(macID, name, .original) else { return (kind, 0, nil) }
             let fm = FileManager.default
             try? fm.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true)
             guard (try? fm.moveItem(at: tmp, to: f)) != nil else { return (kind, 0, nil) }
@@ -281,29 +283,38 @@ final class ImageStore {
             return (kind, 0, RemoteSession.isNetworkFailure(error) ? error : nil)
         }
         if Task.isCancelled { return (kind, 0, nil) }
-        writeDisk(name, kind, data)
+        writeDisk(macID, name, kind, data)
         return (kind, Int64(data.count), nil)
     }
 
     /// 手机上存着的那张原图（离线时存相册 / 分享、预览兜底用）。
-    nonisolated static func cachedOriginal(name: String) -> URL? {
-        guard let f = diskFile(name, .original), FileManager.default.fileExists(atPath: f.path) else { return nil }
+    nonisolated static func cachedOriginal(macID: String, name: String) -> URL? {
+        guard let f = diskFile(macID, name, .original), FileManager.default.fileExists(atPath: f.path) else { return nil }
         return f
     }
 
-    /// 壁纸列表变了：删掉不在这批里的缓存。
-    /// 按文件名认，不用分批次目录：同一张图换了批还在，省得整批重下。
-    nonisolated static func keepOnly(names: [String]) {
-        guard let dir = diskDir else { return }
+    /// 壁纸列表变了：删掉这台 Mac 目录里不在这批里的缓存，并顺手清掉旧版本留在根目录的平铺文件。
+    /// 按 Mac 分目录、按文件名认：切换 Mac 不互相清，同一张图换了批还在。
+    nonisolated static func keepOnly(macID: String, names: [String]) {
         let fm = FileManager.default
-        let prefixes = ImageKind.allCases.map { $0.cachePrefix + "-" }
-        let wanted = Set(names.map { safeName($0) })
-        let items = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-        for u in items {
-            let f = u.lastPathComponent
-            if let prefix = prefixes.first(where: { f.hasPrefix($0) }),
-               wanted.contains(String(f.dropFirst(prefix.count))) { continue }
-            try? fm.removeItem(at: u)
+        if let dir = diskDir(for: macID) {
+            let prefixes = ImageKind.allCases.map { $0.cachePrefix + "-" }
+            let wanted = Set(names.map { safeName($0) })
+            let items = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            for u in items {
+                let f = u.lastPathComponent
+                if let prefix = prefixes.first(where: { f.hasPrefix($0) }),
+                   wanted.contains(String(f.dropFirst(prefix.count))) { continue }
+                try? fm.removeItem(at: u)
+            }
+        }
+        // 升级前缓存平铺在 images/ 根目录，清理普通文件但不动其他 Mac 的子目录
+        if let root = rootDiskDir {
+            let rootItems = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+            for u in rootItems {
+                let isDir = (try? u.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                if !isDir { try? fm.removeItem(at: u) }
+            }
         }
     }
 
@@ -324,8 +335,8 @@ final class ImageStore {
         func data(_ kind: ImageKind) -> KindUsage { kinds[kind] ?? KindUsage() }
     }
 
-    nonisolated static func usage(names: [String]) -> Usage {
-        guard let dir = diskDir else { return Usage() }
+    nonisolated static func usage(macID: String, names: [String]) -> Usage {
+        guard let dir = diskDir(for: macID) else { return Usage() }
         let items = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey])) ?? []
         var u = Usage()
         var present: [ImageKind: Set<String>] = [:]
@@ -358,14 +369,24 @@ final class ImageStore {
         return u
     }
 
-    /// 磁盘上的图片缓存占了多少（补齐前量「已用」）。
-    nonisolated static func diskUsage() -> Int64 {
-        usage(names: []).used
+    /// 整个图片缓存目录（所有 Mac 合计）占了多少磁盘空间，补齐前用来对比全局缓存上限。
+    nonisolated static func totalDiskUsage() -> Int64 {
+        guard let root = rootDiskDir,
+              let en = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for case let url as URL in en {
+            guard let vals = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+                  vals.isRegularFile == true else { continue }
+            total += Int64(vals.fileSize ?? 0)
+        }
+        return total
     }
 
-    /// 清掉缓存（内存里的一起）。传空就是全部清掉。
+    /// 清掉某台 Mac 的缓存（内存里的一起）。默认清除该 Mac 全部四档并移除目录。
     /// 下次连上电脑会从队列第一项开始慢慢补回来。
-    func clear(_ kinds: [ImageKind] = ImageKind.allCases) {
+    func clear(macID: String, _ kinds: [ImageKind] = ImageKind.allCases) {
         task?.cancel()
         task = nil
         gen += 1
@@ -376,15 +397,22 @@ final class ImageStore {
         prefetchTotal = 0
         prefetchOriginalDone = 0
         cache.removeAllObjects()
+        let clearAll = kinds.count == ImageKind.allCases.count
         let prev = clearTask
         clearTask = Task.detached(priority: .utility) {
             _ = await prev?.value
-            for kind in kinds { Self.removeFiles(kind) }
+            if clearAll {
+                if let dir = Self.diskDir(for: macID) {
+                    try? FileManager.default.removeItem(at: dir)
+                }
+            } else {
+                for kind in kinds { Self.removeFiles(macID, kind) }
+            }
         }
     }
 
-    private nonisolated static func removeFiles(_ kind: ImageKind) {
-        guard let dir = diskDir else { return }
+    private nonisolated static func removeFiles(_ macID: String, _ kind: ImageKind) {
+        guard let dir = diskDir(for: macID) else { return }
         let prefix = kind.cachePrefix + "-"
         let items = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
         for f in items where f.hasPrefix(prefix) {
@@ -395,62 +423,66 @@ final class ImageStore {
     #if DEBUG
     /// 截图用（-demo -demoOffline）：把演示图写进磁盘缓存，
     /// 验证「离线时从磁盘读图」这条路径真的能走通。
-    func seedDiskCache(names: [String], hero: String?) {
+    func seedDiskCache(macID: String, names: [String], hero: String?) {
         demo = false
         #if os(iOS) // NSImage 没有 jpegData，macOS 上的类型检查不用这段
         // 只种网格里看得见的那几张：这一步是同步的，种太多启动会卡好几秒
         for n in names {
             guard let img = Self.demoImage(n, large: false),
                   let data = img.jpegData(compressionQuality: 0.7) else { continue }
-            Self.writeDisk(n, .thumb, data)
+            Self.writeDisk(macID, n, .thumb, data)
         }
         if let hero, let img = Self.demoImage(hero, large: true),
            let data = img.jpegData(compressionQuality: 0.7) {
-            Self.writeDisk(hero, .hero, data)
+            Self.writeDisk(macID, hero, .hero, data)
         }
         // 设置 › 离线 › 大图那一行：只种几张，看有数字的样子
         for n in names.prefix(names.count / 3) {
             guard let img = Self.demoImage(n, large: true),
                   let data = img.jpegData(compressionQuality: 0.8) else { continue }
-            Self.writeDisk(n, .image, data)
+            Self.writeDisk(macID, n, .image, data)
         }
         // 设置 › 离线 › 原图那一行：种一半的「原图」，看有数字的样子
         for n in names.prefix(names.count / 2) {
             guard let img = Self.demoImage(n, large: true),
                   let data = img.jpegData(compressionQuality: 0.8) else { continue }
-            Self.writeDisk(n, .original, data)
+            Self.writeDisk(macID, n, .original, data)
         }
         #endif
     }
     #endif
 
-    /// 缓存目录：Application Support/拾景/images/<种类>-<文件名>。
-    /// 文件名里可能带中文，直接用没问题，但 "/" 要换掉。
-    private nonisolated static var diskDir: URL? { AppSupport.path("images") }
+    /// 缓存根目录：Application Support/拾景/images/<macID>/<种类>-<文件名>。
+    private nonisolated static var rootDiskDir: URL? { AppSupport.path("images") }
+
+    private nonisolated static func diskDir(for macID: String) -> URL? {
+        guard !macID.isEmpty, let root = rootDiskDir else { return nil }
+        return root.appending(path: safeName(macID), directoryHint: .isDirectory)
+    }
 
     /// 文件名里可能带中文，直接用没问题，但 "/" 和 ":" 要换掉（不能做文件名）。
     private nonisolated static func safeName(_ name: String) -> String {
         name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
     }
 
-    private nonisolated static func diskFile(_ name: String, _ kind: ImageKind) -> URL? {
-        guard !name.isEmpty, let dir = diskDir else { return nil }
+    private nonisolated static func diskFile(_ macID: String, _ name: String, _ kind: ImageKind) -> URL? {
+        guard !name.isEmpty, let dir = diskDir(for: macID) else { return nil }
         return dir.appending(path: "\(kind.cachePrefix)-\(safeName(name))", directoryHint: .notDirectory)
     }
 
-    private nonisolated static func readDisk(_ name: String, _ kind: ImageKind) -> Data? {
-        guard let f = diskFile(name, kind) else { return nil }
+    private nonisolated static func readDisk(_ macID: String, _ name: String, _ kind: ImageKind) -> Data? {
+        guard let f = diskFile(macID, name, kind) else { return nil }
         return try? Data(contentsOf: f)
     }
 
     /// 磁盘上有没有这一档（只看文件在不不在，不读内容）。
-    private nonisolated static func onDisk(_ name: String, _ kind: ImageKind) -> Bool {
-        guard let f = diskFile(name, kind) else { return false }
+    private nonisolated static func onDisk(_ macID: String, _ name: String, _ kind: ImageKind) -> Bool {
+        guard let f = diskFile(macID, name, kind) else { return false }
         return FileManager.default.fileExists(atPath: f.path)
     }
 
-    private nonisolated static func writeDisk(_ name: String, _ kind: ImageKind, _ data: Data) {
-        guard let f = diskFile(name, kind) else { return }
+    private nonisolated static func writeDisk(_ macID: String, _ name: String, _ kind: ImageKind, _ data: Data) {
+        guard let f = diskFile(macID, name, kind) else { return }
         let fm = FileManager.default
         try? fm.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: f, options: .atomic)

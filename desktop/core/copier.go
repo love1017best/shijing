@@ -478,7 +478,27 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 	}
 	sample := func(all []sourceImage, grouped map[string][]sourceImage, leaves []string, n int) []sourceImage {
 		if o.BalanceFirst {
-			return sampleBalanced(grouped, leaves, n, r)
+			sel := sampleBalanced(grouped, leaves, n, r)
+			if need := n - len(sel); need > 0 {
+				// 叶子目录里的图片凑不够（例如图片都在非叶子目录，或叶子目录大多被排除），
+				// 再从其余符合条件的图片里补足，避免非叶子目录图片被丢弃或选出 0 张。
+				inGrouped := make(map[string]bool, len(sel))
+				for _, leaf := range leaves {
+					for _, img := range grouped[leaf] {
+						inGrouped[img.path] = true
+					}
+				}
+				var extra []sourceImage
+				for _, img := range all {
+					if !inGrouped[img.path] {
+						extra = append(extra, img)
+					}
+				}
+				if len(extra) > 0 {
+					sel = append(sel, sampleN(extra, need, r)...)
+				}
+			}
+			return sel
 		}
 		return sampleN(all, n, r)
 	}
@@ -487,6 +507,10 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 		selected = append(selected, sample(fillAll, fillGrouped, fillLeaves, need)...)
 	}
 	res.Selected = len(selected)
+	if len(selected) == 0 {
+		logf("⚠️ 未能选出任何可用图片，保留现有壁纸目录不变")
+		return res, ErrNoImages
+	}
 	if o.BalanceFirst {
 		leafCount := len(grouped)
 		logf("⚖️ 平衡采样：%d 个叶子文件夹，共 %d 张符合条件的图片", leafCount, len(all))
@@ -547,6 +571,17 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 	var dests []string
 	res.Copied, res.Failed, res.Archived, dests, res.Bytes = processImages(selected, destDir, o, archiveOverride, rep)
 	if rep.stopped() && res.Copied+res.Failed < len(selected) {
+		// 已经清空过壁纸目录：按实际复制成功的图重写 last_selection.json，
+		// 避免保留上一批映射导致后续「删除原图」按旧记录删错 NAS 文件。
+		doneSrc := make([]string, 0, res.Copied)
+		doneDst := make([]string, 0, res.Copied)
+		for i, d := range dests {
+			if d != "" {
+				doneSrc = append(doneSrc, selected[i].path)
+				doneDst = append(doneDst, d)
+			}
+		}
+		saveSelection(o.SelectionFile, destDir, doneSrc, doneDst, logf)
 		logf("⏹️ 已停止：壁纸目录里保留已复制的 %d 张", res.Copied)
 		return res, ErrCanceled
 	}
@@ -671,7 +706,20 @@ func compareSelection(file, destDir string, prev *prevSelection, selected []sour
 		logf("🔁 和上一轮相比：新更换 %d 张，重复 %d 张（重合率 %.0f%%%s）",
 			len(cur)-res.Repeated, res.Repeated, float64(res.Repeated)/float64(len(cur))*100, note)
 	}
-	data, err := json.Marshal(savedSelection{Dest: destDir, Sources: cur, Dests: dests})
+	saveSelection(file, destDir, cur, dests, logf)
+}
+
+func saveSelection(file, destDir string, sources, dests []string, logf Logf) {
+	if file == "" {
+		return
+	}
+	if sources == nil {
+		sources = []string{}
+	}
+	if dests == nil {
+		dests = []string{}
+	}
+	data, err := json.Marshal(savedSelection{Dest: destDir, Sources: sources, Dests: dests})
 	if err == nil {
 		err = WriteFileAtomic(file, data, 0o644)
 	}

@@ -54,6 +54,11 @@ func (a *app) queueDelete(wall, src string) error {
 		a.pending = append(a.pending, e)
 		a.savePending()
 	}
+	if a.pendingBusy {
+		a.pendingMu.Lock()
+		delete(a.pendingCanceled, src)
+		a.pendingMu.Unlock()
+	}
 	a.appendLog(fmt.Sprintf("🕓 图库未连接，原图删除已排队（连接后自动执行）: %s", src))
 	if err := a.removeWallpaper(wall, false); err != nil {
 		return err
@@ -69,25 +74,41 @@ func (a *app) maybeProcessPending() {
 		return
 	}
 	a.pendingBusy = true
+	a.pendingMu.Lock()
+	a.pendingCanceled = map[string]bool{}
+	a.pendingMu.Unlock()
 	list := slices.Clone(a.pending)
+	isCanceled := func(path string) bool {
+		a.pendingMu.Lock()
+		defer a.pendingMu.Unlock()
+		return a.pendingCanceled[path]
+	}
 	go func() {
-		res := core.RunPending(list, nil) // 已经确认都挂上了，不用再按目录判断
+		res := core.RunPendingWithCancel(list, nil, isCanceled) // 已经确认都挂上了，不用再按目录判断
 		a.update(func() { a.applyPending(res) })
 	}()
 }
 
 // applyPending 把一次执行的结果写回队列和删除记录（主线程）。
 // 变了的（Stale）不删、也不再自动重试：提示用户自己看过再决定。
+// 用路径差集归并而非整片覆盖，确保后台执行期间新入队的条目不丢、已取消的条目不复活。
 func (a *app) applyPending(res core.PendingResult) {
 	a.pendingBusy = false
+	a.pendingMu.Lock()
+	a.pendingCanceled = nil
+	a.pendingMu.Unlock()
+	finished := make(map[string]bool, len(res.Deleted)+len(res.Gone)+len(res.Stale))
 	for _, e := range res.Deleted {
+		finished[e.Path] = true
 		core.LogDeletion(a.paths.DeleteLog, e.Path, int(a.minW), int(a.minH), core.ReasonManual)
 		a.appendLog(fmt.Sprintf("🔥 手动删除原图（排队执行，%s 排队）: %s", e.AddedAt.Format("1月2日 15:04"), e.Path))
 	}
 	for _, e := range res.Gone {
+		finished[e.Path] = true
 		a.appendLog(fmt.Sprintf("🕓 排队的原图已不存在，跳过: %s", e.Path))
 	}
 	for _, e := range res.Stale {
+		finished[e.Path] = true
 		a.appendLog(fmt.Sprintf("⚠️ 排队的原图在排队期间被修改，未删除: %s", e.Path))
 	}
 	if len(res.Deleted)+len(res.Gone) > 0 {
@@ -96,7 +117,19 @@ func (a *app) applyPending(res core.PendingResult) {
 	if len(res.Stale) > 0 && len(res.Deleted)+len(res.Gone) == 0 {
 		a.toast = fmt.Sprintf("%d 张排队的原图在排队期间被修改，未删除（见日志）", len(res.Stale))
 	}
-	a.pending = res.Kept
+	if len(finished) > 0 {
+		kept := a.pending[:0]
+		for _, e := range a.pending {
+			if !finished[e.Path] {
+				kept = append(kept, e)
+			}
+		}
+		if len(kept) == 0 {
+			a.pending = nil
+		} else {
+			a.pending = kept
+		}
+	}
 	a.savePending()
 }
 
@@ -106,6 +139,14 @@ func (a *app) cancelPending(i int) {
 		return
 	}
 	path := a.pending[i].Path
+	if a.pendingBusy {
+		a.pendingMu.Lock()
+		if a.pendingCanceled == nil {
+			a.pendingCanceled = map[string]bool{}
+		}
+		a.pendingCanceled[path] = true
+		a.pendingMu.Unlock()
+	}
 	a.pending = slices.Delete(a.pending, i, i+1)
 	a.savePending()
 	a.toast = "已取消排队删除：" + filepath.Base(path)
@@ -113,6 +154,16 @@ func (a *app) cancelPending(i int) {
 
 func (a *app) cancelAllPending() {
 	n := len(a.pending)
+	if a.pendingBusy {
+		a.pendingMu.Lock()
+		if a.pendingCanceled == nil {
+			a.pendingCanceled = map[string]bool{}
+		}
+		for _, e := range a.pending {
+			a.pendingCanceled[e.Path] = true
+		}
+		a.pendingMu.Unlock()
+	}
 	a.pending = nil
 	a.savePending()
 	a.toast = fmt.Sprintf("已取消 %d 项排队删除", n)

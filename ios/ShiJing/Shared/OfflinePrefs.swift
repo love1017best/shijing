@@ -27,12 +27,21 @@ struct OfflinePrefs: Codable, Equatable {
             && !path.usesInterfaceType(.wifi) && !path.usesInterfaceType(.wiredEthernet)
     }
 
-    /// 按设置和当前网络，这次该不该离线。小组件每次排时间线前调用一次，最多等 1 秒读网络状态。
+    enum HoldReason: Equatable {
+        case manual
+        case cellular
+    }
+
+    /// 按设置和当前网络，这次该不该离线。小组件和快捷指令在连网前调用一次，最多等 1 秒读网络状态。
     static func holdNow() async -> Bool {
+        await holdReasonNow() != nil
+    }
+
+    static func holdReasonNow() async -> HoldReason? {
         let prefs = load()
-        if prefs.manual { return true }
-        guard prefs.onCellular else { return false }
-        return await currentlyCellularOnly()
+        if prefs.manual { return .manual }
+        guard prefs.onCellular else { return nil }
+        return await currentlyCellularOnly() ? .cellular : nil
     }
 
     private static func currentlyCellularOnly() async -> Bool {

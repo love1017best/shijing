@@ -769,7 +769,7 @@ private struct OfflineCacheSection: View {
                         Text("已用 \(bytes(usage?.used)) / \(limitGB) GB")
                         Spacer()
                         Button("清除") {
-                            store.clear()
+                            store.clear(macID: session.macID.uuidString)
                             refresh()
                         }
                         .disabled((usage?.used ?? 0) == 0)
@@ -777,7 +777,7 @@ private struct OfflineCacheSection: View {
                     ProgressView(value: fraction)
                 }
             }
-            .task { refresh() }
+            .task(id: session.macID) { refresh() }
             .onChange(of: store.prefetching) { _, running in if !running { refresh() } }
             .onChange(of: store.prefetchDone) { _, _ in
                 // 存的过程中不用每张都数一遍文件，隔一阵更新一次
@@ -833,13 +833,14 @@ private struct OfflineCacheSection: View {
     }
 
     private func refresh() {
+        let macID = session.macID.uuidString
         let names = session.walls.map(\.name)
         Task {
             // 刚点过「清除」时等文件删完再数，不然显示的还是清之前的大小
             await store.waitForClear()
             // 一次量完：列一遍目录就有各档的张数和大小，不用一档列一遍
             usage = await Task.detached(priority: .utility) {
-                ImageStore.usage(names: names)
+                ImageStore.usage(macID: macID, names: names)
             }.value
         }
     }

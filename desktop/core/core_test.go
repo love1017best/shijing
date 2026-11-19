@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -750,5 +751,120 @@ func TestReadDeleteLog(t *testing.T) {
 	// 没有原因的旧日志也是筛选删的
 	if f, m := CountDeletions(ReadDeleteLog(p)); f != 2 || m != 1 {
 		t.Errorf("应是筛选删除 2、手动删除 1，实际 %d、%d", f, m)
+	}
+}
+
+// 中途停止复制后，last_selection.json 应按本次实际复制成功的图重写，不能残留上一批映射。
+func TestCopySamplesCanceledUpdatesSelection(t *testing.T) {
+	root := t.TempDir()
+	oldSrc := filepath.Join(root, "old", "cat")
+	newSrc := filepath.Join(root, "new", "cat")
+	dest := filepath.Join(root, "dest")
+	selFile := filepath.Join(root, "last_selection.json")
+	writePNG(t, filepath.Join(oldSrc, "1.png"), 80, 40)
+	// 张数要显著大于 copyWorkers，避免首批并发 worker 一次把全部图片领完导致未触发中途取消。
+	const totalNew = copyWorkers*3 + 4
+	for i := range totalNew {
+		writePNG(t, filepath.Join(newSrc, fmt.Sprintf("%d.png", i)), 80, 40)
+	}
+
+	if _, err := CopySamples(CopyOptions{
+		Sources: []string{oldSrc}, Dest: dest, Mode: "copy", Num: 1, SelectionFile: selFile,
+	}, quiet, rand.New(rand.NewPCG(1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	oldMap := WallpaperSources(selFile, dest)
+	if oldMap["cat-1.png"] != filepath.Join(oldSrc, "1.png") {
+		t.Fatalf("上一批映射异常: %+v", oldMap)
+	}
+
+	var stop atomic.Bool
+	rep := Reporter{
+		Progress: func(s Stage, done, _ int) {
+			if s == StageCopy && done >= 1 {
+				stop.Store(true)
+			}
+		},
+		Stop: stop.Load,
+	}
+	res, err := CopySamples(CopyOptions{
+		Sources: []string{newSrc}, Dest: dest, Mode: "copy", Num: totalNew, SelectionFile: selFile,
+	}, rep, rand.New(rand.NewPCG(2, 2)))
+	if !errors.Is(err, ErrCanceled) {
+		t.Fatalf("预期 ErrCanceled，实际 %v (copied=%d)", err, res.Copied)
+	}
+	got := WallpaperSources(selFile, dest)
+	for name, src := range got {
+		if strings.HasPrefix(src, oldSrc) {
+			t.Fatalf("残留了上一批映射: %s -> %s", name, src)
+		}
+	}
+	if len(got) != res.Copied {
+		t.Fatalf("映射数 %d 与已复制数 %d 不一致: %+v", len(got), res.Copied, got)
+	}
+}
+
+// walk 跳过 NAS 噪声目录和 ._* 影子文件；全部图片都在非叶子目录时 BalanceFirst 仍可采样不清空目标目录。
+func TestWalkIgnoresNASNoiseAndNonLeafFallback(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "lib")
+	dest := filepath.Join(root, "dest")
+	// 噪声目录和影子文件（都是竖图/低清图，不应被扫描、删除或复制）
+	writePNG(t, filepath.Join(src, "album", "@eaDir", "thumb.png"), 20, 40)
+	writePNG(t, filepath.Join(src, "#recycle", "trash.png"), 20, 40)
+	writePNG(t, filepath.Join(src, "album", "._ghost.png"), 20, 40)
+	// 真实横屏图片（由于 @eaDir 被跳过，album 依然是叶子目录）
+	writePNG(t, filepath.Join(src, "album", "ok.png"), 80, 40)
+
+	sr := SortImages(SortOptions{Sources: []string{src}, MinWidth: tw, MinHeight: th, Delete: true}, quiet)
+	if sr.Deleted != 0 || sr.Images != 1 {
+		t.Fatalf("不应扫进 @eaDir/#recycle/._*，实际处理 %d 删 %d", sr.Images, sr.Deleted)
+	}
+	if _, err := os.Stat(filepath.Join(src, "#recycle", "trash.png")); err != nil {
+		t.Fatalf("#recycle 里的文件不应被删除: %v", err)
+	}
+
+	// 全非叶子目录场景（目录下既有图片也有空子目录）
+	nonLeaf := filepath.Join(root, "nonleaf")
+	if err := os.MkdirAll(filepath.Join(nonLeaf, "empty_sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writePNG(t, filepath.Join(nonLeaf, "top.png"), 80, 40)
+	res, err := CopySamples(CopyOptions{
+		Sources: []string{nonLeaf}, Dest: dest, Mode: "copy", Num: 2, BalanceFirst: true,
+	}, quiet, rand.New(rand.NewPCG(1, 2)))
+	if err != nil || res.Copied != 1 {
+		t.Fatalf("非叶子目录兜底失败: copied=%d err=%v", res.Copied, err)
+	}
+}
+
+// 增量模式下先模拟运行记录 mtime，后续开启真删不能跳过仍含不合格图的目录。
+func TestSortImagesIncrementalDryRunThenDelete(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "lib")
+	stateFile := filepath.Join(root, "state.json")
+	bad := filepath.Join(src, "a", "portrait.png")
+	good := filepath.Join(src, "a", "wide.png")
+	writePNG(t, bad, 30, 60)
+	writePNG(t, good, 80, 40)
+
+	dry := SortImages(SortOptions{
+		Sources: []string{src}, MinWidth: tw, MinHeight: th, Delete: false, Incremental: true, StateFile: stateFile,
+	}, quiet)
+	if dry.Rejected != 1 || dry.Deleted != 0 {
+		t.Fatalf("模拟运行结果异常: %+v", dry)
+	}
+
+	real := SortImages(SortOptions{
+		Sources: []string{src}, MinWidth: tw, MinHeight: th, Delete: true, Incremental: true, StateFile: stateFile,
+	}, quiet)
+	if real.Skipped != 0 || real.Deleted != 1 {
+		t.Fatalf("模拟后开真删不应跳过含不合格图的目录: %+v", real)
+	}
+	if _, err := os.Stat(bad); !os.IsNotExist(err) {
+		t.Fatalf("不合格原图应被删除: %v", err)
+	}
+	if _, err := os.Stat(good); err != nil {
+		t.Fatalf("合格原图应保留: %v", err)
 	}
 }

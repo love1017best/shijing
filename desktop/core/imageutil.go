@@ -119,14 +119,29 @@ func walk(root string, fn func(dir string, dirs, files []string)) {
 	visit(top)
 }
 
+// 遍历图库与计算目录 mtime 时忽略的元数据/缓存条目（CLAUDE.md 坑 7）：
+// AppleDouble 影子文件和 NAS 索引/回收站目录既不参与采样筛选，也不应把真实图片目录判成非叶子目录。
+var ignoredNames = map[string]bool{
+	".DS_Store": true, "Thumbs.db": true, "desktop.ini": true,
+	"@eaDir": true, "#recycle": true, "@Recycle": true, ".@__thumb": true,
+	".SynologyWorkingDirectory": true,
+}
+
+func isIgnoredEntry(name string) bool {
+	return strings.HasPrefix(name, "._") || ignoredNames[name]
+}
+
 // readDirSplit 读一个目录，按 os.walk 的方式分出子目录（含指向目录的软链接）、文件，
-// 以及需要下钻的子目录（不含软链接）。
+// 以及需要下钻的子目录（不含软链接）。跳过已知的系统/NAS 噪声条目。
 func readDirSplit(dir string) (dirs, files, descend []string, err error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	for _, e := range entries {
+		if isIgnoredEntry(e.Name()) {
+			continue
+		}
 		isDir := e.IsDir()
 		if !isDir && e.Type()&fs.ModeSymlink != 0 {
 			// os.walk 用 entry.is_dir()（跟随软链接）分类，但 followlinks=False 不下钻

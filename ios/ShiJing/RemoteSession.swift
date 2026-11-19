@@ -50,8 +50,9 @@ final class RemoteSession {
     private var held = false
     /// 上次把快照写到磁盘的时间（运行中状态更新很密，最多 5 秒写一次）
     private var lastSnapshotSave = Date.distantPast
-    /// 有一轮壁纸列表正在拉：状态推得很密时别每次推送都再发一个请求
-    private var refreshingWalls = false
+    /// 正在进行的拉壁纸列表任务（合并并发调用，避免旧响应晚到覆写新列表）
+    private var refreshWallsTask: Task<Bool, Never>?
+    private var refreshWallsGen = 0
     /// 离线时点的「移出 / 不再选」，连上电脑后自动处理（存在 UserDefaults 里，按 Mac 分开）
     internal(set) var queued: [OfflineAction] = []
     var flushing = false
@@ -256,44 +257,47 @@ final class RemoteSession {
                 var firstEvent = true
                 for try await s in try client().events() {
                     let wasLive = connection == .live
-                    if firstEvent {
-                        firstEvent = false
-                        // 事件流（重新）连上了：回前台之前可能有一次没补完的离线操作，先补上
-                        // （只认第一帧：电脑在换壁纸时补不成的留着，等换完一批那一路再触发）
-                        if !queued.isEmpty { Task { await flushOfflineActions() } }
-                    }
+                    let wasRunning = state?.running == true
+                    let isFirst = firstEvent
+                    firstEvent = false
                     RunNotifier.observe(new: s, mac: mac.name)
-                    if state?.running == true, !s.running {
+                    if wasRunning, !s.running {
                         WidgetReload.all()
-                        // 换完一批：日志、删除记录都变了，更新手机上存的记录
-                        Task { await refreshRecordsCache() }
-                        // 电脑忙的时候没补成的离线操作，这时候再补一次
-                        if !queued.isEmpty { Task { await flushOfflineActions() } }
                     }
                     state = s
                     snapshotAt = nil
                     remember()
                     #if os(iOS)
-                    // 在后台等的这次换完了：通知已经发了，断开
+                    // 在后台等的这次换完了：通知已发、快照已保存，直接断开；
+                    // 离线队列重放和记录缓存留到回到前台后处理，避免刚派发就被系统挂起截断。
                     if !s.running, bgTask != .invalid { endBackground(disconnect: true); return }
                     #endif
                     connection = .live
+                    if (isFirst || !wasLive || (wasRunning && !s.running)), !queued.isEmpty {
+                        Task { await flushOfflineActions() }
+                    }
+                    if wasRunning, !s.running {
+                        // 换完一批：日志、删除记录都变了，更新手机上存的记录
+                        Task { await refreshRecordsCache() }
+                    }
                     if !wasLive {
-                        if !queued.isEmpty { Task { await flushOfflineActions() } }
                         Task {
                             if s.wallsRev != wallsRev {
                                 // 换了一批：refreshWalls 里先收拾缓存，再按新的列表补齐
                                 await refreshWalls()
                             } else if !ImageStore.shared.prefetching, !ImageStore.shared.prefetchPaused {
                                 // 还是同一批：上一次没缓存完的接着补（已经存下的会跳过）。
-                                // 用户自己点了「暂停」的就不动，等他再点「补齐」
+                                // 用户自己点了「暂停」的就不动，等用户再点「补齐」
                                 ImageStore.shared.prefetch(self)
                             }
                         }
                         // 记录页的三份数据也存一份，下次断了还能看
-                        Task { await refreshRecordsCache() }
+                        if !(wasRunning && !s.running) {
+                            Task { await refreshRecordsCache() }
+                        }
+                    } else if s.wallsRev != wallsRev {
+                        Task { await refreshWalls() }
                     }
-                    if s.wallsRev != wallsRev { Task { await refreshWalls() } }
                     delay = 1
                     failures = 0
                 }
@@ -469,7 +473,7 @@ final class RemoteSession {
     /// 离线时用手机上存着的那份原图（设置 › 离线 › 保存原图），没存过就只能等连上电脑。
     func saveOriginal(_ w: Wallpaper) async {
         let live = connection == .live
-        let cached = ImageStore.cachedOriginal(name: w.name)
+        let cached = ImageStore.cachedOriginal(macID: macID.uuidString, name: w.name)
         guard live || cached != nil else {
             switch connection {
             case .connecting:
@@ -534,35 +538,48 @@ final class RemoteSession {
     @discardableResult
     func refreshWalls(force: Bool = false) async -> Bool {
         guard let rev = state?.wallsRev else { return false }
-        if !force, rev == wallsRev { return true }
-        if !force, refreshingWalls { return true } // 已经有一轮在拉了，等它拉完
-        defer { if !force { refreshingWalls = false } }
-        if !force { refreshingWalls = true }
-        do {
-            let list = try await client().wallpapers()
-            let changed = list.rev != wallsRev
-            walls = list.items
-            wallsRev = list.rev
-            heroName = list.hero
-            remember(wallsChanged: true)
-            if changed {
-                // 换了一批：下载中的先停掉，别让属于上一批的图写进来
-                ImageStore.shared.stopForNewBatch()
+        if !force {
+            if let existing = refreshWallsTask { return await existing.value }
+            if rev == wallsRev { return true }
+        } else {
+            // force 需要拿到此刻之后的最新列表：先等上一条在途请求落地，避免并发响应乱序覆写
+            while let existing = refreshWallsTask {
+                _ = await existing.value
             }
-            // 删掉不在这批里的缓存（按文件名认，同一张图换了批还在），也顺手清掉升级前的旧文件。
-            // 每次拉到新列表都跑一遍。要等它删完再开始补齐：补齐按「磁盘现在占了多少」算上限，
-            // 没删掉的会被一起算进去，新一批没存几张就以为到上限了
-            let names = list.items.map(\.name)
-            await Task.detached(priority: .utility) { ImageStore.keepOnly(names: names) }.value
-            if changed {
-                ImageStore.shared.prefetch(self) // 这一批存到磁盘，离线也能看
-            }
-            return true
-        } catch {
-            // 列表拉不到不影响别的，下次状态推送再试
-            noteNetworkFailure(error)
-            return false
         }
+        refreshWallsGen += 1
+        let gen = refreshWallsGen
+        let t = Task { @MainActor [weak self] () -> Bool in
+            guard let self else { return false }
+            defer { if self.refreshWallsGen == gen { self.refreshWallsTask = nil } }
+            do {
+                let list = try await self.client().wallpapers()
+                let changed = list.rev != self.wallsRev
+                self.walls = list.items
+                self.wallsRev = list.rev
+                self.heroName = list.hero
+                self.remember(wallsChanged: true)
+                if changed {
+                    // 换了一批：下载中的先停掉，别让属于上一批的图写进来
+                    ImageStore.shared.stopForNewBatch()
+                }
+                // 删掉这台 Mac 目录里不在这批里的缓存，也顺手清掉升级前的根目录旧文件。
+                // 要等删完再开始补齐：补齐按总磁盘占用算上限。
+                let names = list.items.map(\.name)
+                let macID = self.macID.uuidString
+                await Task.detached(priority: .utility) { ImageStore.keepOnly(macID: macID, names: names) }.value
+                if changed, !self.paused {
+                    ImageStore.shared.prefetch(self) // 这一批存到磁盘，离线也能看
+                }
+                return true
+            } catch {
+                // 列表拉不到不影响别的，下次状态推送再试
+                self.noteNetworkFailure(error)
+                return false
+            }
+        }
+        refreshWallsTask = t
+        return await t.value
     }
 
     /// 连上电脑时把记录页的三份数据（运行日志、删除记录、不再选）各存一份到手机，

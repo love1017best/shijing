@@ -5,15 +5,24 @@ import Foundation
 /// 不打开 App；App 和小组件两个目标都编译这份代码（小组件上的按钮在小组件进程里执行）。
 enum IntentError: LocalizedError {
     case noMac
+    case offline(OfflinePrefs.HoldReason)
 
     var errorDescription: String? {
         switch self {
-        case .noMac: "尚未配对 Mac：请先打开拾景，在 Mac 上完成配对。"
+        case .noMac:
+            "尚未配对 Mac：请先打开拾景，在 Mac 上完成配对。"
+        case .offline(.manual):
+            "已打开离线模式，拾景暂停连接电脑。需要时先在拾景里关闭离线模式。"
+        case .offline(.cellular):
+            "正在使用蜂窝网络，拾景暂停连接电脑；连接 Wi‑Fi 后再试。"
         }
     }
 }
 
-private func currentClient() throws -> (CurrentMac, APIClient) {
+private func currentClient() async throws -> (CurrentMac, APIClient) {
+    if let reason = await OfflinePrefs.holdReasonNow() {
+        throw IntentError.offline(reason)
+    }
     guard let mac = CurrentMac.load() else { throw IntentError.noMac }
     return (mac, try mac.client())
 }
@@ -42,7 +51,7 @@ struct RunWallpaperIntent: AppIntent {
     init(deleteOriginals: Bool) { self.deleteOriginals = deleteOriginals }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let (mac, client) = try currentClient()
+        let (mac, client) = try await currentClient()
         do {
             let before = try await client.state()
             if before.running { return .result(dialog: "「\(mac.name)」正在更换壁纸，请等待本次更换完成。") }
@@ -61,7 +70,7 @@ struct StopWallpaperIntent: AppIntent {
     static let description = IntentDescription("停止 Mac 上正在进行的换壁纸。")
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let (mac, client) = try currentClient()
+        let (mac, client) = try await currentClient()
         do {
             guard try await client.state().running else { return .result(dialog: "「\(mac.name)」当前没有在更换壁纸。") }
             _ = try await client.stop()
@@ -78,7 +87,7 @@ struct WallpaperStatusIntent: AppIntent {
     static let description = IntentDescription("看看 Mac 上的拾景现在在做什么、上次换得怎么样。")
 
     func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
-        let (mac, client) = try currentClient()
+        let (mac, client) = try await currentClient()
         do {
             let s = try await client.state()
             var text: String

@@ -140,3 +140,29 @@ func TestPendingBarCancel(t *testing.T) {
 		t.Errorf("磁盘上的队列也要清掉: %+v", got)
 	}
 }
+
+// 后台 RunPending 执行期间取消旧项、新入队新项：applyPending 既不复活已取消项，也不覆盖新入队项。
+func TestPendingApplyMergesConcurrentChanges(t *testing.T) {
+	f, _ := newFakeApp(t)
+	a := core.PendingDelete{Path: "/Volumes/Media0/a.jpg", Wall: "a.jpg"}
+	b := core.PendingDelete{Path: "/Volumes/Media0/b.jpg", Wall: "b.jpg"}
+	c := core.PendingDelete{Path: "/Volumes/Media0/c.jpg", Wall: "c.jpg"}
+	f.pending = []core.PendingDelete{a, b}
+	f.pendingBusy = true
+	f.pendingCanceled = map[string]bool{}
+
+	// 执行期间用户取消了 b，又新排队了 c
+	f.cancelPending(1)
+	f.pending = append(f.pending, c)
+	if !f.pendingCanceled[b.Path] {
+		t.Fatalf("pendingBusy 期间取消应记录 pendingCanceled")
+	}
+	// 后台结果报告 a 已删除、b 仍在 Kept（例如取消前 stat 失败）
+	f.applyPending(core.PendingResult{
+		Deleted: []core.PendingDelete{a},
+		Kept:    []core.PendingDelete{b},
+	})
+	if len(f.pending) != 1 || f.pending[0].Path != c.Path {
+		t.Fatalf("应只保留新入队的 c，不能复活 b 或丢掉 c: %+v", f.pending)
+	}
+}

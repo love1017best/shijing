@@ -23,12 +23,31 @@ enum Keychain {
     }
 
     static func setData(_ data: Data, account: String) {
-        deleteData(account: account)
+        let attrs: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        // 优先原地更新，避免先删后加期间小组件并发读到 nil；仅不存在时再新增。
         for g in [group, nil] {
-            var q = query(account, group: g)
-            q[kSecValueData as String] = data
-            q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            if SecItemAdd(q as CFDictionary, nil) == errSecSuccess || g == nil { return }
+            let base = query(account, group: g)
+            var status = SecItemUpdate(base as CFDictionary, attrs as CFDictionary)
+            if status == errSecItemNotFound {
+                var add = base
+                add[kSecValueData as String] = data
+                add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+                status = SecItemAdd(add as CFDictionary, nil)
+                if status == errSecDuplicateItem {
+                    status = SecItemUpdate(base as CFDictionary, attrs as CFDictionary)
+                }
+            }
+            if status == errSecSuccess {
+                // 写入共享组成功后，顺手清理默认组里可能残留的旧副本（不影响共享组并发读取）
+                if g != nil {
+                    SecItemDelete(query(account, group: nil) as CFDictionary)
+                }
+                return
+            }
+            if g == nil { return }
         }
     }
 

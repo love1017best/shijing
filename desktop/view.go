@@ -20,12 +20,6 @@ func (a *app) view(c *ui.Context) {
 		(a.walls.dir != core.ExpandUser(a.cfg.DestDir) || a.wallsGen != a.wallsLoadedGen) {
 		a.loadWallpapers()
 	}
-	// 「删除不合格原图」被重新打开：恢复运行前的确认
-	if a.cfg.DeleteDuringFilter && !a.prevDelete && a.skipConfirm {
-		a.skipConfirm = false
-		a.saveUIState()
-	}
-	a.prevDelete = a.cfg.DeleteDuringFilter
 	if a.toast != "" {
 		c.Toast(a.toast)
 		a.toast = ""
@@ -97,8 +91,7 @@ func (a *app) view(c *ui.Context) {
 	a.pairModal(c)
 	a.qrPairModal(c)
 	a.renameModal(c)
-	a.autosave()
-	a.publishRemote()
+	a.commitState()
 }
 
 func sidebarBg(t *ui.Theme) ui.Color {

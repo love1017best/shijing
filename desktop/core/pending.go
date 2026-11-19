@@ -60,8 +60,17 @@ func SavePending(path string, list []PendingDelete) error {
 // （调用方按挂载状态给，连不上的直接留着，免得对着断掉的网络卷发一堆会阻塞的请求）。
 // 返回的 Stale 已经做过判断，调用方应当从队列里去掉，提示用户这张没删。
 func RunPending(entries []PendingDelete, mounted func(path string) bool) PendingResult {
+	return RunPendingWithCancel(entries, mounted, nil)
+}
+
+// RunPendingWithCancel 在 RunPending 基础上支持执行期间按路径取消：
+// canceled 返回 true 的条目立即跳过（不删除文件，也不记入结果），避免后台删除期间与用户取消竞态。
+func RunPendingWithCancel(entries []PendingDelete, mounted, canceled func(path string) bool) PendingResult {
 	var res PendingResult
 	for _, e := range entries {
+		if canceled != nil && canceled(e.Path) {
+			continue
+		}
 		if mounted != nil && !mounted(e.Path) {
 			res.Kept = append(res.Kept, e)
 			continue
@@ -81,6 +90,9 @@ func RunPending(entries []PendingDelete, mounted func(path string) bool) Pending
 		}
 		if !fingerprintMatch(e, fi.Size(), fi.ModTime()) {
 			res.Stale = append(res.Stale, e)
+			continue
+		}
+		if canceled != nil && canceled(e.Path) {
 			continue
 		}
 		if err := os.Remove(e.Path); err != nil {

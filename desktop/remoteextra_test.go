@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -204,6 +205,7 @@ func TestRemotePendingCancel(t *testing.T) {
 		{Path: "/Volumes/Media0/A/a.jpg", Wall: "a.jpg", AddedAt: time.Now()},
 		{Path: "/Volumes/Media0/A/b.jpg", Wall: "b.jpg", AddedAt: time.Now()},
 	}
+	h.tt.Frame()
 	_, st := h.do(t, "GET", "/api/state", tok, nil)
 	if st["pending"] != float64(2) {
 		t.Fatalf("pending = %v", st["pending"])
@@ -270,5 +272,60 @@ func TestRemoteHero(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "image/jpeg" {
 		t.Fatalf("hero 图 = %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+}
+
+// 窗口隐藏时不调用 view()，手机改设置与不再选名单后仍应立即落盘，避免退出时丢失。
+func TestRemotePersistsConfigWithoutViewFrame(t *testing.T) {
+	h := newRemoteHarness(t)
+	tok := h.pair(t, "iPhone")
+
+	callWithoutFrame := func(method, path string, body map[string]any) int {
+		t.Helper()
+		done := make(chan int, 1)
+		go func() {
+			b, _ := json.Marshal(body)
+			req, _ := http.NewRequest(method, h.base+path, strings.NewReader(string(b)))
+			req.Header.Set("Authorization", "Bearer "+tok)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				done <- -1
+				return
+			}
+			resp.Body.Close()
+			done <- resp.StatusCode
+		}()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			h.mu.Lock()
+			q := h.queue
+			h.queue = nil
+			h.mu.Unlock()
+			for _, fn := range q {
+				fn() // 只执行 a.update，不渲染 view()
+			}
+			select {
+			case code := <-done:
+				return code
+			default:
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+		t.Fatalf("%s %s 超时", method, path)
+		return 0
+	}
+
+	if code := callWithoutFrame("POST", "/api/settings", map[string]any{"sample_count": 77}); code != 200 {
+		t.Fatalf("POST /api/settings = %d", code)
+	}
+	if code := callWithoutFrame("POST", "/api/excluded/add", map[string]any{"paths": []string{"/Volumes/Media0/A/x.jpg"}}); code != 200 {
+		t.Fatalf("POST /api/excluded/add = %d", code)
+	}
+	cfg, err := core.LoadConfig(h.cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.SampleCount != 77 || len(cfg.Excluded) != 1 || cfg.Excluded[0] != "/Volumes/Media0/A/x.jpg" {
+		t.Fatalf("未渲染 view 时配置应已落盘，实际 = %+v", cfg)
 	}
 }

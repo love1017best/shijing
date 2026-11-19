@@ -358,7 +358,7 @@ func (rs *remoteServer) onMain(fn func()) bool {
 	done := make(chan struct{})
 	rs.a.update(func() {
 		fn()
-		rs.a.publishRemote() // 响应里带的快照要反映 fn 的结果
+		rs.a.commitState() // 响应前落盘并发布最新快照（窗口隐藏时不依赖 view 重绘）
 		close(done)
 	})
 	select {

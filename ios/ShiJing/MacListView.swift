@@ -161,8 +161,8 @@ struct AddMacView: View {
         .nearbyPresenters(store: store, flow: flow)
         .onAppear { discovery.want("add", true) }
         .onDisappear { discovery.want("add", false) }
-        .onChange(of: store.macs.count) { old, new in
-            if new > old { dismiss() }
+        .onChange(of: store.pairRevision) { _, _ in
+            dismiss()
         }
     }
 }

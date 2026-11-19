@@ -224,9 +224,11 @@ type app struct {
 	pendSched bool
 
 	// 图库没连上时排队的「删除原图」（pending.go）：loadPending 启动时读，连上后自动执行
-	pending      []core.PendingDelete
-	pendingBusy  bool // 正在后台执行队列
-	pendingShown bool // 「待删除的原图」弹层
+	pending         []core.PendingDelete
+	pendingBusy     bool // 正在后台执行队列
+	pendingShown    bool // 「待删除的原图」弹层
+	pendingMu       sync.Mutex
+	pendingCanceled map[string]bool // 后台 RunPending 执行期间被取消的路径
 }
 
 func newApp(cfgPath string, paths core.Paths) *app {
@@ -293,7 +295,7 @@ func (a *app) buildConfig() core.Config {
 	return cfg
 }
 
-// autosave 在每次构建界面后调用：配置变了就写盘。失败只在侧边栏提示，不弹窗打断。
+// autosave 在配置变化时写盘。失败只在侧边栏提示，不弹窗打断。
 func (a *app) autosave() {
 	cfg := a.buildConfig()
 	if reflect.DeepEqual(cfg, a.saved) {
@@ -304,6 +306,20 @@ func (a *app) autosave() {
 		return
 	}
 	a.saved, a.saveErr = cfg, ""
+}
+
+// commitState 同步依赖配置的派生状态、按需落盘并向手机遥控发布最新快照。
+// view()（窗口可见）与 a.update / remote.onMain（后台或窗口隐藏）统一调用，
+// 避免窗口隐藏时遥控修改设置或「不再选」名单未落盘。
+func (a *app) commitState() {
+	// 「删除不合格原图」被重新打开：恢复运行前的确认
+	if a.cfg.DeleteDuringFilter && !a.prevDelete && a.skipConfirm {
+		a.skipConfirm = false
+		a.saveUIState()
+	}
+	a.prevDelete = a.cfg.DeleteDuringFilter
+	a.autosave()
+	a.publishRemote()
 }
 
 func (a *app) allDirs() []string {

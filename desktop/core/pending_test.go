@@ -104,3 +104,26 @@ func TestPendingSaveLoad(t *testing.T) {
 		t.Errorf("空队列应当删掉文件: %v", err)
 	}
 }
+
+func TestRunPendingWithCancelSkipsCanceledEntry(t *testing.T) {
+	dir := t.TempDir()
+	p1, s1, m1 := mkfile(t, dir, "a.jpg", "one")
+	p2, s2, m2 := mkfile(t, dir, "b.jpg", "two")
+	res := RunPendingWithCancel(
+		[]PendingDelete{
+			{Path: p1, Size: s1, ModTime: m1},
+			{Path: p2, Size: s2, ModTime: m2},
+		},
+		nil,
+		func(p string) bool { return p == p1 },
+	)
+	if len(res.Deleted) != 1 || res.Deleted[0].Path != p2 || len(res.Kept) != 0 {
+		t.Fatalf("应只删 p2、跳过已取消的 p1: %+v", res)
+	}
+	if _, err := os.Stat(p1); err != nil {
+		t.Errorf("已取消的 p1 不应被删: %v", err)
+	}
+	if _, err := os.Stat(p2); !os.IsNotExist(err) {
+		t.Errorf("p2 应当被删: %v", err)
+	}
+}

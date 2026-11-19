@@ -66,6 +66,7 @@ func setupBackground(a *app, win *mygo.Window) {
 			return
 		}
 		quitting = true
+		a.autosave()
 		a.remote.stop() // 结束 Bonjour 广播（dns-sd 子进程）
 	})
 

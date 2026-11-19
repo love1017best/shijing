@@ -12,20 +12,8 @@ import (
 	"time"
 )
 
-// 计算目录 mtime 时忽略的元数据/缓存条目（CLAUDE.md 坑 7）：AppleDouble 影子文件
-// 和 NAS 索引缓存目录的增删会推高目录自身的 mtime，但图片内容并没有变化。
-var ignoredNames = map[string]bool{
-	".DS_Store": true, "Thumbs.db": true, "desktop.ini": true,
-	"@eaDir": true, "#recycle": true, "@Recycle": true, ".@__thumb": true,
-	".SynologyWorkingDirectory": true,
-}
-
-func isIgnoredEntry(name string) bool {
-	return strings.HasPrefix(name, "._") || ignoredNames[name]
-}
-
 // dirMtime 返回目录里"有意义的文件"的最新 mtime（秒，浮点），递归子目录，
-// 跳过已知噪声条目。不用目录自身的 mtime。
+// 跳过已知噪声条目（定义见 imageutil.go 的 isIgnoredEntry）。不用目录自身的 mtime。
 func dirMtime(dir string) float64 {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -275,7 +263,10 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 		rel := relPath(d.root, d.source)
 		if o.Incremental {
 			<-ready[i]
-			if mtimes[i] <= state.Dirs[d.root] {
+			prev, seen := state.Dirs[d.root]
+			// 仅在有历史记录、当前 mtime 有效且未变，并且真删模式下没有遗留的待删不合格图时跳过。
+			// 否则模拟/自动运行记过 mtime 后，后续开启真删会把已知不合格图永久跳过。
+			if seen && mtimes[i] > 0 && mtimes[i] <= prev && !(o.Delete && len(state.Rejected[d.root]) > 0) {
 				res.Remaining = append(res.Remaining, state.Rejected[d.root]...)
 				res.Skipped++
 				logf("  ├─ %s: ⏭️ 已跳过（无变化）", rel)
@@ -314,7 +305,9 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 		logf("  └─ %s: 处理 %d 张，删除 %d 张", rel, len(d.images), dirDelete)
 		res.Remaining = append(res.Remaining, kept...)
 		if o.Incremental {
-			dirMtimes[d.root] = mtimes[i]
+			if mtimes[i] > 0 {
+				dirMtimes[d.root] = mtimes[i]
+			}
 			dirRejected[d.root] = kept
 		}
 		rep.progress(StageFilter, i+1, len(dirs))

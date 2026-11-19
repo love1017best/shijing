@@ -70,12 +70,6 @@ extension RemoteSession {
         }
     }
 
-    /// 一条没补成：放回原来那一格（下次先补它），别接到队尾。
-    private func reinsert(_ act: OfflineAction, at i: Int) {
-        queued.insert(act, at: min(i, queued.count))
-        saveQueue()
-    }
-
     func enqueue(_ kind: OfflineAction.Kind, _ w: Wallpaper) {
         guard !queued.contains(where: { $0.name == w.name && $0.kind == kind }) else { return }
         let index = walls.firstIndex { $0.name == w.name }
@@ -140,13 +134,10 @@ extension RemoteSession {
         guard await refreshWalls(force: true) else { return }
         var applied = 0
         var expired = 0
-        // 一条一条消费：处理之前先从队列里摘掉（设置页的「待处理操作」跟着变），处理不成再放回原处。
-        // 不能开头拍一份快照、结束时整体写回——这一路都在 await，用户可能正在点「取消」，
-        // 那样被取消的条目会被写回队列，或者本地放回了电脑上已经移出的图。
-        while let i = queued.firstIndex(where: { $0.kind != .delete }) {
-            let act = queued[i]
-            queued.remove(at: i)
-            saveQueue()
+        // 一条一条消费：发请求期间保留持久化记录，服务端确认处理或返回过期后再从队列移除。
+        // 这样重放途中进程被挂起、强杀或断网时，未确认的条目仍在磁盘上不会丢失；
+        // 若等待期间用户手动取消了某条，removeQueued(act.id) 幂等跳过。
+        while let act = queued.first(where: { $0.kind != .delete }) {
             do {
                 switch act.kind {
                 case .exclude:
@@ -167,7 +158,7 @@ extension RemoteSession {
                             // 刚拉完列表电脑上又没了（或者已经换了一批）：移出这一步不用做了，
                             // 但「不再选」和批次无关，下面照样按原图路径补进名单
                         }
-                        // 「正在换壁纸」上面不接，交给外层放回队列、换完一批再补
+                        // 「正在换壁纸」上面不接，交给外层保留队列、换完一批再补
                         walls.removeAll { $0.name == act.name }
                     }
                     if !excluded, let src = act.source, !src.isEmpty {
@@ -176,6 +167,7 @@ extension RemoteSession {
                         state?.excluded = list.count // 概览上的名单张数别停在旧值
                         excluded = true
                     }
+                    removeQueued(act.id)
                     if moved || excluded {
                         applied += 1
                     } else {
@@ -184,23 +176,22 @@ extension RemoteSession {
                 case .remove:
                     state = try await client().removeWallpaper(act.name, exclude: false)
                     walls.removeAll { $0.name == act.name }
+                    removeQueued(act.id)
                     applied += 1
                 case .delete:
                     break // 上面 while 已经跳过了，这里是给编译器看全的
                 }
             } catch APIError.server(_, let msg) where msg.contains("正在换壁纸") {
-                // 电脑在忙，不是过期：放回原处，换完一批时再补
-                reinsert(act, at: i)
+                // 电脑在忙，不是过期：保留在队列里，换完一批时再补
                 break
             } catch APIError.server(let status, _) where status == 404 || status == 409 {
+                removeQueued(act.id)
                 expired += 1
             } catch APIError.unauthorized(let msg) {
                 connection = .unpaired(msg)
-                reinsert(act, at: i)
                 break
             } catch {
-                // 又断了：放回原处，留着下次
-                reinsert(act, at: i)
+                // 又断了：保留在队列里，留着下次
                 noteNetworkFailure(error)
                 break
             }

@@ -5,6 +5,8 @@ import Observation
 @Observable @MainActor
 final class MacStore {
     private(set) var macs: [SavedMac] = []
+    /// 每次配对（含同台 Mac 重新配对）递增，让会话重建连接、添加页自动关闭。
+    private(set) var pairRevision = 0
     var selectedID: SavedMac.ID? {
         didSet {
             UserDefaults.standard.set(selectedID?.uuidString, forKey: Self.selectedKey)
@@ -53,6 +55,7 @@ final class MacStore {
         tokens[mac.id] = token
         save()
         selectedID = mac.id
+        pairRevision += 1
         return mac
     }
 
@@ -70,6 +73,7 @@ final class MacStore {
         Keychain.delete(id)
         tokens[id] = nil
         OfflineStore.shared.clear(id.uuidString) // 离线快照和记录缓存也一起清掉
+        ImageStore.shared.clear(macID: id.uuidString) // 这台 Mac 的磁盘图片缓存也一起清掉
         RemoteSession.clearQueue(id) // 还没补上的离线操作也不用留了
         if selectedID == id { selectedID = macs.first?.id }
         save()

@@ -69,7 +69,7 @@ extension WallActionKind {
     func isEnabled(_ session: RemoteSession, _ w: Wallpaper) -> Bool {
         if self == .save {
             if session.saving != nil { return false }
-            return !session.offline || ImageStore.cachedOriginal(name: w.name) != nil
+            return !session.offline || ImageStore.cachedOriginal(macID: session.macID.uuidString, name: w.name) != nil
         }
         // 离线时整理只是把操作记下来（连上后补），不用管电脑上是不是正在换壁纸：
         // 那份状态是断开前同步的，可能早就结束了，按它禁用会让人一直点不了
@@ -573,7 +573,7 @@ struct ShareOriginalButton: View {
 
     /// 手机上存过这张的原图（离线时唯一能用的那份）
     private var cached: URL? {
-        ImageStore.cachedOriginal(name: wall.name)
+        ImageStore.cachedOriginal(macID: session.macID.uuidString, name: wall.name)
     }
 
     var body: some View {
