@@ -4,6 +4,7 @@
 #       scripts/install-local.sh --no-build # 直接安装已有的 dmg（发布时刚构建过；没有 dmg 时装构建目录里的 .app）
 #       加 --no-ios 不管手机；默认连着 iPhone / iPad 时也构建 iOS 版装上去（scripts/install-ios-device.sh）
 #       加 --force 手机上的那一版也重新装（平时手机上已经是最新构建时会跳过）
+#       加 --refresh-signing 强制刷新 iOS 免费签名描述文件（剩余不足 2 天时默认也会自动刷新）
 # 通用版（darwin/universal）只在发布时构建，这个脚本不管。
 #
 # 本地预览不建 dmg：mygo build -skip-dmg 直接给出 .app，省掉打包、挂载这两步。
@@ -20,11 +21,12 @@ BUILT=build/darwin-arm64/拾景.app
 DMG=build/darwin-arm64/shi-jing-$VERSION-arm64.dmg
 TOTAL=$EPOCHREALTIME
 NO_BUILD=0 NO_IOS=0
-FORCE_ARG=""
+IOS_ARGS=()
 for arg in "$@"; do
 	case $arg in
 	--no-build) NO_BUILD=1 ;;
-	--force) FORCE_ARG=--force ;;
+	--force) IOS_ARGS+=(--force) ;;
+	--refresh-signing) IOS_ARGS+=(--refresh-signing) ;;
 	--no-ios) NO_IOS=1 ;;
 	esac
 done
@@ -76,7 +78,7 @@ OK=0
 # 失败只提示，不影响上面 macOS 的结果）
 if ((!NO_IOS)); then
 	t0=$EPOCHREALTIME
-	scripts/install-ios-device.sh ${FORCE_ARG:+"$FORCE_ARG"} || true
+	scripts/install-ios-device.sh "${IOS_ARGS[@]}" || true
 	printf 'iOS 这一头：%.1f 秒\n' $((EPOCHREALTIME - t0))
 fi
 printf '总共：%.1f 秒\n' $((EPOCHREALTIME - TOTAL))

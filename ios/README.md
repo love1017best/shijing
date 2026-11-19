@@ -24,12 +24,13 @@
 只给手机或平板安装（例如免费签名 7 天到期后续签）时，使用 `desktop/scripts/install-ios.sh`：
 
 ```bash
-desktop/scripts/install-ios.sh                # GitHub 上最新发布的版本
-desktop/scripts/install-ios.sh --current      # 当前工作区的代码（包括未提交的改动）
-desktop/scripts/install-ios.sh --device Pad   # 只安装到名称含「Pad」的设备；省略时安装到所有连接的设备
+desktop/scripts/install-ios.sh                    # GitHub 上最新发布的版本（签名不足 2 天自动刷新）
+desktop/scripts/install-ios.sh --refresh-signing  # 提前强制刷新免费签名并重装
+desktop/scripts/install-ios.sh --current          # 当前工作区的代码（包括未提交的改动）
+desktop/scripts/install-ios.sh --device Pad       # 只安装到名称含「Pad」的设备；省略时安装到所有连接的设备
 ```
 
-默认安装最新发布的 tag：脚本在临时 worktree 里检出这个 tag 再构建，构建内容只包含这个 tag 的代码，安装完删除临时 worktree。`/Applications` 里的 Mac 版保持原样。设备需要解锁、信任这台电脑并打开开发者模式。
+默认安装最新发布的 tag：脚本在临时 worktree 里检出这个 tag 再构建，构建内容只包含这个 tag 的代码，安装完删除临时 worktree。`/Applications` 里的 Mac 版保持原样。设备需要解锁、信任这台电脑并打开开发者模式。当本机缓存的描述文件剩余不足 2 天或传入 `--refresh-signing` 时，脚本会先备份旧文件再向 Apple 重新签发 7 天描述文件（拉取失败时自动恢复备份）；拉取新描述文件要求 Xcode 中已登录 Apple ID。
 
 手动逐步安装（`xcode-select` 指向命令行工具时，用 `DEVELOPER_DIR` 指定 Xcode）：
 

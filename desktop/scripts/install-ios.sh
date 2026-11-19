@@ -2,10 +2,12 @@
 # 把拾景装到连着的 iPhone / iPad 上（自己手动装用，比如免费签名 7 天到期了要续一下）。
 #
 # 用法：
-#   desktop/scripts/install-ios.sh                 装 GitHub 上最新发布的版本（默认）
-#   desktop/scripts/install-ios.sh --current       装当前工作区的代码（包括还没提交的改动）
-#   desktop/scripts/install-ios.sh --device Pad    只装名字里含「Pad」的设备（不区分大小写），不写就装所有连着的
-#   两个选项可以一起用。
+#   desktop/scripts/install-ios.sh                    装 GitHub 上最新发布的版本（默认；签名不足 2 天自动刷新）
+#   desktop/scripts/install-ios.sh --current          装当前工作区的代码（包括还没提交的改动）
+#   desktop/scripts/install-ios.sh --device Pad       只装名字里含「Pad」的设备（不区分大小写），不写就装所有连着的
+#   desktop/scripts/install-ios.sh --refresh-signing  强制清理本地描述文件、向 Apple 拉取新的 7 天签名并重装
+#   desktop/scripts/install-ios.sh --force            强制重装（即使设备上已是这一版）
+#   以上选项可以组合使用。
 #
 # 默认装最新发布版：在临时 worktree 里检出那个 tag 再构建，工作区里没提交的改动不会混进去；装完删掉 worktree。
 # 构建复用工作区的 ios/build（以后装得快），日志在 ${TMPDIR:-/tmp}/install-device.log。
@@ -16,11 +18,14 @@ set -uo pipefail
 
 CURRENT=""
 DEVICE=""
+PASS_ARGS=()
 while (( $# )); do
 	case $1 in
 	--current) CURRENT=1; shift ;;
 	--device) [[ $# -ge 2 ]] || { echo "--device 后面要写设备名字里的一段"; exit 2; }; DEVICE=$2; shift 2 ;;
-	-h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	--refresh-signing) PASS_ARGS+=(--refresh-signing); shift ;;
+	--force) PASS_ARGS+=(--force); shift ;;
+	-h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "不认识的参数：$1（--help 看用法）"; exit 2 ;;
 	esac
 done
@@ -33,7 +38,7 @@ export SHIJING_DEVICE=$DEVICE
 
 if [[ -n "$CURRENT" ]]; then
 	echo "装当前工作区的代码…"
-	"$SCRIPTS/install-ios-device.sh"
+	"$SCRIPTS/install-ios-device.sh" "${PASS_ARGS[@]}"
 	exit
 fi
 
@@ -54,4 +59,4 @@ echo "装最新发布版 $TAG（第一次构建要一两分钟）…"
 # 派生数据复用工作区的 ios/build（增量构建，以后装得快）；日志放到 worktree 外面，这个 worktree 装完就删了
 export SHIJING_DERIVED_DIR="$ROOT/ios/build"
 export SHIJING_LOG_DIR="${TMPDIR:-/tmp}"
-SHIJING_IOS_DIR="$WT/ios" "$SCRIPTS/install-ios-device.sh"
+SHIJING_IOS_DIR="$WT/ios" "$SCRIPTS/install-ios-device.sh" "${PASS_ARGS[@]}"
