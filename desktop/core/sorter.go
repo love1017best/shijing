@@ -296,17 +296,20 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 			deleteCount++
 			// 每张不合格的图只打一行：模拟运行「待删除」，真删「已删除」或「删除失败」
 			if !o.Delete {
+				rep.onDelete(DeleteEvent{Kind: DeleteSimulated, Folder: rel, Name: name, Reason: reasons[k]})
 				logf("    [%s] 🗑️ 待删除: %s  (%s)", rel, name, reasons[k])
 				kept = append(kept, file)
 				continue
 			}
 			if err := os.Remove(file); err != nil {
+				rep.onDelete(DeleteEvent{Kind: DeleteFailed, Folder: rel, Name: name, Reason: err.Error()})
 				logf("    [%s] ❌ 删除失败: %s - %v", rel, name, err)
 				kept = append(kept, file)
 				continue
 			}
 			deleted++
 			LogDeletion(o.DeleteLog, file, o.MinWidth, o.MinHeight, reasons[k])
+			rep.onDelete(DeleteEvent{Kind: DeleteRemoved, Folder: rel, Name: name, Reason: reasons[k]})
 			logf("    [%s] 🔥 已删除: %s  (%s)", rel, name, reasons[k])
 		}
 		logf("  └─ %s: 处理 %d 张，删除 %d 张", rel, len(d.images), dirDelete)

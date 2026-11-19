@@ -29,6 +29,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"desktop/core"
@@ -94,6 +95,10 @@ type remoteServer struct {
 	stopAd        func()
 	walls         wallsSnapshot // 壁纸列表（remotewalls.go），主线程发布
 	decodeSem     chan struct{} // 限制同时解码的大图张数
+	mainTimeout   time.Duration // onMain 等待主线程的超时（默认 mainThreadMax，测试可缩短）
+	deletionsMu   sync.Mutex
+	deletionsETag string
+	deletionsBody []byte
 }
 
 func newRemoteServer(a *app, file string) *remoteServer {
@@ -370,18 +375,41 @@ func (rs *remoteServer) onMainOrFail(w http.ResponseWriter, fn func()) bool {
 }
 
 // onMain 在主线程上执行 fn 并等它跑完；主线程太久没反应时返回 false。
+// 超时后若主线程尚未开始执行，通过原子状态取消排队的回调，防止返回 503 后仍产生写操作副作用。
 func (rs *remoteServer) onMain(fn func()) bool {
 	done := make(chan struct{})
+	// 0: 排队中，1: 已开始执行，2: 已超时取消
+	var state atomic.Int32
 	rs.a.update(func() {
+		if !state.CompareAndSwap(0, 1) {
+			return
+		}
 		fn()
 		rs.a.commitState() // 响应前落盘并发布最新快照（窗口隐藏时不依赖 view 重绘）
 		close(done)
 	})
+	timeout := rs.mainTimeout
+	if timeout <= 0 {
+		timeout = mainThreadMax
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case <-done:
 		return true
-	case <-time.After(mainThreadMax):
-		return false
+	case <-timer.C:
+		if state.CompareAndSwap(0, 2) {
+			return false
+		}
+		// 恰好在超时临界点已进入主线程执行，短暂等待完成以保持响应与状态一致
+		grace := time.NewTimer(200 * time.Millisecond)
+		defer grace.Stop()
+		select {
+		case <-done:
+			return true
+		case <-grace.C:
+			return false
+		}
 	}
 }
 
@@ -898,7 +926,7 @@ func (a *app) remoteSnapshot() remoteState {
 		Unmounted:   a.unmountedCount(),
 		WillDelete:  a.willDelete(),
 		Wallpapers:  len(a.walls.all),
-		WallsRev:    wallsRev(a.walls.all, a.walls.heroPath),
+		WallsRev:    a.walls.cachedRev(),
 		Dest:        tildify(a.cfg.DestDir),
 		Sample:      int(a.num),
 		Library:     len(a.allDirs()),
@@ -990,13 +1018,95 @@ func mountName(s mountState) string {
 	}
 }
 
-// publishRemote 在主线程上把最新状态交给手机遥控服务（没开启时什么都不做）。
+// remoteStamp 是 publishRemote 用来零开销判断是否需要重新生成与序列化状态快照的指纹。
+// 所有影响 remoteSnapshot() 的状态都在这里以标量或短指针表达，未变化时直接短路。
+type remoteStamp struct {
+	port          int
+	version       string
+	cfgRev        uint64
+	running       bool
+	stopping      bool
+	stage         core.Stage
+	done, total   int
+	runDelete     bool
+	runRejected   int
+	runDeleted    int
+	runDelFailed  int
+	logSeq        uint64
+	runningSec    int64 // 运行中按秒刷新进度文案（如剩余时间），空闲时恒为 0
+	last          *runResult
+	lastGood      *core.Summary
+	wallsDir      string
+	wallsRev      string
+	wallsSrcLen   int
+	undoName      string
+	pendingLen    int
+	pendingFirst  string
+	pendingLast   string
+	pendingFirstT int64
+	mountHash     uint64
+	delSize       int64
+	delMod        int64
+	nextAuto      int64
+}
+
+func (a *app) currentRemoteStamp(port int) remoteStamp {
+	var mountHash uint64
+	for _, d := range a.cfg.FilterAndSampleDirs {
+		mountHash = mountHash*31 + uint64(a.mountStateOf(d)) + 1
+	}
+	for _, d := range a.cfg.SampleOnlyDirs {
+		mountHash = mountHash*31 + uint64(a.mountStateOf(d)) + 1
+	}
+	_ = a.deleteRecords() // 短 TTL 缓存，常规重绘无 syscall
+	st := remoteStamp{
+		port:        port,
+		version:     a.version,
+		cfgRev:      a.cfgRev,
+		running:     a.running,
+		stopping:    a.running && a.stopReq.Load(),
+		last:        a.last,
+		lastGood:    a.lastGood,
+		wallsDir:    a.walls.dir,
+		wallsRev:    a.walls.cachedRev(),
+		wallsSrcLen: len(a.walls.sources),
+		undoName:    a.undoName(),
+		pendingLen:  len(a.pending),
+		mountHash:   mountHash,
+		delSize:     a.delCache.size,
+		delMod:      a.delCache.mod.UnixNano(),
+	}
+	if a.running {
+		st.stage, st.done, st.total = a.prog.stage, a.prog.done, a.prog.total
+		st.runDelete = a.runDelete
+		st.runRejected, st.runDeleted, st.runDelFailed = a.runRejected, a.runDeleted, a.runDelFailed
+		st.logSeq = a.logSeq
+		st.runningSec = time.Now().Unix()
+	}
+	if len(a.pending) > 0 {
+		st.pendingFirst = a.pending[0].Path
+		st.pendingLast = a.pending[len(a.pending)-1].Path
+		st.pendingFirstT = a.pending[0].AddedAt.UnixNano()
+	}
+	if next := a.nextAutoRun(); !next.IsZero() {
+		st.nextAuto = next.Unix()
+	}
+	return st
+}
+
+// publishRemote 在主线程上把最新状态交给手机遥控服务（没开启或状态未变化时跳过序列化）。
 func (a *app) publishRemote() {
 	if a.remote == nil {
 		return
 	}
 	a.remote.setEnabled(a.cfg.RemoteEnabled)
-	if port, _ := a.remote.status(); port == 0 {
+	port, _ := a.remote.status()
+	if port == 0 {
+		a.remotePublished = false
+		return
+	}
+	stamp := a.currentRemoteStamp(port)
+	if a.remotePublished && stamp == a.lastRemoteStamp {
 		return
 	}
 	snap := a.remoteSnapshot()
@@ -1006,6 +1116,8 @@ func (a *app) publishRemote() {
 		return
 	}
 	a.remote.publish(data)
+	a.lastRemoteStamp = stamp
+	a.remotePublished = true
 }
 
 // ── Bonjour ───────────────────────────────────────────────────────────────
@@ -1048,6 +1160,31 @@ func computerName() string {
 		return strings.TrimSuffix(h, ".local")
 	}
 	return "Mac"
+}
+
+const localIPsCacheTTL = 10 * time.Second
+
+var (
+	localIPsMu    sync.Mutex
+	localIPsAt    time.Time
+	localIPsValue []string
+)
+
+// cachedLocalIPs 在设置页高频重绘时复用 10 秒内的局域网 IP 列表，避免每帧枚举网卡。
+func cachedLocalIPs() []string {
+	localIPsMu.Lock()
+	if !localIPsAt.IsZero() && time.Since(localIPsAt) < localIPsCacheTTL {
+		out := slices.Clone(localIPsValue)
+		localIPsMu.Unlock()
+		return out
+	}
+	localIPsMu.Unlock()
+	ips := localIPs()
+	localIPsMu.Lock()
+	localIPsValue = slices.Clone(ips)
+	localIPsAt = time.Now()
+	localIPsMu.Unlock()
+	return ips
 }
 
 // localIPs 是本机的局域网 IPv4 地址，设置页上显示，Bonjour 找不到时手机可以手动填。

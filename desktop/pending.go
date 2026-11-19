@@ -98,6 +98,7 @@ func (a *app) applyPending(res core.PendingResult) {
 	for _, e := range res.Deleted {
 		finished[e.Path] = true
 		core.LogDeletion(a.paths.DeleteLog, e.Path, int(a.minW), int(a.minH), core.ReasonManual)
+		a.invalidateDeleteCache()
 		a.appendLog(fmt.Sprintf("🔥 手动删除原图（排队执行，%s 排队）: %s", e.AddedAt.Format("1月2日 15:04"), e.Path))
 	}
 	for _, e := range res.Gone {

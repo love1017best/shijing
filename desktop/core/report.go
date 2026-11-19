@@ -16,11 +16,30 @@ const (
 	StageRefresh              // 刷新系统壁纸
 )
 
-// Reporter 收集流程的日志和进度；两个字段都可以为 nil。
+// DeleteKind 是筛选阶段单张不合格图片的处理结果。
+type DeleteKind int
+
+const (
+	DeleteSimulated DeleteKind = iota // 模拟运行：判定不合格但未删除
+	DeleteRemoved                     // 真删模式：已删除原图
+	DeleteFailed                      // 真删模式：删除原图失败
+)
+
+// DeleteEvent 是筛选阶段单张不合格图片的结构化事件（供界面统计与展示，替代解析中文日志）。
+type DeleteEvent struct {
+	Kind   DeleteKind
+	Folder string // 相对源目录的子目录名
+	Name   string // 文件名
+	Reason string // 不合格原因或删除失败原因
+}
+
+// Reporter 收集流程的日志、进度与结构化删除事件；各字段都可以为 nil。
 type Reporter struct {
 	Log Logf
 	// Progress 报告 stage 阶段已完成 done / total 项；total 为 0 表示进度未知。
 	Progress func(stage Stage, done, total int)
+	// OnDelete 在筛选阶段每处理一张不合格图片时回调；可以为 nil。
+	OnDelete func(DeleteEvent)
 	// Stop 返回 true 表示用户要求停止。流程只在安全的地方检查它：筛选时在文件夹之间，
 	// 清空壁纸目录之前，复制时不再开始新的图片（已经开始的会复制完）。可以为 nil。
 	Stop func() bool
@@ -43,6 +62,12 @@ func (r Reporter) progress(s Stage, done, total int) {
 	}
 }
 
+func (r Reporter) onDelete(ev DeleteEvent) {
+	if r.OnDelete != nil {
+		r.OnDelete(ev)
+	}
+}
+
 // synced 返回一个可以被多个 goroutine 同时调用的 Reporter：调用方传进来的回调
 // （测试里往切片追加、命令行里 Printf）不一定是并发安全的，这里统一加锁串行化。
 func (r Reporter) synced() Reporter {
@@ -60,6 +85,13 @@ func (r Reporter) synced() Reporter {
 			mu.Lock()
 			defer mu.Unlock()
 			r.Progress(s, done, total)
+		}
+	}
+	if r.OnDelete != nil {
+		out.OnDelete = func(ev DeleteEvent) {
+			mu.Lock()
+			defer mu.Unlock()
+			r.OnDelete(ev)
 		}
 	}
 	return out

@@ -86,6 +86,28 @@ extension RemoteSession {
         }
     }
 
+    /// 批量记下多张离线整理：一次入队、一次写盘和快照（避免多选几十张时反复编码整个队列与壁纸列表）。
+    @discardableResult
+    func enqueueBatch(_ kind: OfflineAction.Kind, _ items: [Wallpaper]) -> Int {
+        guard !items.isEmpty else { return 0 }
+        var existing = Set(queued.filter { $0.kind == kind }.map(\.name))
+        let indexByName = Dictionary(walls.enumerated().map { ($0.element.name, $0.offset) },
+                                     uniquingKeysWith: { first, _ in first })
+        var removed = Set<String>()
+        var added = false
+        for w in items {
+            removed.insert(w.name)
+            guard existing.insert(w.name).inserted else { continue }
+            queued.append(OfflineAction(kind: kind, name: w.name, source: w.source, wall: w,
+                                        index: indexByName[w.name], rev: wallsRev))
+            added = true
+        }
+        if added { saveQueue() }
+        walls.removeAll { removed.contains($0.name) }
+        remember(wallsChanged: true)
+        return items.count
+    }
+
     /// 取消一条还没补上的离线操作，那张放回列表原来的位置。
     /// 「不再选」「删除原图」在电脑上也会把那张从壁纸文件夹移出，所以离线时三种都先从列表里去掉了，取消后都要放回去。
     func cancelQueued(_ a: OfflineAction, announce: Bool = true) {

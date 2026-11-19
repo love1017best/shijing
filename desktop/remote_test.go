@@ -492,6 +492,21 @@ func TestRemoteHandlerRejectsBadJSON(t *testing.T) {
 	}
 }
 
+func TestRemoteOnMainTimeoutSkipsSideEffects(t *testing.T) {
+	h := newRemoteHarness(t)
+	h.remote.mainTimeout = 20 * time.Millisecond
+	ran := false
+	// 主线程队列没有被消费，onMain 应超时返回 false
+	if ok := h.remote.onMain(func() { ran = true }); ok {
+		t.Fatal("主线程未执行时 onMain 应超时返回 false")
+	}
+	// 之后主线程恢复并排空队列：已超时的写回调绝不能再执行
+	h.settle(t, h.tt, func() bool { return true })
+	if ran {
+		t.Fatal("onMain 超时后排队的回调不应产生副作用")
+	}
+}
+
 // 系统不把用户设置的设备名给 App（iOS 16 起要有 Apple 批准的授权），配对的手机默认都叫「iPhone」。
 // 电脑上可以直接改名：只改这里的记录，手机上不用重新配对。
 func TestRemoteRenameDevice(t *testing.T) {

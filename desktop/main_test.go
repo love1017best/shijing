@@ -640,11 +640,11 @@ func TestRunShowsDeletionsAndOverlap(t *testing.T) {
 	inner := f.run
 	f.run = func(cfg core.Config, rep core.Reporter) (core.Summary, error) {
 		rep.Progress(core.StageFilter, 1, 3)
-		rep.Log("    [set0] 🗑️ 待删除: a.jpg")
+		rep.OnDelete(core.DeleteEvent{Kind: core.DeleteRemoved, Folder: "set0", Name: "a.jpg", Reason: "竖屏"})
 		rep.Log("    [set0] 🔥 已删除: a.jpg")
-		rep.Log("    [set1] 🗑️ 待删除: b.jpg")
-		rep.Log("    [set1] 🔥 已删除: b.jpg")
-		rep.Log("    [set1] 🗑️ 待删除: c.jpg")
+		rep.OnDelete(core.DeleteEvent{Kind: core.DeleteRemoved, Folder: "set1", Name: "b:删除失败  (1).jpg", Reason: "竖屏 1080×1920"})
+		rep.Log("    [set1] 🔥 已删除: b:删除失败  (1).jpg  (竖屏 1080×1920)")
+		rep.OnDelete(core.DeleteEvent{Kind: core.DeleteFailed, Folder: "set1", Name: "c.jpg", Reason: "permission denied"})
 		rep.Log("    [set1] ❌ 删除失败: c.jpg - permission denied")
 		sum, err := inner(cfg, rep)
 		sum.Copy.Selected, sum.Copy.PrevSelected, sum.Copy.Repeated = 2, 2, 1
@@ -653,7 +653,7 @@ func TestRunShowsDeletionsAndOverlap(t *testing.T) {
 	tt.Frame()
 	click(t, tt, "换一批壁纸")
 	f.settle(t, tt, func() bool { return tt.HasText("已删除 2 张不合格原图") })
-	for _, s := range []string{"1 张删除失败", "b.jpg", "在 set1"} {
+	for _, s := range []string{"1 张删除失败", "b:删除失败  (1).jpg", "在 set1"} {
 		if !tt.HasText(s) {
 			t.Errorf("运行卡片上应显示 %q", s)
 		}

@@ -20,11 +20,10 @@ const (
 )
 
 func (a *app) wallsPage(c *ui.Context) {
-	// 换了一批之后，上次筛的那个目录可能已经不在了
-	if a.wallFolder != "" {
-		if _, counts := a.wallFolders(); counts[a.wallFolder] == 0 {
-			a.wallFolder = ""
-		}
+	// 换了一批之后，上次筛的那个目录可能已经不在了；同一帧只算一次目录分组，复用到筛选栏
+	folders, counts := a.wallFolders()
+	if a.wallFolder != "" && counts[a.wallFolder] == 0 {
+		a.wallFolder = ""
 	}
 	a.pruneWallSel()
 	list := a.filteredWalls()
@@ -42,7 +41,7 @@ func (a *app) wallsPage(c *ui.Context) {
 				a.openWallpapers()
 			}
 		})
-		a.wallsFilterBar(c)
+		a.wallsFilterBar(c, folders, counts)
 	})
 	a.wallHeadH = head.LayoutBounds().H
 
@@ -288,11 +287,10 @@ func (a *app) wallsSummary(list []string) string {
 }
 
 // wallsFilterBar 是搜索框和目录筛选。
-func (a *app) wallsFilterBar(c *ui.Context) {
+func (a *app) wallsFilterBar(c *ui.Context, folders []string, counts map[string]int) {
 	if len(a.walls.all) == 0 {
 		return
 	}
-	folders, counts := a.wallFolders()
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 		ui.SearchField(c, &a.wallQuery).Grow(1).Label("按文件名搜索壁纸").Placeholder("按文件名搜索")
 		label := "全部目录"
@@ -339,11 +337,16 @@ func (a *app) filteredWalls() []string {
 	return out
 }
 
-// wallFolders 列出壁纸按原图目录分组的目录名和张数（筛选菜单用）。
+// wallFolders 列出壁纸按原图目录分组的目录名和张数（筛选菜单用），按列表指纹缓存。
 func (a *app) wallFolders() ([]string, map[string]int) {
+	w := &a.walls
+	rev := w.cachedRev()
+	if w.folderRev == rev && w.folderSrcLen == len(w.sources) && w.folderCounts != nil {
+		return w.folders, w.folderCounts
+	}
 	counts := map[string]int{}
 	var folders []string
-	for _, p := range a.walls.all {
+	for _, p := range w.all {
 		f := a.wallFolderOf(p)
 		if counts[f] == 0 {
 			folders = append(folders, f)
@@ -351,6 +354,10 @@ func (a *app) wallFolders() ([]string, map[string]int) {
 		counts[f]++
 	}
 	slices.Sort(folders)
+	w.folderRev = rev
+	w.folderSrcLen = len(w.sources)
+	w.folders = folders
+	w.folderCounts = counts
 	return folders, counts
 }
 

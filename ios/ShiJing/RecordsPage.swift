@@ -432,7 +432,7 @@ struct DeletionsView: View {
     private func load() async {
         let r = await loadRecord(session, .deletions,
                                  offlineNote: "现在无法连接电脑，手机上尚未存过删除记录。连接电脑后会自动存一份，之后离线也能查看。") {
-            try await $0.deletions()
+            try await session.fetchDeletions($0)
         }
         list = r.value
         syncedAt = r.syncedAt

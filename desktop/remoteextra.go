@@ -8,12 +8,14 @@ package main
 //   - 删除记录直接读日志文件（不用主线程）；日志、不再选名单在主线程上读。
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"desktop/core"
@@ -348,16 +350,73 @@ type remoteDeletion struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// etagMatches 检查 If-None-Match 头是否命中当前 ETag（兼容 *、逗号列表与弱比较 W/ 前缀）。
+func etagMatches(header, etag string) bool {
+	if header == "" || etag == "" {
+		return false
+	}
+	norm := func(s string) string {
+		s = strings.TrimSpace(s)
+		s = strings.TrimPrefix(s, "W/")
+		return s
+	}
+	target := norm(etag)
+	for _, part := range strings.Split(header, ",") {
+		p := strings.TrimSpace(part)
+		if p == "*" || norm(p) == target {
+			return true
+		}
+	}
+	return false
+}
+
 // handleDeletions 给删除记录（新的在前），读日志文件，不占主线程。
+// 基于日志文件的 (size, mtime) 提供 ETag 条件请求（304）与内存 JSON 缓存，未变化时无需重读和重传。
 // 全部给出去：手机在另一台机器上，没法去翻日志文件，截断只会让页面上的张数对不上。
 func (rs *remoteServer) handleDeletions(w http.ResponseWriter, r *http.Request, _ string) {
+	etag := `"empty"`
+	if st, err := os.Stat(rs.a.paths.DeleteLog); err == nil {
+		etag = fmt.Sprintf(`"%x-%x"`, st.Size(), st.ModTime().UnixNano())
+	}
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-cache")
+	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	rs.deletionsMu.Lock()
+	if rs.deletionsETag == etag && rs.deletionsBody != nil {
+		body := rs.deletionsBody
+		rs.deletionsMu.Unlock()
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+		return
+	}
+	rs.deletionsMu.Unlock()
+
 	recs := core.ReadDeleteLog(rs.a.paths.DeleteLog)
 	items := make([]remoteDeletion, 0, len(recs))
 	for _, d := range recs {
 		items = append(items, remoteDeletion{At: d.At.Unix(), Name: filepath.Base(d.Path), Dir: tildify(filepath.Dir(d.Path)), Reason: d.Reason})
 	}
 	byFilter, manual := core.CountDeletions(recs)
-	writeJSON(w, http.StatusOK, map[string]any{"total": len(recs), "filter": byFilter, "manual": manual, "items": items})
+	body, err := json.Marshal(map[string]any{"total": len(recs), "filter": byFilter, "manual": manual, "items": items})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "序列化删除记录失败")
+		return
+	}
+	body = append(body, '\n')
+
+	rs.deletionsMu.Lock()
+	rs.deletionsETag = etag
+	rs.deletionsBody = body
+	rs.deletionsMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
 
 // handleWallOriginal 给壁纸文件夹里这张图的原文件（手机上分享、存到相册用）。

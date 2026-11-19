@@ -380,6 +380,21 @@ func TestLoadConfigMergesDefaultsAndReadsPythonConfig(t *testing.T) {
 	if ExpandUser("~/x") != filepath.Join(home, "x") || ExpandUser("/a/~") != "/a/~" {
 		t.Error("ExpandUser 不对")
 	}
+	expCfg := Config{
+		FilterAndSampleDirs: []string{"~/Pictures/Filter", "/abs/dir"},
+		SampleOnlyDirs:      []string{"~/Pictures/Sample"},
+		DestDir:             "~/Pictures/Dest",
+	}
+	exp := expCfg.expanded()
+	if exp.FilterAndSampleDirs[0] != filepath.Join(home, "Pictures/Filter") ||
+		exp.FilterAndSampleDirs[1] != "/abs/dir" ||
+		exp.SampleOnlyDirs[0] != filepath.Join(home, "Pictures/Sample") ||
+		exp.DestDir != filepath.Join(home, "Pictures/Dest") {
+		t.Fatalf("Config.expanded 未正确展开源目录: %+v", exp)
+	}
+	if expCfg.FilterAndSampleDirs[0] != "~/Pictures/Filter" {
+		t.Fatal("Config.expanded 不应修改原切片")
+	}
 }
 
 func TestMigrateDataDir(t *testing.T) {

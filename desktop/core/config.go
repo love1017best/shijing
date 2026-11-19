@@ -130,8 +130,22 @@ func ExpandUser(p string) string {
 	return p
 }
 
-// expanded 返回展开了 ~ 的副本（对应 run.load_config 里的那几处 expanduser）。
+// expandDirs 展开目录列表中每一项开头的 ~。
+func expandDirs(dirs []string) []string {
+	if len(dirs) == 0 {
+		return dirs
+	}
+	out := make([]string, len(dirs))
+	for i, d := range dirs {
+		out[i] = ExpandUser(d)
+	}
+	return out
+}
+
+// expanded 返回展开了 ~ 的副本（涵盖源目录、目标目录与归档相关路径）。
 func (c Config) expanded() Config {
+	c.FilterAndSampleDirs = expandDirs(c.FilterAndSampleDirs)
+	c.SampleOnlyDirs = expandDirs(c.SampleOnlyDirs)
 	c.DestDir = ExpandUser(c.DestDir)
 	c.ArchiveDirOverride = ExpandUser(c.ArchiveDirOverride)
 	c.ArchiveSMBRoot = ExpandUser(c.ArchiveSMBRoot)

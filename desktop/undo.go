@@ -103,6 +103,7 @@ func (a *app) undoRemove() error {
 	w := &a.walls
 	i := min(max(r.idx, 0), len(w.all))
 	w.all = slices.Insert(w.all, i, r.wall)
+	w.invalidateRev()
 	if r.thumb != nil && w.thumbs != nil {
 		w.thumbs[r.wall] = r.thumb
 	}

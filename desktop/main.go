@@ -37,11 +37,15 @@ func main() {
 
 	mygo.App.WhenReady(func() {
 		var win *mygo.Window
-		// 每次回主线程改完状态都提交（同步派生状态、按需落盘并发布快照给手机遥控，窗口隐藏时 view 不一定会重画）
+		// 每次回主线程改完状态都提交（同步派生状态、按需落盘并发布快照给手机遥控，窗口隐藏时 view 不一定会重画）；
+		// 若 fn 内已显式调用 commitState（例如 remote.onMain 响应前先提交），此处不再重复执行。
 		a.update = func(fn func()) {
 			win.Update(func() {
+				a.committed = false
 				fn()
-				a.commitState()
+				if !a.committed {
+					a.commitState()
+				}
 			})
 		}
 		a.remote.host = computerName()

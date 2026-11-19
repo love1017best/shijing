@@ -6,7 +6,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -88,7 +87,7 @@ type progress struct {
 	done, total int
 }
 
-// runStats 是运行中的进度和筛选阶段的删除情况（删除数从日志行里数出来，见 countDeletion）。
+// runStats 是运行中的进度和筛选阶段的删除情况（由 core.Reporter.OnDelete 结构化回调维护）。
 type runStats struct {
 	prog                                  progress
 	copyT0                                time.Time // 复制阶段开始的时间，算剩余时间用
@@ -128,6 +127,7 @@ type app struct {
 
 	cfg     core.Config
 	saved   core.Config // 最近一次写入磁盘的配置，用来判断是否需要自动保存
+	cfgRev  uint64      // 配置变更序号：用于 publishRemote 零开销判定是否需要重新序列化快照
 	saveErr string
 	num     float64 // NumberInput 编辑 float64，保存时转回 int
 	minW    float64
@@ -223,7 +223,13 @@ type app struct {
 	pendMu    sync.Mutex
 	pendLog   []string
 	pendProg  *progress
+	pendDel   []core.DeleteEvent
 	pendSched bool
+	logSeq    uint64 // 日志追加序号，用于 publishRemote 零开销判定 lastLine 是否可能变化
+
+	committed       bool        // 本轮 a.update 是否已执行过 commitState，防止 onMain 与 a.update 重复发布
+	lastRemoteStamp remoteStamp // 上一次发布给手机遥控的状态指纹，未变化时跳过快照序列化
+	remotePublished bool        // 是否已经成功发布过至少一次快照
 
 	// 图库没连上时排队的「删除原图」（pending.go）：loadPending 启动时读，连上后自动执行
 	pending         []core.PendingDelete
@@ -280,6 +286,7 @@ func (a *app) setConfig(cfg core.Config) {
 	a.autoIdx = slices.Index(autoRunHours, cfg.AutoRunHours)
 	a.prevDelete = cfg.DeleteDuringFilter
 	a.preset = presetFor(cfg.MinWidth, cfg.MinHeight)
+	a.cfgRev++
 }
 
 // buildConfig 从界面状态生成配置（目录列表复制一份，后台运行不受界面编辑影响）。
@@ -299,12 +306,43 @@ func (a *app) buildConfig() core.Config {
 	return cfg
 }
 
+// configMatchesSaved 无分配比较当前界面状态与上次落盘的 saved 是否一致。
+func (a *app) configMatchesSaved() bool {
+	c, s := &a.cfg, &a.saved
+	autoHours := c.AutoRunHours
+	if a.autoIdx >= 0 {
+		autoHours = autoRunHours[a.autoIdx]
+	}
+	return c.DestDir == s.DestDir &&
+		int(a.num) == s.SampleCount &&
+		int(a.minW) == s.MinWidth &&
+		int(a.minH) == s.MinHeight &&
+		modes[a.modeIdx] == s.Mode &&
+		c.BalanceFirst == s.BalanceFirst &&
+		c.Incremental == s.Incremental &&
+		c.DeleteDuringFilter == s.DeleteDuringFilter &&
+		c.RefreshWallpaper == s.RefreshWallpaper &&
+		c.ArchiveEnabled == s.ArchiveEnabled &&
+		c.ArchiveSubdirName == s.ArchiveSubdirName &&
+		c.ArchiveDirOverride == s.ArchiveDirOverride &&
+		c.ArchiveSMBRoot == s.ArchiveSMBRoot &&
+		c.ArchiveNFSRoot == s.ArchiveNFSRoot &&
+		c.PreferUnseen == s.PreferUnseen &&
+		autoHours == s.AutoRunHours &&
+		c.RemoteEnabled == s.RemoteEnabled &&
+		slices.Equal(c.FilterAndSampleDirs, s.FilterAndSampleDirs) &&
+		slices.Equal(c.SampleOnlyDirs, s.SampleOnlyDirs) &&
+		slices.Equal(c.Excluded, s.Excluded) &&
+		maps.Equal(c.Shortcuts, s.Shortcuts)
+}
+
 // autosave 在配置变化时写盘。失败只在侧边栏提示，不弹窗打断。
 func (a *app) autosave() {
-	cfg := a.buildConfig()
-	if reflect.DeepEqual(cfg, a.saved) {
+	if a.configMatchesSaved() {
 		return
 	}
+	a.cfgRev++
+	cfg := a.buildConfig()
 	if err := core.SaveConfig(a.cfgPath, cfg); err != nil {
 		a.saveErr = err.Error()
 		return
@@ -324,6 +362,7 @@ func (a *app) commitState() {
 	a.prevDelete = a.cfg.DeleteDuringFilter
 	a.autosave()
 	a.publishRemote()
+	a.committed = true
 }
 
 func (a *app) allDirs() []string {
@@ -419,7 +458,7 @@ func (a *app) startRunWith(o runOpts) {
 		}
 		a.appendLog(fmt.Sprintf("📱 由「%s」遥控运行%s", o.from, note))
 	}
-	rep := core.Reporter{Log: a.logf, Progress: a.progressf, Stop: a.stopReq.Load}
+	rep := core.Reporter{Log: a.logf, Progress: a.progressf, OnDelete: a.deletef, Stop: a.stopReq.Load}
 	if a.onRunState != nil {
 		a.onRunState(true, nil)
 	}
@@ -432,13 +471,16 @@ func (a *app) startRunWith(o runOpts) {
 		case err != nil:
 			a.logf("❌ %v", err)
 		}
-		a.flush()
 		a.update(func() {
+			// 在主线程一次性排空全部残留的日志、进度与删除事件，再切为非运行态，
+			// 彻底避免与 80ms 定时刷新并发导致末尾计数漏算。
+			a.drainPending()
 			a.running = false
 			a.last = &runResult{sum: sum, err: err, at: time.Now()}
 			if err == nil {
 				a.lastGood = &sum
 			}
+			a.invalidateDeleteCache()
 			a.saveUIState()
 			a.wallsGen++       // 壁纸文件夹换了一批，重新读缩略图
 			a.loadWallpapers() // 不等下一帧：桌面窗口关着时 view 不重画（手机靠这次重读拿到新列表）
@@ -472,6 +514,13 @@ func (a *app) progressf(stage core.Stage, done, total int) {
 	a.pendMu.Unlock()
 }
 
+func (a *app) deletef(ev core.DeleteEvent) {
+	a.pendMu.Lock()
+	a.pendDel = append(a.pendDel, ev)
+	a.scheduleLocked()
+	a.pendMu.Unlock()
+}
+
 func (a *app) scheduleLocked() {
 	if !a.pendSched {
 		a.pendSched = true
@@ -481,63 +530,64 @@ func (a *app) scheduleLocked() {
 
 func (a *app) flush() {
 	a.pendMu.Lock()
-	lines, prog := a.pendLog, a.pendProg
-	a.pendLog, a.pendProg, a.pendSched = nil, nil, false
-	a.pendMu.Unlock()
-	if len(lines) == 0 && prog == nil {
+	has := len(a.pendLog) > 0 || a.pendProg != nil || len(a.pendDel) > 0
+	if !has {
+		a.pendSched = false
+		a.pendMu.Unlock()
 		return
 	}
-	a.update(func() {
-		if len(lines) > 0 {
-			a.appendLog(strings.Join(lines, "\n"))
+	a.pendMu.Unlock()
+	a.update(func() { a.drainPending() })
+}
+
+// drainPending 在主线程排空积攒的日志、进度与删除事件（主线程串行执行，避免与结束回调竞态）。
+func (a *app) drainPending() {
+	a.pendMu.Lock()
+	lines, prog, dels := a.pendLog, a.pendProg, a.pendDel
+	a.pendLog, a.pendProg, a.pendDel, a.pendSched = nil, nil, nil, false
+	a.pendMu.Unlock()
+	if len(lines) > 0 {
+		a.appendLog(strings.Join(lines, "\n"))
+	}
+	if a.running {
+		for _, ev := range dels {
+			a.applyDeleteEvent(ev)
 		}
-		if prog != nil {
-			if prog.stage == core.StageCopy && a.prog.stage != core.StageCopy {
-				a.copyT0 = time.Now()
-			}
-			a.prog = *prog
+	}
+	if prog != nil {
+		if prog.stage == core.StageCopy && a.prog.stage != core.StageCopy {
+			a.copyT0 = time.Now()
 		}
-	})
+		a.prog = *prog
+	}
+}
+
+// applyDeleteEvent 应用单条结构化筛选删除事件，不依赖解析中文日志文本。
+func (a *app) applyDeleteEvent(ev core.DeleteEvent) {
+	switch ev.Kind {
+	case core.DeleteSimulated:
+		a.runRejected++
+		if !a.runDelete {
+			a.lastDel = logEntry{kind: logDelete, indent: 2, label: "待删除", text: ev.Name, detail: ev.Folder, reason: ev.Reason}
+		}
+	case core.DeleteRemoved:
+		a.runDeleted++
+		if a.runDelete {
+			a.lastDel = logEntry{kind: logDelete, indent: 2, label: "已删除", text: ev.Name, detail: ev.Folder, reason: ev.Reason}
+		}
+	case core.DeleteFailed:
+		a.runDelFailed++
+	}
 }
 
 // appendLog 只能在主线程调用。
 func (a *app) appendLog(text string) {
 	lines := strings.Split(text, "\n")
-	if a.running {
-		for _, l := range lines {
-			a.countDeletion(l)
-		}
-	}
 	a.log = append(a.log, lines...)
 	if over := len(a.log) - maxLogLines; over > 0 {
 		a.log = slices.Delete(a.log, 0, over)
 	}
-}
-
-// countDeletion 数筛选阶段的「[文件夹] 🗑️ 待删除 / 🔥 已删除 / ❌ 删除失败」行。
-func (a *app) countDeletion(line string) {
-	raw := strings.TrimSpace(line)
-	if !strings.HasPrefix(raw, "[") {
-		return
-	}
-	if strings.Contains(raw, "删除失败") {
-		a.runDelFailed++
-		return
-	}
-	e := parseLogLine(line)
-	if e.kind != logDelete {
-		return
-	}
-	switch e.label {
-	case "待删除":
-		a.runRejected++
-	case "已删除":
-		a.runDeleted++
-	}
-	// 真删时只记真正删掉的那张（待删除之后可能删除失败），模拟运行时记不合格的那张
-	if (e.label == "已删除") == a.runDelete {
-		a.lastDel = e
-	}
+	a.logSeq++
 }
 
 // lastLogLine 是运行中显示在进度条下的那一行。

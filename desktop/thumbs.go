@@ -49,6 +49,31 @@ type wallpapers struct {
 	loading   bool
 	more      bool // 正在后台解码更多缩略图
 	browsing  bool // 正在后台解码壁纸页的缩略图
+	// 派生缓存：避免每次重绘或发布快照都重新哈希整份壁纸列表、重算目录分组
+	revCache     string
+	revLen       int
+	revHero      string
+	folderRev    string
+	folderSrcLen int
+	folders      []string
+	folderCounts map[string]int
+}
+
+// invalidateRev 在就地增删 all 或切换 heroPath 后清掉列表指纹和目录分组缓存。
+func (w *wallpapers) invalidateRev() {
+	w.revCache = ""
+	w.folderRev = ""
+}
+
+// cachedRev 返回壁纸列表指纹；all 与 heroPath 未变时直接复用缓存。
+func (w *wallpapers) cachedRev() string {
+	if w.revCache != "" && w.revLen == len(w.all) && w.revHero == w.heroPath {
+		return w.revCache
+	}
+	w.revCache = wallsRev(w.all, w.heroPath)
+	w.revLen = len(w.all)
+	w.revHero = w.heroPath
+	return w.revCache
 }
 
 // shownHero 是横幅现在显示的那张：轮播换过就是 slide，否则是 hero。
@@ -312,6 +337,7 @@ func (a *app) reloadHero() {
 			}
 			a.walls.hero = nil
 			a.walls.heroPath = path
+			a.walls.invalidateRev()
 			if img != nil {
 				a.walls.hero = ui.NewBitmap(img)
 			}

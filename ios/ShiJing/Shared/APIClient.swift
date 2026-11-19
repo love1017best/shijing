@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 enum APIError: LocalizedError {
     /// 令牌无效：没配对，或者在电脑上取消了配对
@@ -59,12 +60,15 @@ struct APIClient: Sendable {
         return req
     }
 
+    private static let logger = Logger(subsystem: "com.love1017best.shijing", category: "APIClient")
+
     private func send<T: Decodable>(_ req: URLRequest, as: T.Type) async throws -> T {
         let (data, resp) = try await Self.session.data(for: req)
         try Self.check(resp, data: data)
         do {
             return try Self.makeDecoder().decode(T.self, from: data)
         } catch {
+            Self.logger.error("解码失败 \(req.httpMethod ?? "GET", privacy: .public) \(req.url?.path ?? "", privacy: .public) -> \(String(describing: T.self), privacy: .public): \(String(describing: error), privacy: .public)")
             throw APIError.badResponse
         }
     }
@@ -194,6 +198,27 @@ struct APIClient: Sendable {
         try await send(request("GET", "api/deletions"), as: DeletionList.self)
     }
 
+    /// 条件获取删除记录：传入上次的 ETag，服务端日志未变时返回 304（结果为 nil）。
+    func deletions(ifNoneMatch etag: String?) async throws -> (list: DeletionList, etag: String?)? {
+        var req = request("GET", "api/deletions")
+        if let etag, !etag.isEmpty {
+            req.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
+        let (data, resp) = try await Self.session.data(for: req)
+        if let http = resp as? HTTPURLResponse, http.statusCode == 304 {
+            return nil
+        }
+        try Self.check(resp, data: data)
+        do {
+            let list = try Self.makeDecoder().decode(DeletionList.self, from: data)
+            let newETag = (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag")
+            return (list, newETag)
+        } catch {
+            Self.logger.error("解码失败 GET api/deletions: \(String(describing: error), privacy: .public)")
+            throw APIError.badResponse
+        }
+    }
+
     /// 下载壁纸的原文件到临时目录（文件名不变），分享 / 存相册用。
     /// 超时按「多久没收到数据」算（URLSession 的 request timeout 就是这个意思），
     /// 所以 30 秒够传几十 MB；连不上电脑时也只要等这么久，不用原来的 120 秒（点一下干等两分钟）。
@@ -226,14 +251,28 @@ struct APIClient: Sendable {
             let task = Task {
                 do {
                     let (bytes, resp) = try await Self.session.bytes(for: req)
-                    try Self.check(resp, data: nil)
+                    if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                        var errData = Data()
+                        errData.reserveCapacity(512)
+                        for try await b in bytes {
+                            errData.append(b)
+                            if errData.count >= 4096 { break }
+                        }
+                        Self.logger.error("SSE 连接失败 status=\(http.statusCode) body=\(String(decoding: errData, as: UTF8.self), privacy: .public)")
+                        try Self.check(resp, data: errData)
+                    } else {
+                        try Self.check(resp, data: nil)
+                    }
                     for try await line in bytes.lines {
                         guard line.hasPrefix("data: ") else { continue } // 「: ping」保活行
                         let json = Data(line.dropFirst(6).utf8)
-                        guard let s = try? Self.makeDecoder().decode(RemoteState.self, from: json) else {
+                        do {
+                            let s = try Self.makeDecoder().decode(RemoteState.self, from: json)
+                            continuation.yield(s)
+                        } catch {
+                            Self.logger.error("SSE 状态帧解码失败: \(String(describing: error), privacy: .public)")
                             throw APIError.badResponse
                         }
-                        continuation.yield(s)
                     }
                     continuation.finish()
                 } catch {

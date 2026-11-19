@@ -31,6 +31,10 @@ func (a *app) view(c *ui.Context) {
 			a.walls.browse = nil
 			a.walls.browsing = false
 		}
+		if a.page == pageDeleted || a.page == pageLibrary {
+			// 切到删除记录或图库页时立刻刷新删除日志缓存，不受短 TTL 延迟影响
+			a.invalidateDeleteCache()
+		}
 		a.prevPage = a.page
 	}
 	t := applyTheme(c)

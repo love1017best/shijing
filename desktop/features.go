@@ -55,23 +55,45 @@ func (a *app) maybeAutoRun(now time.Time) {
 
 // ── 删除记录 ──────────────────────────────────────────────────────────────
 
+// deleteCacheTTL 是 deleteRecords() 的 stat 冷却时间，避免鼠标悬停、滚动等高频重绘每帧调 os.Stat。
+const deleteCacheTTL = time.Second
+
 // deleteCache 缓存读出来的删除日志，文件没变（大小和修改时间）就不重读。
 type deleteCache struct {
-	size  int64
-	mod   time.Time
-	recs  []core.DeleteRecord
-	byDir map[string]int // 图库目录 → 累计删除张数
-	dirs  string         // byDir 是按哪组目录算的
+	checkedAt time.Time
+	exists    bool
+	size      int64
+	mod       time.Time
+	recs      []core.DeleteRecord
+	byDir     map[string]int // 图库目录 → 累计删除张数
+	dirs      string         // byDir 是按哪组目录算的
+}
+
+// invalidateDeleteCache 在本进程写入删除日志或切换至删除记录页时调用，下次读取立即 stat。
+func (a *app) invalidateDeleteCache() {
+	a.delCache.checkedAt = time.Time{}
 }
 
 func (a *app) deleteRecords() []core.DeleteRecord {
+	now := time.Now()
+	if !a.delCache.checkedAt.IsZero() && now.Sub(a.delCache.checkedAt) < deleteCacheTTL {
+		return a.delCache.recs
+	}
 	st, err := os.Stat(a.paths.DeleteLog)
 	if err != nil {
-		a.delCache = deleteCache{}
+		a.delCache = deleteCache{checkedAt: now}
 		return nil
 	}
-	if st.Size() != a.delCache.size || !st.ModTime().Equal(a.delCache.mod) {
-		a.delCache = deleteCache{size: st.Size(), mod: st.ModTime(), recs: core.ReadDeleteLog(a.paths.DeleteLog)}
+	if !a.delCache.exists || st.Size() != a.delCache.size || !st.ModTime().Equal(a.delCache.mod) {
+		a.delCache = deleteCache{
+			checkedAt: now,
+			exists:    true,
+			size:      st.Size(),
+			mod:       st.ModTime(),
+			recs:      core.ReadDeleteLog(a.paths.DeleteLog),
+		}
+	} else {
+		a.delCache.checkedAt = now
 	}
 	return a.delCache.recs
 }
@@ -84,7 +106,8 @@ func (a *app) deletedIn(dir string) int {
 		a.delCache.byDir, a.delCache.dirs = map[string]int{}, key
 		for _, r := range recs {
 			for _, d := range a.allDirs() {
-				if strings.HasPrefix(r.Path, filepath.Clean(d)+string(filepath.Separator)) {
+				prefix := filepath.Clean(core.ExpandUser(d)) + string(filepath.Separator)
+				if strings.HasPrefix(r.Path, prefix) {
 					a.delCache.byDir[d]++
 				}
 			}
@@ -274,6 +297,7 @@ func (a *app) finishDeleteOriginal(wall, src string, outcome removeSrcOutcome, p
 		return actionErr("删除原图失败", permErr)
 	default:
 		core.LogDeletion(a.paths.DeleteLog, src, int(a.minW), int(a.minH), core.ReasonManual)
+		a.invalidateDeleteCache()
 		a.appendLog(fmt.Sprintf("🔥 手动删除原图: %s", src))
 		_ = os.Remove(wall)
 		a.dropWall(wall)
@@ -331,6 +355,7 @@ func (a *app) deleteOriginalAsync(wall string) {
 func (a *app) dropWall(wall string) {
 	w := &a.walls
 	w.all = slices.DeleteFunc(w.all, func(p string) bool { return p == wall })
+	w.invalidateRev()
 	delete(w.thumbs, wall)
 	delete(w.browse, wall)
 	if wall == w.slidePath {

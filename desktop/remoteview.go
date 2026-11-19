@@ -21,7 +21,7 @@ func (a *app) remoteGroup(c *ui.Context) {
 					note = "无法监听端口：" + errText + "。关掉再打开可以重试。"
 				case port > 0:
 					note = fmt.Sprintf("正在监听端口 %d", port)
-					if ips := localIPs(); len(ips) > 0 {
+					if ips := cachedLocalIPs(); len(ips) > 0 {
 						help += fmt.Sprintf("iPhone 上打开拾景 App 会自动找到这台 Mac；找不到时可以手动填 %s:%d。", ips[0], port)
 					}
 				}

@@ -133,13 +133,53 @@ func TestRemoteLogDeletionsOriginal(t *testing.T) {
 	}
 
 	core.LogDeletion(h.paths.DeleteLog, "/Volumes/Media0/Lib/set1/p.jpg", 3840, 2160, "竖屏 1080×1920")
-	_, data = h.do(t, "GET", "/api/deletions", tok, nil)
+	reqDel, _ := http.NewRequest("GET", h.base+"/api/deletions", nil)
+	reqDel.Header.Set("Authorization", "Bearer "+tok)
+	respDel, err := http.DefaultClient.Do(reqDel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	etag := respDel.Header.Get("ETag")
+	data = nil
+	_ = json.NewDecoder(respDel.Body).Decode(&data)
+	respDel.Body.Close()
+	if respDel.StatusCode != 200 || etag == "" {
+		t.Fatalf("deletions status=%d etag=%q", respDel.StatusCode, etag)
+	}
 	items := data["items"].([]any)
 	if data["total"] != float64(1) || len(items) != 1 || data["filter"] != float64(1) || data["manual"] != float64(0) {
 		t.Fatalf("deletions = %v", data)
 	}
 	if d := items[0].(map[string]any); d["name"] != "p.jpg" || d["reason"] != "竖屏 1080×1920" || d["at"].(float64) <= 0 {
 		t.Fatalf("记录 = %v", d)
+	}
+	// 带相同 If-None-Match 应返回 304 Not Modified
+	req304, _ := http.NewRequest("GET", h.base+"/api/deletions", nil)
+	req304.Header.Set("Authorization", "Bearer "+tok)
+	req304.Header.Set("If-None-Match", etag)
+	resp304, err := http.DefaultClient.Do(req304)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp304.Body.Close()
+	if resp304.StatusCode != http.StatusNotModified {
+		t.Fatalf("相同 ETag 应返回 304，实际 %d", resp304.StatusCode)
+	}
+	// 新增一条删除记录后 ETag 变化并返回 200
+	core.LogDeletion(h.paths.DeleteLog, "/Volumes/Media0/Lib/set1/q.jpg", 3840, 2160, core.ReasonManual)
+	req200, _ := http.NewRequest("GET", h.base+"/api/deletions", nil)
+	req200.Header.Set("Authorization", "Bearer "+tok)
+	req200.Header.Set("If-None-Match", etag)
+	resp200, err := http.DefaultClient.Do(req200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data2 map[string]any
+	_ = json.NewDecoder(resp200.Body).Decode(&data2)
+	etag2 := resp200.Header.Get("ETag")
+	resp200.Body.Close()
+	if resp200.StatusCode != 200 || etag2 == etag || data2["total"] != float64(2) {
+		t.Fatalf("更新后应返回 200 且 total=2: status=%d etag=%q total=%v", resp200.StatusCode, etag2, data2["total"])
 	}
 
 	req, _ := http.NewRequest("GET", h.base+"/api/wallpapers/c.jpg/original", nil)

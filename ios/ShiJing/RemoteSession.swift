@@ -61,6 +61,11 @@ final class RemoteSession {
     /// 正在进行的拉壁纸列表任务（合并并发调用，避免旧响应晚到覆写新列表）
     private var refreshWallsTask: Task<Bool, Never>?
     private var refreshWallsGen = 0
+    /// 顶部提示气泡的自动隐藏延时任务（新提示到来时取消旧任务，防止被提前清掉）
+    private var noticeTask: Task<Void, Never>?
+    /// 删除记录条件请求缓存（命中 304 时跳过全量传输、解码与落盘）
+    private var deletionsETag: String?
+    private var cachedDeletions: DeletionList?
     /// 离线时点的「移出 / 不再选」，连上电脑后自动处理（存在 UserDefaults 里，按 Mac 分开）
     internal(set) var queued: [OfflineAction] = []
     var flushing = false
@@ -308,7 +313,7 @@ final class RemoteSession {
                     let wasRunning = state?.running == true
                     let isFirst = firstEvent
                     firstEvent = false
-                    RunNotifier.observe(new: s, mac: mac.name)
+                    RunNotifier.observe(new: s, mac: mac.name, macKey: macID.uuidString)
                     if wasRunning, !s.running {
                         WidgetReload.all()
                     }
@@ -573,9 +578,12 @@ final class RemoteSession {
 
     func showNotice(_ text: String) {
         notice = text
-        Task {
+        noticeTask?.cancel()
+        noticeTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(2))
-            if notice == text { notice = nil }
+            guard let self, !Task.isCancelled else { return }
+            self.notice = nil
+            self.noticeTask = nil
         }
     }
 
@@ -636,12 +644,43 @@ final class RemoteSession {
         // 离线时发出去只会干等超时（三路各 30 秒），等连上再说
         guard connection == .live, let client = try? client() else { return }
         let id = macID.uuidString
+        let etag = deletionsETag
         async let log: [String]? = try? client.log()
-        async let deletions: DeletionList? = try? client.deletions()
+        async let deletions: (list: DeletionList, etag: String?)?? = try? client.deletions(ifNoneMatch: etag)
         async let excluded: [ExcludedItem]? = try? client.excluded()
         if let v = await log { OfflineStore.shared.saveRecord(id, .log, v) }
-        if let v = await deletions { OfflineStore.shared.saveRecord(id, .deletions, v) }
+        if let res = await deletions, let (v, newETag) = res {
+            deletionsETag = newETag
+            cachedDeletions = v
+            OfflineStore.shared.saveRecord(id, .deletions, v)
+        }
         if let v = await excluded { OfflineStore.shared.saveRecord(id, .excluded, v) }
+    }
+
+    /// 拉取删除记录：命中服务端 ETag（304）时直接复用本地缓存，避免重复传整份日志。
+    func fetchDeletions(_ client: APIClient) async throws -> DeletionList {
+        if let res = try await client.deletions(ifNoneMatch: deletionsETag) {
+            deletionsETag = res.etag
+            cachedDeletions = res.list
+            OfflineStore.shared.saveRecord(macID.uuidString, .deletions, res.list)
+            return res.list
+        }
+        if let cached = cachedDeletions {
+            return cached
+        }
+        if let disk: OfflineStore.Cached<DeletionList> = await OfflineStore.shared.loadRecord(macID.uuidString, .deletions) {
+            cachedDeletions = disk.value
+            return disk.value
+        }
+        // ETag 命中但本地副本已不在，清掉 ETag 全量重拉一次
+        deletionsETag = nil
+        if let res = try await client.deletions(ifNoneMatch: nil) {
+            deletionsETag = res.etag
+            cachedDeletions = res.list
+            OfflineStore.shared.saveRecord(macID.uuidString, .deletions, res.list)
+            return res.list
+        }
+        return try await client.deletions()
     }
 
     /// 把当前状态和壁纸列表写到磁盘（离线时显示的上次样子）。运行中状态推得很密，最多 5 秒写一次；
@@ -665,18 +704,27 @@ final class RemoteSession {
         await wallAct(w, kind: exclude ? .exclude : .remove, refresh: refresh, records: records) { try await $0.removeWallpaper(w.name, exclude: exclude) }
     }
 
-    /// 一次整理多张（「全部壁纸」页多选）：逐张调接口，失败就停（错误已经弹出来了），最后只重新拉一次列表。
-    /// 成功返回处理了几张。
+    /// 一次整理多张（「全部壁纸」页多选）：在线时逐张调接口、最后拉一次列表；
+    /// 离线时合并入队并只写一次盘和快照。返回成功处理或登记的张数。
     @discardableResult
     func removeWallpapers(_ items: [Wallpaper], exclude: Bool) async -> Int {
         guard !items.isEmpty else { return 0 }
+        #if DEBUG
+        if Self.demoMode != nil {
+            let names = Set(items.map(\.name))
+            walls.removeAll { names.contains($0.name) }
+            return items.count
+        }
+        #endif
+        if offline {
+            return enqueueBatch(exclude ? .exclude : .remove, items)
+        }
         var done = 0
         for w in items {
             if Task.isCancelled { break }
             guard await removeWallpaper(w, exclude: exclude, refresh: false, records: false) else { break }
             done += 1
         }
-        // 离线时记的都是队列里的操作，不用（也拉不到）列表
         if !offline { await refreshWalls() }
         if done > 0 { Task { await refreshRecordsCache() } }
         return done

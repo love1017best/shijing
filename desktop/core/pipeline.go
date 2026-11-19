@@ -52,6 +52,7 @@ var RefreshWallpaper = func() error {
 
 // ValidateConfig 对应 run.validate_config：源目录不存在只警告（可能卷未挂载）。
 func ValidateConfig(cfg Config, logf Logf) {
+	cfg = cfg.expanded()
 	for _, d := range append(append([]string{}, cfg.FilterAndSampleDirs...), cfg.SampleOnlyDirs...) {
 		if !exists(d) {
 			logf("⚠️  目录不存在（可能卷未挂载）: %s", d)
