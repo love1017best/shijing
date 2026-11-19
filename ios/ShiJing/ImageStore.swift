@@ -65,6 +65,13 @@ final class ImageStore {
         cache.countLimit = 400
         cache.totalCostLimit = 160 << 20
         AppSupport.prepare(Self.rootDiskDir)
+        // 清理旧版本（v0.4.20 及以前）平铺在 images/ 根目录的缓存文件，
+        // 以及此前异常退出可能留在 tmp/originals/ 的过期临时原图；
+        // 挂到 clearTask 上让首次统计磁盘占用和后台缓存都等它删完再量。
+        clearTask = Task.detached(priority: .utility) {
+            Self.purgeLegacyRootFiles()
+            Self.purgeStaleTempOriginals()
+        }
     }
 
     /// 内存缓存的 key。用 Mac 的 id 而不是地址或客户端：`session.client()` 要读钥匙串，
@@ -162,6 +169,7 @@ final class ImageStore {
         prefetchHitLimit = false
         let macID = session.macID.uuidString
         let names = session.walls.map(\.name)
+        let heroName = session.heroName
         let wantOriginals = Self.originalsEnabled
         // 进度按壁纸算：这一批多少张就是多少（缩略图、横幅很小，不算；大图和原图各走一遍这个数）
         prefetchTotal = names.count
@@ -169,19 +177,63 @@ final class ImageStore {
         prefetchOriginalDone = 0
         prefetching = true
         task = Task {
-            // 先等还在跑的删缓存做完，再量磁盘：不然「已用」把马上要删的文件也算进去
+            // 先等还在跑的删缓存（含升级后清理根目录旧文件）做完，再量磁盘：
+            // 不然「已用」会把马上要删的文件也算进去
             await waitForClear()
-            var used = await Task.detached(priority: .utility) { Self.totalDiskUsage() }.value
-            let limit = Self.cacheLimitBytes
-            var queue: [(String, ImageKind)] = names.map { ($0, .thumb) }
-            if let hero = session.heroName ?? names.first { queue.append((hero, .hero)) }
+            if Task.isCancelled {
+                if g == gen { prefetching = false }
+                return
+            }
+            let prep = await Task.detached(priority: .utility) {
+                (Self.totalDiskUsage(), Self.existingFileNames(for: macID))
+            }.value
+            if Task.isCancelled {
+                if g == gen { prefetching = false }
+                return
+            }
+            var used = prep.0
+            let existing = prep.1
+            var candidates: [(String, ImageKind)] = names.map { ($0, .thumb) }
+            if let hero = heroName ?? names.first { candidates.append((hero, .hero)) }
             // 概览横幅会轮播整批：其余每张也存一份横幅图（1600 宽，每张约 200–300 KB）。
             // 旧版桌面端没给 hero 时手机横幅用大图，不存这一档
-            if let hero = session.heroName {
-                queue.append(contentsOf: names.filter { $0 != hero }.map { ($0, .hero) })
+            if let hero = heroName {
+                candidates.append(contentsOf: names.filter { $0 != hero }.map { ($0, .hero) })
             }
-            queue.append(contentsOf: names.map { ($0, .image) })
-            if wantOriginals { queue.append(contentsOf: names.map { ($0, .original) }) }
+            candidates.append(contentsOf: names.map { ($0, .image) })
+            if wantOriginals { candidates.append(contentsOf: names.map { ($0, .original) }) }
+
+            // 先过滤已经在磁盘上的项，既省去无意义的并发任务，也避免已全部存完时误触发「已到上限」
+            var queue: [(String, ImageKind)] = []
+            var doneImage = 0
+            var doneOriginal = 0
+            let origPrefix = ImageKind.original.cachePrefix + "-"
+            for (n, kind) in candidates {
+                let s = Self.safeName(n)
+                let fileName = "\(kind.cachePrefix)-\(s)"
+                if existing.contains(fileName) || (kind == .image && existing.contains(origPrefix + s)) {
+                    if kind == .image { doneImage += 1 }
+                    if kind == .original { doneOriginal += 1 }
+                    continue
+                }
+                queue.append((n, kind))
+            }
+            if g == gen {
+                prefetchDone = doneImage
+                prefetchOriginalDone = doneOriginal
+            }
+            guard !queue.isEmpty else {
+                if g == gen { prefetching = false }
+                return
+            }
+            if used >= Self.cacheLimitBytes {
+                if g == gen {
+                    prefetchHitLimit = true
+                    prefetching = false
+                }
+                return
+            }
+
             var next = 0
             var hitLimit = false
             await withTaskGroup(of: (ImageKind, Int64, Error?).self) { group in
@@ -211,13 +263,15 @@ final class ImageStore {
                         return
                     }
                     // 进度按壁纸算：大图、原图各数各的，缩略图和横幅不算
-                    if kind == .image { prefetchDone += 1 }
-                    if kind == .original { prefetchOriginalDone += 1 }
+                    if g == gen {
+                        if kind == .image { prefetchDone += 1 }
+                        if kind == .original { prefetchOriginalDone += 1 }
+                    }
                     used += bytes
-                    if used >= limit, next < queue.count {
+                    if used >= Self.cacheLimitBytes, next < queue.count {
                         // 到了上限：手上这几张存完就停，后面的不存了
                         hitLimit = true
-                        prefetchHitLimit = true
+                        if g == gen { prefetchHitLimit = true }
                     }
                     _ = addNext()
                 }
@@ -240,11 +294,12 @@ final class ImageStore {
         if let clear = clearTask { await clear.value; clearTask = nil }
     }
 
-    /// 进入离线模式：停掉这一轮缓存。和「暂停」不同，退出离线模式、重新连上后会自动接着补。
+    /// 进入离线模式或切换 Mac：停掉这一轮缓存。和「暂停」不同，退出离线模式、重新连上后会自动接着补。
     func cancelPrefetch() {
         task?.cancel()
         task = nil
         prefetching = false
+        prefetchHitLimit = false
     }
 
     /// 换了一批：先停掉下载中的任务（别让属于上一批的图写进来），由调用方接着 `keepOnly`。
@@ -309,13 +364,36 @@ final class ImageStore {
             }
         }
         // 升级前缓存平铺在 images/ 根目录，清理普通文件但不动其他 Mac 的子目录
-        if let root = rootDiskDir {
-            let rootItems = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
-            for u in rootItems {
-                let isDir = (try? u.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-                if !isDir { try? fm.removeItem(at: u) }
-            }
+        purgeLegacyRootFiles()
+    }
+
+    /// 清理旧版本留在 images/ 根目录的平铺缓存文件，不动各台 Mac 的子目录。
+    private nonisolated static func purgeLegacyRootFiles() {
+        guard let root = rootDiskDir else { return }
+        let fm = FileManager.default
+        let rootItems = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        for u in rootItems {
+            let isDir = (try? u.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            if !isDir { try? fm.removeItem(at: u) }
         }
+    }
+
+    /// 清理此前异常退出可能残留在 tmp/originals/ 里的过期临时原图（超过 1 分钟未修改）。
+    private nonisolated static func purgeStaleTempOriginals() {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appending(path: "originals", directoryHint: .isDirectory)
+        let items = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let cutoff = Date().addingTimeInterval(-60)
+        for u in items {
+            let mtime = (try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if mtime < cutoff { try? fm.removeItem(at: u) }
+        }
+    }
+
+    /// 列出某台 Mac 缓存目录里已有的文件名集合（单次列目录，供后台缓存跳过已存文件）。
+    private nonisolated static func existingFileNames(for macID: String) -> Set<String> {
+        guard let dir = diskDir(for: macID) else { return [] }
+        return Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
     }
 
     /// 某一档缓存的统计。
@@ -328,29 +406,43 @@ final class ImageStore {
     /// 设置页、补齐要的磁盘统计：列一次目录、每张图 stat 一次，各档一起算出来。
     /// （以前分别调 diskUsage / cachedSize / viewableCount / cachedCount，一次刷新要列四遍目录）
     struct Usage {
-        var used: Int64 = 0 // 整个缓存目录占了多少
-        var viewable = 0    // 这一批里离线能看到大图的张数（有大图或原图都算）
+        var used: Int64 = 0      // 这台 Mac 的缓存目录占了多少
+        var totalUsed: Int64 = 0 // 全部 Mac 缓存目录合计占了多少（与缓存上限同口径）
+        var viewable = 0         // 这一批里离线能看到大图的张数（有大图或原图都算）
         var kinds: [ImageKind: KindUsage] = [:]
 
         func data(_ kind: ImageKind) -> KindUsage { kinds[kind] ?? KindUsage() }
     }
 
     nonisolated static func usage(macID: String, names: [String]) -> Usage {
-        guard let dir = diskDir(for: macID) else { return Usage() }
-        let items = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+        let fm = FileManager.default
         var u = Usage()
         var present: [ImageKind: Set<String>] = [:]
-        for f in items {
-            let n = f.lastPathComponent
-            let size = Int64((try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-            u.used += size
-            guard let kind = ImageKind.allCases.first(where: { n.hasPrefix($0.cachePrefix + "-") }) else { continue }
-            var d = u.kinds[kind] ?? KindUsage()
-            d.bytes += size
-            d.count += 1
-            u.kinds[kind] = d
-            present[kind, default: []].insert(n)
+        if let dir = diskDir(for: macID) {
+            let items = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+            for f in items {
+                let n = f.lastPathComponent
+                let size = Int64((try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+                u.used += size
+                guard let kind = ImageKind.allCases.first(where: { n.hasPrefix($0.cachePrefix + "-") }) else { continue }
+                var d = u.kinds[kind] ?? KindUsage()
+                d.bytes += size
+                d.count += 1
+                u.kinds[kind] = d
+                present[kind, default: []].insert(n)
+            }
         }
+        // 加上其他 Mac 子目录的占用，确保设置页「已用 / 上限」与后台缓存上限口径一致
+        var total = u.used
+        if let root = rootDiskDir {
+            let currentName = safeName(macID)
+            let topItems = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+            for sub in topItems where sub.lastPathComponent != currentName {
+                let isDir = (try? sub.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                if isDir { total += directorySize(sub) }
+            }
+        }
+        u.totalUsed = total
         // 这一批里每档存了多少张（文件名对得上才算）
         let imageName = ImageKind.image.cachePrefix + "-"
         let originalName = ImageKind.original.cachePrefix + "-"
@@ -369,15 +461,27 @@ final class ImageStore {
         return u
     }
 
-    /// 整个图片缓存目录（所有 Mac 合计）占了多少磁盘空间，补齐前用来对比全局缓存上限。
+    /// 整个图片缓存目录（所有 Mac 子目录合计）占了多少磁盘空间，补齐前用来对比全局缓存上限。
+    /// 仅统计各 Mac 子目录，不把旧版可能残留的根目录散落文件算进去。
     nonisolated static func totalDiskUsage() -> Int64 {
-        guard let root = rootDiskDir,
-              let en = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]) else {
+        guard let root = rootDiskDir else { return 0 }
+        let fm = FileManager.default
+        let topItems = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        var total: Int64 = 0
+        for sub in topItems {
+            let isDir = (try? sub.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            if isDir { total += directorySize(sub) }
+        }
+        return total
+    }
+
+    private nonisolated static func directorySize(_ dir: URL) -> Int64 {
+        guard let items = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]) else {
             return 0
         }
         var total: Int64 = 0
-        for case let url as URL in en {
-            guard let vals = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+        for f in items {
+            guard let vals = try? f.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
                   vals.isRegularFile == true else { continue }
             total += Int64(vals.fileSize ?? 0)
         }
@@ -405,6 +509,7 @@ final class ImageStore {
                 if let dir = Self.diskDir(for: macID) {
                     try? FileManager.default.removeItem(at: dir)
                 }
+                Self.purgeLegacyRootFiles()
             } else {
                 for kind in kinds { Self.removeFiles(macID, kind) }
             }

@@ -766,7 +766,7 @@ private struct OfflineCacheSection: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("已用 \(bytes(usage?.used)) / \(limitGB) GB")
+                        Text("已用 \(bytes(usage?.totalUsed)) / \(limitGB) GB")
                         Spacer()
                         Button("清除") {
                             store.clear(macID: session.macID.uuidString)
@@ -775,6 +775,11 @@ private struct OfflineCacheSection: View {
                         .disabled((usage?.used ?? 0) == 0)
                     }
                     ProgressView(value: fraction)
+                    if let u = usage, u.totalUsed > u.used {
+                        Text("其中这台 Mac 占 \(bytes(u.used))，其余为其他 Mac 缓存")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .task(id: session.macID) { refresh() }
@@ -823,7 +828,7 @@ private struct OfflineCacheSection: View {
     }
 
     private var fraction: Double {
-        guard limitGB > 0, let used = usage?.used, used > 0 else { return 0 }
+        guard limitGB > 0, let used = usage?.totalUsed, used > 0 else { return 0 }
         return min(1, Double(used) / Double(limitGB * 1_000_000_000))
     }
 
