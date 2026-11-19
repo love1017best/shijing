@@ -22,52 +22,73 @@ enum Keychain {
         return q
     }
 
-    static func setData(_ data: Data, account: String) {
+    private static func write(_ data: Data, account: String, group: String?) -> OSStatus {
+        let base = query(account, group: group)
         let attrs: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
         // 优先原地更新，避免先删后加期间小组件并发读到 nil；仅不存在时再新增。
-        for g in [group, nil] {
-            let base = query(account, group: g)
-            var status = SecItemUpdate(base as CFDictionary, attrs as CFDictionary)
-            if status == errSecItemNotFound {
-                var add = base
-                add[kSecValueData as String] = data
-                add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-                status = SecItemAdd(add as CFDictionary, nil)
-                if status == errSecDuplicateItem {
-                    status = SecItemUpdate(base as CFDictionary, attrs as CFDictionary)
-                }
+        var status = SecItemUpdate(base as CFDictionary, attrs as CFDictionary)
+        if status == errSecItemNotFound {
+            var add = base
+            add[kSecValueData as String] = data
+            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            status = SecItemAdd(add as CFDictionary, nil)
+            if status == errSecDuplicateItem {
+                status = SecItemUpdate(base as CFDictionary, attrs as CFDictionary)
             }
-            if status == errSecSuccess {
-                // 写入共享组成功后，顺手清理默认组里可能残留的旧副本（不影响共享组并发读取）
-                if g != nil {
-                    SecItemDelete(query(account, group: nil) as CFDictionary)
-                }
-                return
-            }
-            if g == nil { return }
         }
+        return status
+    }
+
+    static func setData(_ data: Data, account: String) {
+        // 注意：绝不能在写入共享组成功后对 group: nil 调用 SecItemDelete。
+        // SecItemDelete 省略 kSecAttrAccessGroup 时会删除当前进程有权访问的所有组里的匹配项，包括刚写入的共享组。
+        if let group, write(data, account: account, group: group) == errSecSuccess {
+            return
+        }
+        _ = write(data, account: account, group: nil)
+    }
+
+    private static func copyData(account: String, group: String) -> Data? {
+        var q = query(account, group: group)
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess else { return nil }
+        return out as? Data
     }
 
     static func data(account: String) -> Data? {
-        // 先找共享组；旧版本存在默认组里的，找到后挪进共享组
-        for g in [group, nil] {
-            var q = query(account, group: g)
-            q[kSecReturnData as String] = true
-            q[kSecMatchLimit as String] = kSecMatchLimitOne
-            var out: AnyObject?
-            if SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data {
-                if g == nil, group != nil { setData(data, account: account) }
-                return data
+        // 先查共享组；旧版本存在其它组里的，找到后迁进共享组并按其精确组名删除旧副本。
+        if let group, let data = copyData(account: account, group: group) {
+            return data
+        }
+        var q = query(account, group: nil)
+        q[kSecReturnData as String] = true
+        q[kSecReturnAttributes as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess,
+              let dict = out as? [String: Any],
+              let data = dict[kSecValueData as String] as? Data else {
+            return nil
+        }
+        if let group {
+            let foundGroup = dict[kSecAttrAccessGroup as String] as? String
+            if foundGroup != group, write(data, account: account, group: group) == errSecSuccess,
+               let oldGroup = foundGroup, !oldGroup.isEmpty {
+                SecItemDelete(query(account, group: oldGroup) as CFDictionary)
             }
         }
-        return nil
+        return data
     }
 
     static func deleteData(account: String) {
-        SecItemDelete(query(account, group: group) as CFDictionary)
+        if let group {
+            SecItemDelete(query(account, group: group) as CFDictionary)
+        }
         SecItemDelete(query(account, group: nil) as CFDictionary)
     }
 
