@@ -369,7 +369,7 @@ func (a *app) previewModal(c *ui.Context) {
 		src := a.wallSource(a.pendingDelWall)
 		msg := fmt.Sprintf("会从图库里删除原图 %s，并移出壁纸文件夹。删除不可撤销，会记进删除记录。", tildify(src))
 		if ui.AlertDialog(c, &a.confirmDelSrc, "删除图库里的这张原图？", msg, "取消", "删除原图") == 1 {
-			a.report(a.deleteOriginal(a.pendingDelWall))
+			a.deleteOriginalAsync(a.pendingDelWall)
 		}
 	}
 }

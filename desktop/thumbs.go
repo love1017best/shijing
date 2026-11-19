@@ -303,6 +303,13 @@ func (a *app) reloadHero() {
 			if a.walls.dir != dir || a.wallsGen != gen {
 				return // 期间重新读过壁纸文件夹，那次会自己定横幅
 			}
+			// 候选图在解码期间也被移出了：不回写已删除路径，若列表还有图则继续挑下一张
+			if path != "" && !slices.Contains(a.walls.all, path) {
+				if len(a.walls.all) > 0 && a.walls.heroPath == "" {
+					a.reloadHero()
+				}
+				return
+			}
 			a.walls.hero = nil
 			a.walls.heroPath = path
 			if img != nil {
@@ -312,15 +319,22 @@ func (a *app) reloadHero() {
 	}()
 }
 
-// loadBrowseThumbs 给壁纸页补一批缩略图：每次后台解一批，解完触发重绘再补下一批。
-// 用比概览更小的宽度（browseThumbWidth），几百张一起摆也不会占太多内存。
-func (a *app) loadBrowseThumbs(paths []string) {
+// loadBrowseThumbs 给壁纸页补一批可视区附近的缩略图：每次后台解一批，解完触发重绘。
+// 校验 wallsGen 和当前存在性，避免换批或移出后写入过期缩略图；超出上限时淘汰远离当前窗口的项。
+func (a *app) loadBrowseThumbs(window []string, keepSet map[string]bool) {
 	w := &a.walls
 	if w.browsing || w.loading || a.update == nil {
 		return
 	}
+	if len(w.browse) > browseMaxCached && len(keepSet) > 0 {
+		for p := range w.browse {
+			if !keepSet[p] {
+				delete(w.browse, p)
+			}
+		}
+	}
 	var todo []string
-	for _, p := range paths {
+	for _, p := range window {
 		if _, tried := w.browse[p]; !tried {
 			todo = append(todo, p)
 			if len(todo) >= browseBatch {
@@ -332,19 +346,29 @@ func (a *app) loadBrowseThumbs(paths []string) {
 		return
 	}
 	w.browsing = true
-	dir := w.dir
+	dir, gen := w.dir, a.wallsGen
 	go func() {
 		imgs := decodeThumbsAt(todo, browseThumbWidth)
 		a.update(func() {
 			w := &a.walls
-			if w.dir != dir { // 期间重新读过壁纸文件夹，这批作废
+			if w.dir != dir || a.wallsGen != gen || a.page != pageWalls { // 期间换批或切离壁纸页，这批作废
+				w.browsing = false
 				return
 			}
 			w.browsing = false
 			if w.browse == nil {
 				w.browse = map[string]*ui.Bitmap{}
 			}
-			maps.Copy(w.browse, bitmaps(imgs))
+			for p, img := range imgs {
+				if !slices.Contains(w.all, p) {
+					continue
+				}
+				if img != nil {
+					w.browse[p] = ui.NewBitmap(img)
+				} else {
+					w.browse[p] = nil
+				}
+			}
 		})
 	}()
 }
@@ -365,19 +389,28 @@ func (a *app) loadMoreThumbs(want int) {
 		return
 	}
 	w.more = true
-	dir := w.dir
+	dir, gen := w.dir, a.wallsGen
 	go func() {
 		imgs := decodeThumbs(todo)
 		a.update(func() {
 			w := &a.walls
-			if w.dir != dir || !w.more { // 期间重新读过壁纸文件夹，这批作废
+			if w.dir != dir || a.wallsGen != gen || !w.more { // 期间重新读过壁纸文件夹，这批作废
 				return
 			}
 			w.more = false
 			if w.thumbs == nil {
 				w.thumbs = map[string]*ui.Bitmap{}
 			}
-			maps.Copy(w.thumbs, bitmaps(imgs))
+			for p, img := range imgs {
+				if !slices.Contains(w.all, p) {
+					continue
+				}
+				if img != nil {
+					w.thumbs[p] = ui.NewBitmap(img)
+				} else {
+					w.thumbs[p] = nil
+				}
+			}
 		})
 	}()
 }

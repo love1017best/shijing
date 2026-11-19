@@ -99,6 +99,6 @@ final class MacStore {
             CurrentMac.clear()
             return
         }
-        CurrentMac(name: mac.name, host: mac.host, port: mac.port, token: token).save()
+        CurrentMac(id: mac.id, name: mac.name, host: mac.host, port: mac.port, token: token).save()
     }
 }

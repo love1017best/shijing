@@ -122,7 +122,7 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 						ui.Text(c, parts).FontSize(11.5).TextColor(t.TextMuted).SingleLine().Shrink(0).
 							Tooltip("上次成功运行时扫描到的、符合画质要求的图片；删过的张数来自删除记录")
 					}
-					switch a.mounts[d] {
+					switch a.mountStateOf(d) {
 					case mountOK:
 						pill(c, "可访问", t.Success)
 					case mountMissing:

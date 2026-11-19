@@ -210,10 +210,11 @@ struct APIClient: Sendable {
             try? FileManager.default.removeItem(at: tmp) // 失败了别把临时文件留在磁盘上
             throw error
         }
-        let dir = FileManager.default.temporaryDirectory.appending(path: "originals", directoryHint: .isDirectory)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = FileManager.default.temporaryDirectory
+            .appending(path: "originals", directoryHint: .isDirectory)
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dst = dir.appending(path: name)
-        try? FileManager.default.removeItem(at: dst)
         try FileManager.default.moveItem(at: tmp, to: dst)
         return dst
     }

@@ -224,6 +224,64 @@ func (a *app) removeWallpaper(wall string, exclude bool) error {
 	return nil
 }
 
+const deleteSrcTimeout = 3 * time.Second
+
+type removeSrcOutcome int
+
+const (
+	removeSrcDone removeSrcOutcome = iota
+	removeSrcQueue
+	removeSrcPerm
+)
+
+// removeSourceWithTimeout 在独立 goroutine 里执行原图删除与父目录校验，避免挂起网络卷卡死调用方。
+func removeSourceWithTimeout(src string, timeout time.Duration) (removeSrcOutcome, error) {
+	type result struct {
+		out removeSrcOutcome
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		if err := os.Remove(src); err != nil && !os.IsNotExist(err) {
+			if !os.IsPermission(err) { // 删不掉多半是网络卷临时断开：排队等下次
+				ch <- result{removeSrcQueue, nil}
+				return
+			}
+			ch <- result{removeSrcPerm, err}
+			return
+		}
+		// 路径不存在要分清「文件真的没了」和「整个卷没挂上」：后者报的也是 ENOENT
+		if _, err := os.Lstat(filepath.Dir(src)); os.IsNotExist(err) {
+			ch <- result{removeSrcQueue, nil}
+			return
+		}
+		ch <- result{removeSrcDone, nil}
+	}()
+	select {
+	case r := <-ch:
+		return r.out, r.err
+	case <-time.After(timeout):
+		return removeSrcQueue, nil
+	}
+}
+
+// finishDeleteOriginal 在主线程把后台删原图的结果落地（记日志、删本地壁纸，或转入待删队列）。
+func (a *app) finishDeleteOriginal(wall, src string, outcome removeSrcOutcome, permErr error) error {
+	switch outcome {
+	case removeSrcQueue:
+		return a.queueDelete(wall, src)
+	case removeSrcPerm:
+		return actionErr("删除原图失败", permErr)
+	default:
+		core.LogDeletion(a.paths.DeleteLog, src, int(a.minW), int(a.minH), core.ReasonManual)
+		a.appendLog(fmt.Sprintf("🔥 手动删除原图: %s", src))
+		_ = os.Remove(wall)
+		a.dropWall(wall)
+		a.toast = "已删除图库中的原图，并记进删除记录"
+		return nil
+	}
+}
+
 // deleteOriginal 删除原图（记进删除日志）并从壁纸文件夹移除。调用前已经确认过。
 // 图库（NAS）现在连不上时不报错，而是把这一条排进待办队列，连上后自动执行（pending.go）。
 func (a *app) deleteOriginal(wall string) error {
@@ -234,22 +292,39 @@ func (a *app) deleteOriginal(wall string) error {
 	if a.sourceUnmounted(src) {
 		return a.queueDelete(wall, src)
 	}
-	if err := os.Remove(src); err != nil && !os.IsNotExist(err) {
-		if !os.IsPermission(err) { // 删不掉多半是网络卷临时断开：排队等下次
-			return a.queueDelete(wall, src)
-		}
-		return actionErr("删除原图失败", err)
+	outcome, permErr := removeSourceWithTimeout(src, deleteSrcTimeout)
+	return a.finishDeleteOriginal(wall, src, outcome, permErr)
+}
+
+// deleteOriginalAsync 是桌面 UI 入口：网络卷已确认离线时直接排队，否则把 NAS 删除放到后台带超时执行，
+// 避免挂起的 SMB/NFS 卷阻塞主线程界面和遥控服务。
+func (a *app) deleteOriginalAsync(wall string) {
+	src := a.wallSource(wall)
+	if src == "" {
+		return
 	}
-	// 路径不存在要分清「文件真的没了」和「整个卷没挂上」：后者报的也是 ENOENT
-	if _, err := os.Lstat(filepath.Dir(src)); os.IsNotExist(err) {
-		return a.queueDelete(wall, src)
+	if a.sourceUnmounted(src) {
+		a.report(a.queueDelete(wall, src))
+		return
 	}
-	core.LogDeletion(a.paths.DeleteLog, src, int(a.minW), int(a.minH), core.ReasonManual)
-	a.appendLog(fmt.Sprintf("🔥 手动删除原图: %s", src))
-	_ = os.Remove(wall)
-	a.dropWall(wall)
-	a.toast = "已删除图库中的原图，并记进删除记录"
-	return nil
+	if a.update == nil {
+		a.report(a.deleteOriginal(wall))
+		return
+	}
+	if a.deletingWalls == nil {
+		a.deletingWalls = map[string]bool{}
+	}
+	if a.deletingWalls[wall] {
+		return
+	}
+	a.deletingWalls[wall] = true
+	go func() {
+		outcome, permErr := removeSourceWithTimeout(src, deleteSrcTimeout)
+		a.update(func() {
+			delete(a.deletingWalls, wall)
+			a.report(a.finishDeleteOriginal(wall, src, outcome, permErr))
+		})
+	}()
 }
 
 // dropWall 把一张从列表里去掉（不重新扫描，其余缩略图不变）。

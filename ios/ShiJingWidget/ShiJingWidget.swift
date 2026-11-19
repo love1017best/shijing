@@ -148,7 +148,8 @@ enum TimelineMaker {
         guard let mac = CurrentMac.load() else {
             return Timeline(entries: [Entry(problem: "打开拾景配对一台 Mac")], policy: .after(now.addingTimeInterval(3600)))
         }
-        let key = "\(mac.host):\(mac.port)"
+        let key = mac.cacheKey
+        let legacyKey = "\(mac.host):\(mac.port)"
         let accessory = context.family.isAccessory
 
         // 1. 状态和列表：在线就取新的并缓存，取不到用缓存
@@ -164,7 +165,7 @@ enum TimelineMaker {
             let state = try await c.state(timeout: fastTimeout)
             // 锁定屏幕上的功能小组件不用图，不拉列表
             let list = (photo || !accessory) ? (try? await c.wallpapers(timeout: fastTimeout)) : nil
-            let cachedList = WidgetCache.load(key)?.list
+            let cachedList = (WidgetCache.load(key) ?? (legacyKey != key ? WidgetCache.load(legacyKey) : nil))?.list
             snap = WidgetCache.Snapshot(state: state, list: list ?? cachedList, at: now)
             WidgetCache.save(snap!, key)
             client = c
@@ -172,7 +173,7 @@ enum TimelineMaker {
         } catch APIError.unauthorized {
             problem = "配对已失效，打开拾景重新配对"
         } catch {
-            snap = WidgetCache.load(key)
+            snap = WidgetCache.load(key) ?? (legacyKey != key ? WidgetCache.load(legacyKey) : nil)
             offlineSince = snap?.at
             if snap == nil {
                 problem = held ? "离线模式：手机上还没有缓存" : "连不上 \(mac.name)，Mac 可能睡着了或不在同一个网络"
@@ -249,7 +250,7 @@ enum TimelineMaker {
         } else {
             min(end, now.addingTimeInterval(photo ? 6 * 3600 : 30 * 60))
         }
-        WidgetCache.prune(keep: max(Self.poolTarget, allNames.count), online: client != nil)
+        WidgetCache.prune(keep: max(Self.poolTarget, allNames.count), activeKey: key, online: client != nil)
         return Timeline(entries: entries, policy: .after(next))
     }
 
@@ -285,23 +286,26 @@ enum TimelineMaker {
         for kind in kinds {
             if let data = try? await client.imageData(name, kind: kind, timeout: max(2, min(remaining, 12))),
                let jpeg = downsample(data, maxPixels: px) {
-                try? jpeg.write(to: file)
+                try? jpeg.write(to: file, options: .atomic)
                 return file
             }
         }
         return nil
     }
 
-    /// 解码时直接缩到目标尺寸，再存成 JPEG。
+    /// 解码时直接缩到目标尺寸，再存成 JPEG；用 autoreleasepool 及时回收中间位图，避免连续缩图顶破扩展 30MB 内存限制。
     private static func downsample(_ data: Data, maxPixels: Int) -> Data? {
-        guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-        let opts: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixels,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-        ]
-        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
-        return UIImage(cgImage: cg).jpegData(compressionQuality: 0.85)
+        autoreleasepool {
+            guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let opts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCache: false,
+            ]
+            guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+            return UIImage(cgImage: cg).jpegData(compressionQuality: 0.85)
+        }
     }
 }
 
@@ -356,13 +360,23 @@ enum WidgetCache {
     /// `keep` 传这一批壁纸的张数：缓存跟着这一批走，离线时整批都能轮。
     /// 在线时（`online`）顺手清掉 7 天没被轮到过的：换了档位、换了批次之后就再也用不上的那些。
     /// 离线时不动，免得把人不在电脑边时要用的缓存清空。
-    static func prune(keep: Int = 120, online: Bool = false) {
+    static func prune(keep: Int = 120, activeKey: String? = nil, online: Bool = false) {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
         let now = Date()
-        var live: [(URL, Date)] = []
-        for f in files where f.lastPathComponent.hasPrefix("img-") {
+        let activeStateName = activeKey.map { stateFile($0).lastPathComponent }
+        // 按像素档位分别记配额：不同尺寸的小组件同时刷新时互不驱逐
+        var byPx: [Int: [(URL, Date)]] = [:]
+        for f in files {
+            let name = f.lastPathComponent
             let mtime = (try? f.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if name.hasPrefix("state-"), name.hasSuffix(".json") {
+                if online, name != activeStateName, now.timeIntervalSince(mtime) > 7 * 86400 {
+                    try? fm.removeItem(at: f)
+                }
+                continue
+            }
+            guard name.hasPrefix("img-") else { continue }
             // 文件名末尾是像素档：早先版本留下的档位（比如 1600）现在的 `pixels()` 不会再算出来，留着只会白占地方
             let px = Int(f.deletingPathExtension().lastPathComponent.split(separator: "-").last ?? "") ?? 0
             if px < minPx || px > maxPx {
@@ -373,8 +387,12 @@ enum WidgetCache {
                 try? fm.removeItem(at: f)
                 continue
             }
-            live.append((f, mtime))
+            byPx[px, default: []].append((f, mtime))
         }
-        for (f, _) in live.sorted(by: { $0.1 > $1.1 }).dropFirst(max(0, keep)) { try? fm.removeItem(at: f) }
+        for group in byPx.values {
+            for (f, _) in group.sorted(by: { $0.1 > $1.1 }).dropFirst(max(0, keep)) {
+                try? fm.removeItem(at: f)
+            }
+        }
     }
 }

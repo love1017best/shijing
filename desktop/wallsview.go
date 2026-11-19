@@ -15,7 +15,8 @@ import (
 const (
 	browseThumbWidth = 240 // 壁纸页缩略图的宽度（像素）：格子最窄 168 DIP，够看又不占太多内存
 	browseMinCol     = 168 // 一格最窄多宽（DIP），据此算列数
-	browseBatch      = 48  // 每次后台解码几张，解完触发重绘再补下一批
+	browseBatch      = 48  // 每次后台解码几张（覆盖可视区及其上下缓冲）
+	browseMaxCached  = 240 // 壁纸页内存中最多常驻的缩略图张数，超出时淘汰视口外条目
 )
 
 func (a *app) wallsPage(c *ui.Context) {
@@ -67,7 +68,6 @@ func (a *app) wallsPage(c *ui.Context) {
 		a.endWallSelection()
 	}
 
-	a.loadBrowseThumbs(list)
 	// 编号按 all 的完整顺序算：和大图预览的「N / 总数」、数字键跳转对得上（筛选后也不变）
 	numbers := make(map[string]int, len(a.walls.all))
 	for i, p := range a.walls.all {
@@ -85,12 +85,35 @@ func (a *app) wallsPage(c *ui.Context) {
 	}
 	gridH = max(160, gridH)
 
+	visMin, visMax := len(list), -1
 	grid := ui.GridView(c, &a.wallGrid, len(list), browseMinCol, cellH, func(i int) {
+		if i < visMin {
+			visMin = i
+		}
+		if i > visMax {
+			visMax = i
+		}
 		a.wallCell(c, list[i], numbers[list[i]])
 	}).Height(gridH)
 	if a.running {
 		grid.Disabled(true).Opacity(0.4).Tooltip("正在更换壁纸，当前显示上一批")
 	}
+	// 只解码可视区及上下缓冲内的缩略图，避免几千张壁纸全量解码常驻内存
+	if visMax < visMin {
+		visMin, visMax = 0, min(len(list)-1, browseBatch-1)
+	}
+	loadStart := max(0, visMin-browseBatch/2)
+	loadEnd := min(len(list), visMax+1+browseBatch/2)
+	keepStart := max(0, visMin-browseBatch*2)
+	keepEnd := min(len(list), visMax+1+browseBatch*2)
+	var keepSet map[string]bool
+	if len(a.walls.browse) > browseMaxCached {
+		keepSet = make(map[string]bool, keepEnd-keepStart)
+		for _, p := range list[keepStart:keepEnd] {
+			keepSet[p] = true
+		}
+	}
+	a.loadBrowseThumbs(list[loadStart:loadEnd], keepSet)
 	a.wallsSelectionBar(c, list)
 }
 

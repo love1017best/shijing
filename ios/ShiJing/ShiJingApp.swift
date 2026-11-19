@@ -31,6 +31,18 @@ struct ShiJingApp: App {
 /// 顶层：没配对过任何 Mac 时整屏是「找 Mac / 配对」；配对过之后是三个标签——概览、设置、记录，
 /// 对应电脑上侧边栏的概览 / 设置 / 删除记录（iPad、展开的内屏上系统把标签栏放在顶部，不占侧边）。
 /// 切换、添加、移除 Mac 收在概览的标题菜单里（点顶部的 Mac 名字）——这些只在第一次装的时候用，不值得常驻一个侧栏。
+private struct TabActiveKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    /// 当前标签页（或分页子栏）是否处于可见状态，用于在切走后暂停后台轮询与横幅轮播。
+    var isTabActive: Bool {
+        get { self[TabActiveKey.self] }
+        set { self[TabActiveKey.self] = newValue }
+    }
+}
+
 enum RootTab: Hashable {
     case overview, settings, records
 
@@ -156,6 +168,7 @@ struct RootView: View {
             DashboardView(session: session, store: store)
                 .macTitleMenu(store: store, discovery: discovery)
         }
+        .environment(\.isTabActive, tab == .overview)
     }
 
     private func settingsStack(_ session: RemoteSession) -> some View {
@@ -173,10 +186,12 @@ struct RootView: View {
             SettingsPage(session: session)
             #endif
         }
+        .environment(\.isTabActive, tab == .settings)
     }
 
     private func recordsStack(_ session: RemoteSession) -> some View {
         NavigationStack { RecordsPage(session: session) }
+            .environment(\.isTabActive, tab == .records)
     }
 
     /// 选中的 Mac 变了或重新配对了：换一个连接。

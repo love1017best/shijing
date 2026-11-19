@@ -68,6 +68,25 @@ func TestThumbCache(t *testing.T) {
 	if entries, _ := os.ReadDir(thumbCacheDir); len(entries) != 1 {
 		t.Fatalf("清理后应只剩 a 现在的那份，实际 %d", len(entries))
 	}
+	// 软链接断网：所有文件 stat 失败时跳过清理，保留本地缓存
+	pruneThumbCache([]string{filepath.Join(dir, "missing-1.png"), filepath.Join(dir, "missing-2.png")})
+	if entries, _ := os.ReadDir(thumbCacheDir); len(entries) != 1 {
+		t.Fatalf("全部 stat 失败时不应清空缓存，实际剩 %d", len(entries))
+	}
+	// 1 分钟内的 .tmp-* 不误删，超过 1 分钟的残留 .tmp-* 应清掉
+	freshTmp := filepath.Join(thumbCacheDir, ".tmp-fresh")
+	staleTmp := filepath.Join(thumbCacheDir, ".tmp-stale")
+	os.WriteFile(freshTmp, []byte("x"), 0o644)
+	os.WriteFile(staleTmp, []byte("x"), 0o644)
+	old := time.Now().Add(-2 * time.Minute)
+	os.Chtimes(staleTmp, old, old)
+	pruneThumbCache([]string{a})
+	if _, err := os.Stat(freshTmp); err != nil {
+		t.Fatalf("刚创建的 .tmp-* 不应被删: %v", err)
+	}
+	if _, err := os.Stat(staleTmp); !os.IsNotExist(err) {
+		t.Fatalf("过期 .tmp-* 应当被清理: %v", err)
+	}
 }
 
 func TestPreviewDecodesOneAtATime(t *testing.T) {

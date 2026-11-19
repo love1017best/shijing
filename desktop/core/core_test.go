@@ -198,7 +198,7 @@ func TestSampleBalancedShuffle(t *testing.T) {
 	for i := range 20 {
 		writePNG(t, filepath.Join(src, fmt.Sprintf("f%02d", i), "a.png"), 80, 40)
 	}
-	_, grouped, order := scanImages([]string{src}, nil, tw, th, nil)
+	_, grouped, order := scanImages([]string{src}, nil, tw, th, nil, nil)
 	if len(grouped) != 20 {
 		t.Fatalf("叶子文件夹数 %d", len(grouped))
 	}
@@ -489,7 +489,7 @@ func TestScanImagesKeepsOrderWithParallelChecks(t *testing.T) {
 			}
 		}
 	})
-	all, grouped, leaves := scanImages([]string{root}, map[string]bool{resolvePath(root): true}, tw, th, nil)
+	all, grouped, leaves := scanImages([]string{root}, map[string]bool{resolvePath(root): true}, tw, th, nil, nil)
 	var got []string
 	for _, img := range all {
 		got = append(got, img.path)
@@ -866,5 +866,36 @@ func TestSortImagesIncrementalDryRunThenDelete(t *testing.T) {
 	}
 	if _, err := os.Stat(good); err != nil {
 		t.Fatalf("合格原图应保留: %v", err)
+	}
+}
+
+// 扫描阶段响应停止信号：立即中止遍历并返回 ErrCanceled，且不清空现有壁纸目录。
+func TestCopySamplesCancelsDuringScan(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dest := filepath.Join(root, "dest")
+	for i := range 20 {
+		writePNG(t, filepath.Join(src, fmt.Sprintf("d%02d", i), "a.png"), 80, 40)
+	}
+	existing := filepath.Join(dest, "keep.png")
+	writePNG(t, existing, 80, 40)
+
+	var stopped atomic.Bool
+	rep := Reporter{
+		Progress: func(stage Stage, done, _ int) {
+			if stage == StageScan && done >= 2 {
+				stopped.Store(true)
+			}
+		},
+		Stop: stopped.Load,
+	}
+	_, err := CopySamples(CopyOptions{
+		Sources: []string{src}, Dest: dest, Num: 5, Mode: "copy", MinWidth: tw, MinHeight: th,
+	}, rep, nil)
+	if !errors.Is(err, ErrCanceled) {
+		t.Fatalf("扫描阶段停止应返回 ErrCanceled，实际 %v", err)
+	}
+	if _, err := os.Stat(existing); err != nil {
+		t.Fatalf("扫描阶段取消不应清空现有壁纸目录: %v", err)
 	}
 }

@@ -16,6 +16,8 @@ struct DashboardView: View {
     @State private var showAll = false
     /// 横幅轮播现在显示的那张（nil = 电脑指定的横幅 `session.hero`）。见 `rotateHero`
     @State private var slideName: String?
+    @Environment(\.isTabActive) private var tabActive
+    @Environment(\.scenePhase) private var scenePhase
 
     /// 内容区宽于这个值时分两栏（按实际宽度判断，不按机型写死）
     private static let twoColumnWidth: CGFloat = 680
@@ -31,7 +33,10 @@ struct DashboardView: View {
                 WallPreview(session: session, startName: w.name)
             }
             .navigationDestination(isPresented: $showAll) { AllWallpapersView(session: session) }
-            .task { await rotateHero() }
+            .task(id: "\(tabActive)|\(scenePhase == .active)") {
+                guard tabActive, scenePhase == .active else { return }
+                await rotateHero()
+            }
             .onChange(of: session.wallsRev) { slideName = nil } // 换了一批：从电脑指定的横幅重新开始
             // 小组件点进来：要看的那张（壁纸列表可能还没拉到，拉到了再打开）
             .onChange(of: session.openRequest, initial: true) { openRequested() }
@@ -206,7 +211,7 @@ struct DashboardView: View {
             try? await Task.sleep(for: .seconds(10))
             if Task.isCancelled { return }
             let walls = session.walls
-            guard appActive, previewing == nil, !showAll, session.state?.running != true,
+            guard tabActive, scenePhase == .active, previewing == nil, !showAll, session.state?.running != true,
                   !ProcessInfo.processInfo.isLowPowerModeEnabled, walls.count > 1 else { continue }
             let start = shownHero.flatMap { cur in walls.firstIndex { $0.name == cur.name } } ?? 0
             for step in 1...min(5, walls.count - 1) {
@@ -219,15 +224,6 @@ struct DashboardView: View {
                 break
             }
         }
-    }
-
-    /// App 在前台。轮播的循环一直跑着，`@Environment(\.scenePhase)` 在里面读到的是任务开始时的值，所以直接问系统。
-    private var appActive: Bool {
-        #if os(iOS)
-        UIApplication.shared.applicationState == .active
-        #else
-        true
-        #endif
     }
 
     /// 横幅卡上的信息块：有横幅图时是一块液态玻璃（iOS 26 起），没图时退回内容区底色

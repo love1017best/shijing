@@ -137,10 +137,12 @@ type app struct {
 
 	page      string
 	prevPage  string // 上一帧的页面：切页时把开着的说明气泡收起来
-	filter    dirPanel
-	sample    dirPanel
-	mounts    map[string]mountState
-	logShown  bool
+	filter       dirPanel
+	sample       dirPanel
+	mounts       map[string]mountState
+	mountProbing map[string]bool // 正在后台执行 stat 的目录（按 mountKey 规范化），防止挂起卷重复泄漏线程
+	mountSeq     map[string]int  // 每个目录的探测序号，防止旧探针乱序覆盖新状态
+	logShown     bool
 	logReveal bool // 下一帧把日志滚到可见处（错误卡片的「查看日志」）
 	log       []string
 	logList   ui.ListState
@@ -229,6 +231,8 @@ type app struct {
 	pendingShown    bool // 「待删除的原图」弹层
 	pendingMu       sync.Mutex
 	pendingCanceled map[string]bool // 后台 RunPending 执行期间被取消的路径
+	deletingWalls   map[string]bool // 正在后台删除 NAS 原图的壁纸路径，防重复点击
+	stopTimers      func()          // 退出前停止后台定时器（main.go 注入）
 }
 
 func newApp(cfgPath string, paths core.Paths) *app {
@@ -548,32 +552,92 @@ func (a *app) lastLogLine() string {
 
 // ── 挂载状态 ──────────────────────────────────────────────────────────────
 
+const mountProbeTimeout = 3 * time.Second
+
+// mountKey 把配置里的目录路径规范化（展开 ~、清理冗余斜杠和末尾 /），
+// 保证 mounts / mountProbing / sourceUnmounted 的读写 key 始终一致。
+func mountKey(dir string) string {
+	d := filepath.Clean(core.ExpandUser(dir))
+	if d != "/" {
+		d = strings.TrimRight(d, "/")
+	}
+	return d
+}
+
+func (a *app) mountStateOf(dir string) mountState {
+	if s, ok := a.mounts[mountKey(dir)]; ok {
+		return s
+	}
+	return a.mounts[dir]
+}
+
+func (a *app) setMountState(dir string, st mountState) {
+	a.mounts[mountKey(dir)] = st
+}
+
 // checkMounts 在后台检查每个源目录是否可访问。网络卷卡住时 stat 可能阻塞很久，
-// 所以每个目录单独一个 goroutine，3 秒没结果就标成「无响应」。
+// 所以每个目录单独一个 goroutine，3 秒没结果就标成「无响应」；同时按目录对在途探测去重，
+// 防止每分钟定时检查对已挂起卷反复泄漏阻塞在内核 stat 里的线程。
 func (a *app) checkMounts() {
-	for _, d := range a.allDirs() {
-		a.mounts[d] = mountUnknown
-		go func() {
-			state := probeMount(a.statDir, d)
-			a.update(func() {
-				a.mounts[d] = state
-				a.maybeProcessPending() // 图库挂上来了就把排队的删除执行掉
-			})
-		}()
+	if a.mountProbing == nil {
+		a.mountProbing = map[string]bool{}
+	}
+	if a.mountSeq == nil {
+		a.mountSeq = map[string]int{}
+	}
+	for _, raw := range a.allDirs() {
+		key := mountKey(raw)
+		if a.mountProbing[key] {
+			continue
+		}
+		a.mountProbing[key] = true
+		a.mountSeq[key]++
+		seq := a.mountSeq[key]
+		a.mounts[key] = mountUnknown
+		dir := core.ExpandUser(raw)
+		stat := a.statDir
+		go func(dir, key string, seq int) {
+			done := make(chan bool, 1)
+			go func() {
+				ok := stat(dir)
+				done <- ok
+				a.update(func() {
+					delete(a.mountProbing, key)
+					if a.mountSeq[key] != seq {
+						return
+					}
+					if ok {
+						a.mounts[key] = mountOK
+					} else {
+						a.mounts[key] = mountMissing
+					}
+					a.maybeProcessPending() // 图库挂上来了就把排队的删除执行掉
+				})
+			}()
+			select {
+			case <-done:
+			case <-time.After(mountProbeTimeout):
+				a.update(func() {
+					if a.mountSeq[key] == seq {
+						a.mounts[key] = mountSlow
+					}
+				})
+			}
+		}(dir, key, seq)
 	}
 }
 
 // probeMount 检查一个目录能不能访问（会阻塞，最多 3 秒）。
 func probeMount(stat func(string) bool, d string) mountState {
 	result := make(chan bool, 1)
-	go func() { result <- stat(d) }()
+	go func() { result <- stat(core.ExpandUser(d)) }()
 	select {
 	case ok := <-result:
 		if ok {
 			return mountOK
 		}
 		return mountMissing
-	case <-time.After(3 * time.Second):
+	case <-time.After(mountProbeTimeout):
 		return mountSlow
 	}
 }
@@ -581,7 +645,7 @@ func probeMount(stat func(string) bool, d string) mountState {
 func (a *app) unmountedCount() int {
 	n := 0
 	for _, d := range a.allDirs() {
-		if s := a.mounts[d]; s == mountMissing || s == mountSlow {
+		if s := a.mountStateOf(d); s == mountMissing || s == mountSlow {
 			n++
 		}
 	}
@@ -606,7 +670,7 @@ func (a *app) addDir(p *dirPanel) {
 			return
 		}
 		*p.dirs = append(*p.dirs, path)
-		a.mounts[path] = mountOK // 刚从对话框选出来，一定可访问
+		a.setMountState(path, mountOK) // 刚从对话框选出来，一定可访问
 	})
 }
 
@@ -619,7 +683,7 @@ func (a *app) addDropped(p *dirPanel, paths []string) {
 			continue
 		}
 		*p.dirs = append(*p.dirs, path)
-		a.mounts[path] = mountOK
+		a.setMountState(path, mountOK)
 		added++
 	}
 	switch {

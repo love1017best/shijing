@@ -207,6 +207,14 @@ func TestRemotePairingAndAuth(t *testing.T) {
 	if code, _ := h.do(t, "POST", "/api/pair/finish", "", map[string]string{"code": pin}); code != 410 {
 		t.Fatalf("作废后再输对 = %d，应该要重新开始", code)
 	}
+	// 输错满次后进入冷却期，不能立刻重新刷配对码绕过锁定
+	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": "坏人的手机"}); code != 429 {
+		t.Fatalf("输错满次冷却期内应返回 429，实际 %d", code)
+	}
+	future := time.Now().Add(pairFailCooldown + time.Second)
+	h.remote.mu.Lock()
+	h.remote.now = func() time.Time { return future }
+	h.remote.mu.Unlock()
 
 	tok := h.pair(t, "小明的 iPhone")
 	if code, data := h.do(t, "GET", "/api/info", tok, nil); code != 200 || data["paired"] != true {
@@ -424,6 +432,50 @@ func TestRemoteEventsStream(t *testing.T) {
 	click(t, h.tt, "设置")
 	h.tt.SetSize(1040, 1800)
 	h.settle(t, h.tt, func() bool { _, ok := h.tt.Access("已连接"); return ok })
+
+	// 取消配对后，空闲的 SSE 连接应当立刻断开
+	h.remote.unpair("iPhone")
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatal("取消配对后不应继续推送状态事件")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("取消配对后空闲 SSE 连接未及时断开")
+	}
+}
+
+func TestRemotePairStartGuardsAndWallsRevHero(t *testing.T) {
+	h := newRemoteHarness(t)
+	// 正在显示扫码配对时，外部 /api/pair/start 不能覆盖
+	h.remote.startPair("", "", true)
+	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": "抢占者"}); code != 409 {
+		t.Fatalf("扫码配对进行中应返回 409，实际 %d", code)
+	}
+	h.remote.cancelPair()
+
+	// 手动配对输错 1 次后，不能通过再次 /api/pair/start 清零错误次数
+	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": "iPhone"}); code != 200 {
+		t.Fatalf("首次 pair/start = %d", code)
+	}
+	_, pin, _ := h.remote.currentPair()
+	wrong := "000000"
+	if pin == wrong {
+		wrong = "111111"
+	}
+	if code, _ := h.do(t, "POST", "/api/pair/finish", "", map[string]string{"code": wrong}); code != 403 {
+		t.Fatalf("输错应返回 403，实际 %d", code)
+	}
+	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": "iPhone"}); code != 429 {
+		t.Fatalf("有错误记录时重刷 pair/start 应返回 429，实际 %d", code)
+	}
+
+	// wallsRev 应包含 heroPath，换横幅后指纹必须变化
+	r1 := wallsRev([]string{"/tmp/a.jpg", "/tmp/b.jpg"}, "/tmp/a.jpg")
+	r2 := wallsRev([]string{"/tmp/a.jpg", "/tmp/b.jpg"}, "/tmp/b.jpg")
+	if r1 == r2 {
+		t.Fatalf("横幅变化后 wallsRev 未变化: %s", r1)
+	}
 }
 
 func TestRemoteHandlerRejectsBadJSON(t *testing.T) {

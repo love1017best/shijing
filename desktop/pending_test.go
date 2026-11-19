@@ -166,3 +166,33 @@ func TestPendingApplyMergesConcurrentChanges(t *testing.T) {
 		t.Fatalf("应只保留新入队的 c，不能复活 b 或丢掉 c: %+v", f.pending)
 	}
 }
+
+// 带末尾斜杠的配置目录也能正确命中挂载表，且在途探测未结束时不会重复拉起 statDir。
+func TestMountKeyNormalizationAndProbeDedup(t *testing.T) {
+	f, tt := newFakeApp(t)
+	release := make(chan struct{})
+	calls := make(chan string, 4)
+	f.statDir = func(dir string) bool {
+		calls <- dir
+		<-release
+		return false
+	}
+	f.cfg.SampleOnlyDirs = []string{"/Volumes/Offline/Fav/"}
+	f.checkMounts()
+	f.checkMounts() // 第一次还在阻塞，第二次应去重
+	select {
+	case <-calls:
+	case <-time.After(time.Second):
+		t.Fatal("应当发起一次 statDir")
+	}
+	select {
+	case dup := <-calls:
+		t.Fatalf("在途探测未完成时不应重复探测: %s", dup)
+	case <-time.After(80 * time.Millisecond):
+	}
+	close(release)
+	f.settle(t, tt, func() bool { return f.unmountedCount() == 1 })
+	if !f.sourceUnmounted("/Volumes/Offline/Fav/a.jpg") {
+		t.Fatal("带末尾斜杠的目录应正确命中 sourceUnmounted")
+	}
+}

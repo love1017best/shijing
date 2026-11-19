@@ -78,6 +78,8 @@ enum Keychain {
 
 /// App 里选中的那台 Mac，给小组件和快捷指令用。
 struct CurrentMac: Codable, Equatable {
+    /// Mac 的固定标识（旧版本钥匙串记录没有这个字段，解码时为 nil）
+    var id: UUID?
     var name: String
     var host: String
     var port: Int
@@ -86,6 +88,9 @@ struct CurrentMac: Codable, Equatable {
     private static let account = "current-mac"
 
     var address: MacAddress { MacAddress(host: host, port: port) }
+
+    /// 小组件缓存用的稳定键：优先按 Mac 的固定 ID，换 IP 或端口不断档；旧记录退回 host:port
+    var cacheKey: String { id?.uuidString ?? "\(host):\(port)" }
 
     func client() throws -> APIClient { try APIClient(address: address, token: token) }
 

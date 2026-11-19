@@ -46,29 +46,6 @@ func main() {
 		}
 		a.remote.host = computerName()
 		a.remote.advertise = advertiseBonjour
-		// 定时自动换壁纸：每分钟回主线程检查一次（关窗只是隐藏，应用仍在运行）。
-		// 有待删原图排队时顺手再查一遍图库挂上没、挂上了就执行。
-		go func() {
-			for now := range time.Tick(time.Minute) {
-				a.update(func() {
-					a.maybeProcessPending()
-					if len(a.pending) > 0 {
-						a.checkMounts()
-					}
-					a.maybeAutoRun(now)
-				})
-			}
-		}()
-		// 概览横幅轮播：窗口显示着才换（隐藏时不解码、不重画）
-		go func() {
-			for range time.Tick(heroInterval) {
-				win.Update(func() {
-					if win.IsVisible() {
-						a.advanceHero()
-					}
-				})
-			}
-		}()
 		a.version = mygo.App.Version()
 		a.pickDir = func(title string) string {
 			paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
@@ -126,6 +103,51 @@ func main() {
 			Content:         ui.View(a.view),
 		})
 		a.showWindow = func() { a.showMain(win) }
+		stopCh := make(chan struct{})
+		a.stopTimers = func() {
+			select {
+			case <-stopCh:
+			default:
+				close(stopCh)
+			}
+		}
+		// 定时自动换壁纸：必须在 win 初始化完成后再启动，避免与 win 赋值发生数据竞争。
+		// 有待删原图排队时顺手再查一遍图库挂上没、挂上了就执行。
+		go func() {
+			tk := time.NewTicker(time.Minute)
+			defer tk.Stop()
+			for {
+				select {
+				case <-stopCh:
+					return
+				case now := <-tk.C:
+					a.update(func() {
+						a.maybeProcessPending()
+						if len(a.pending) > 0 {
+							a.checkMounts()
+						}
+						a.maybeAutoRun(now)
+					})
+				}
+			}
+		}()
+		// 概览横幅轮播：窗口显示着才换（隐藏时不解码、不重画）
+		go func(w *mygo.Window) {
+			tk := time.NewTicker(heroInterval)
+			defer tk.Stop()
+			for {
+				select {
+				case <-stopCh:
+					return
+				case <-tk.C:
+					w.Update(func() {
+						if w.IsVisible() {
+							a.advanceHero()
+						}
+					})
+				}
+			}
+		}(win)
 		setupBackground(a, win)
 		setupMenu(a, win)
 		setupTray(a)

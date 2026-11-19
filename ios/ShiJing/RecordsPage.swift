@@ -17,6 +17,7 @@ enum RecordsGroup: String, CaseIterable {
 /// 选过哪一栏会记住——原来是指向三个二级页的菜单，用户觉得没必要多这一层（v0.3.171）。
 struct RecordsPage: View {
     let session: RemoteSession
+    @Environment(\.isTabActive) private var tabActive
     @AppStorage("recordsGroup") private var groupRaw = RecordsGroup.log.rawValue
     /// 显示过的栏：没显示过的不构建、也不发请求（三页各有各的）
     @State private var seenGroups: Set<String> = []
@@ -103,6 +104,7 @@ struct RecordsPage: View {
         Group {
             if builtGroups.contains(g.rawValue) { content() }
         }
+        .environment(\.isTabActive, tabActive && groupRaw == g.rawValue)
         .contentWidthCap(max: 680)
         .tag(g.rawValue)
     }
@@ -199,6 +201,8 @@ struct LogView: View {
     @State private var error: String?
     /// 显示的是存下来的副本时，那份是什么时候同步的
     @State private var syncedAt: Date?
+    @Environment(\.isTabActive) private var tabActive
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -239,11 +243,13 @@ struct LogView: View {
                 ProgressView()
             }
         }
-        .task(id: "\(session.state?.running ?? false)|\(session.offline)") {
+        .task(id: "\(session.state?.running ?? false)|\(session.offline)|\(tabActive)|\(scenePhase == .active)") {
+            guard tabActive, scenePhase == .active else { return }
             repeat {
                 await load()
+                guard session.state?.running == true, !session.offline, !Task.isCancelled else { break }
                 try? await Task.sleep(for: .seconds(2))
-            } while session.state?.running == true && !session.offline && !Task.isCancelled
+            } while !Task.isCancelled
         }
         .refreshable { await load() }
     }

@@ -46,6 +46,14 @@ final class RemoteSession {
     private var networkDown = false
     /// 手机现在只有蜂窝网络（没有 Wi‑Fi、有线）
     internal(set) var cellularOnly = false
+    /// 是否已经收到过一次 pathMonitor 回调（冷启动时等首帧，避免抢先发起蜂窝连接）
+    private var pathReady = false
+    /// start() 调用时 pathMonitor 首帧尚未到达，首帧到位后再按真实网络状态决定是否连接
+    private var pendingStart = false
+    /// 等待 pathMonitor 首帧的短超时兜底任务
+    private var pathWaitTask: Task<Void, Never>?
+    /// 离线模式变更通知观察者（deinit 时移除）
+    @ObservationIgnored nonisolated(unsafe) private var offlineObserver: NSObjectProtocol?
     /// 因离线模式断开的（不是连不上）：退出离线模式时要重新连
     private var held = false
     /// 上次把快照写到磁盘的时间（运行中状态更新很密，最多 5 秒写一次）
@@ -79,7 +87,7 @@ final class RemoteSession {
             Task { @MainActor [weak self] in self?.networkChanged(ok, cellular: cellular) }
         }
         pathMonitor.start(queue: .global(qos: .utility))
-        NotificationCenter.default.addObserver(forName: OfflineMode.changed, object: nil, queue: .main) { [weak self] _ in
+        offlineObserver = NotificationCenter.default.addObserver(forName: OfflineMode.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.applyHold() }
         }
     }
@@ -96,6 +104,9 @@ final class RemoteSession {
     private func applyHold() {
         guard !isUnpaired else { return }
         if let hold {
+            pendingStart = false
+            pathWaitTask?.cancel()
+            pathWaitTask = nil
             task?.cancel()
             task = nil
             if !held { ImageStore.shared.cancelPrefetch() }
@@ -121,32 +132,46 @@ final class RemoteSession {
 
     deinit {
         pathMonitor.cancel()
+        if let offlineObserver {
+            NotificationCenter.default.removeObserver(offlineObserver)
+        }
     }
 
     /// 手机的网络状态变了：断了就立刻显示离线并停掉卡住的事件流；恢复后重新连。
     private func networkChanged(_ ok: Bool, cellular: Bool) {
-        if cellularOnly != cellular {
-            cellularOnly = cellular
-            if ok, !networkDown {
-                applyHold()
-                return
-            }
+        pathReady = true
+        pathWaitTask?.cancel()
+        pathWaitTask = nil
+        let prevCellular = cellularOnly
+        let prevDown = networkDown
+        cellularOnly = cellular
+        if !ok {
+            pendingStart = false
+            networkDown = true
+            guard !isUnpaired else { return }
+            connection = .offline("手机未连接网络。")
+            task?.cancel()
+            task = nil
+            return
         }
-        if ok {
-            guard networkDown else { return }
-            networkDown = false
-            if hold != nil { applyHold(); return }
+        networkDown = false
+        if hold != nil {
+            applyHold()
+            return
+        }
+        if held {
+            applyHold()
+            return
+        }
+        // 冷启动等首帧就绪、断网恢复、或关闭蜂窝离线后从蜂窝切回 Wi‑Fi 时，立即唤醒退避等待重连
+        let switchedToWiFi = prevCellular && !cellular && connection != .live
+        if pendingStart || prevDown || switchedToWiFi {
+            pendingStart = false
             if paused { return } // 后台时不主动连，回前台再 start
             guard !isUnpaired else { return }
             connection = .connecting
             start()
-            return
         }
-        networkDown = true
-        guard !isUnpaired else { return }
-        connection = .offline("手机未连接网络。")
-        task?.cancel()
-        task = nil
     }
 
     private var isUnpaired: Bool {
@@ -176,6 +201,26 @@ final class RemoteSession {
     func start() {
         paused = false
         if hold != nil { applyHold(); return }
+        // 开了「使用蜂窝网络时离线」且 pathMonitor 尚未给出首帧：短暂等待首帧，避免冷启动先发起一次蜂窝连接
+        if !pathReady, OfflineMode.shared.prefs.onCellular {
+            #if DEBUG
+            if Self.demoMode != nil { return }
+            #endif
+            pendingStart = true
+            if connection == .live { connection = .connecting }
+            pathWaitTask?.cancel()
+            pathWaitTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard let self, !Task.isCancelled, self.pendingStart, !self.paused else { return }
+                self.pathReady = true
+                self.pendingStart = false
+                self.start()
+            }
+            return
+        }
+        pendingStart = false
+        pathWaitTask?.cancel()
+        pathWaitTask = nil
         held = false
         // 回到前台、点了「重试」：事件流连上、收到第一份状态之前都按「正在连接」算。
         // 以前这里不动连接状态，手机在后台时 Mac 走了、回前台后还显示着「已连接」，
@@ -214,6 +259,9 @@ final class RemoteSession {
     /// App 进入后台时断开，回前台再连。
     func pause() {
         paused = true
+        pendingStart = false
+        pathWaitTask?.cancel()
+        pathWaitTask = nil
         task?.cancel()
         task = nil
     }
@@ -495,16 +543,16 @@ final class RemoteSession {
             return
         }
         do {
-            // 在线时下载到临时目录、用完删掉；离线用的是缓存里的，不能删
+            // 优先复用手机上已经缓存的原图；没有缓存时在线下载到临时子目录、用完删掉
             var temp: URL?
             let file: URL
-            if live {
+            if let cached {
+                file = cached
+            } else {
                 file = try await client().downloadOriginal(w.name)
                 temp = file
-            } else {
-                file = cached!
             }
-            defer { if let temp { try? FileManager.default.removeItem(at: temp) } }
+            defer { if let temp { try? FileManager.default.removeItem(at: temp.deletingLastPathComponent()) } }
             try await PHPhotoLibrary.shared().performChanges {
                 let opts = PHAssetResourceCreationOptions()
                 opts.originalFilename = w.name

@@ -202,10 +202,13 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 	var dirs []found
 	seen := 0
 	for _, source := range o.Sources {
+		if rep.stopped() {
+			break
+		}
 		if !exists(source) {
 			continue
 		}
-		walk(source, func(root string, _ []string, files []string) {
+		walkStop(source, rep.stopped, func(root string, _ []string, files []string) {
 			seen++
 			rep.progress(StageFilter, seen, 0)
 			var images []string
@@ -277,8 +280,12 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 		processedDirs++
 		logf("\n📂 处理文件夹: %s", rel)
 		dirDelete := 0
-		var kept []string                                               // 不合格但没删掉的
-		ok, reasons := checkVerdicts(d.images, o.MinWidth, o.MinHeight) // 并发读文件头，删除和日志仍按顺序串行
+		var kept []string                                                              // 不合格但没删掉的
+		ok, reasons := checkVerdictsStop(d.images, o.MinWidth, o.MinHeight, rep.stopped) // 并发读文件头，删除和日志仍按顺序串行
+		if rep.stopped() {
+			logf("\n⏹️ 已停止筛选，剩下的文件夹下次再检查")
+			break
+		}
 		for k, file := range d.images {
 			totalImages++
 			name := filepath.Base(file)

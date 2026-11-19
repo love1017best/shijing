@@ -632,7 +632,7 @@ struct WallPreview: View {
                 if let n = await session.undoRemove(), walls.contains(where: { $0.name == n }) { go(to: n) }
             }
         }
-        .disabled(session.acting != nil || session.state?.running == true)
+        .disabled(session.acting != nil || (!session.offline && session.state?.running == true))
     }
 
     /// 宽屏竖屏时顶栏右边这一组（照系统相册）：分享、一块玻璃里三个整理操作、红色的删除。
@@ -963,6 +963,8 @@ private struct FilmStrip: View {
     @State private var pos: String?
     /// 正在跟着大图滚动（不是手指拖的），这段时间里滚过的缩略图不算选中
     @State private var following = false
+    /// 延时解除 following 的任务：连续翻页时取消上一次，避免过早复位引发回跳
+    @State private var followTask: Task<Void, Never>?
 
     private static let thumb = CGSize(width: 44, height: 30)
 
@@ -985,10 +987,16 @@ private struct FilmStrip: View {
             guard pos != new else { return }
             following = true
             withAnimation(.easeOut(duration: 0.25)) { pos = new }
-            Task {
+            followTask?.cancel()
+            followTask = Task {
                 try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled else { return }
                 following = false
             }
+        }
+        .onDisappear {
+            followTask?.cancel()
+            followTask = nil
         }
         .onChange(of: pos) { _, new in
             if let new, new != current, !following { onSelect(new) }

@@ -12,11 +12,11 @@
 #   1. 先提交好自己的改动再跑：暂存区必须是空的；版本号文件不能有没提交的改动。
 #      工作区里别的没提交的文件（多半是另一个会话正在改的）不碰、不提交、也不会被打包进去。
 #   2. 和 origin/main 同步（只快进；本地有没推送的提交时 rebase，需要工作区干净）。
-#   3. 在临时 worktree（detached，从同步后的 HEAD 开）里：bump-version.sh 升 Z、跑 go test、只提交版本号文件、
-#      打 tag，用 --atomic 一次推送 main 和 tag；另一个会话抢先发布时推送被拒，丢掉这个 worktree 同步后重来（最多 3 次）。
+#   3. 在临时 worktree（detached，从同步后的 HEAD 开）里：bump-version.sh 升 Z、跑 go test -race 和 mygo vet、
+#      跑 iOS 模拟器构建检查、构建两个 dmg——全部通过后再只提交版本号文件、打 tag，用 --atomic 一次推送 main 和 tag；
+#      任一步失败都不会在远端留下半成品 tag。另一个会话抢先发布时推送被拒，丢掉这个 worktree 同步后重来（最多 3 次）。
 #      推送成功后本地 main 快进到这个提交。
-#   4. 还在这个 worktree 里构建两个 dmg、跑 iOS 模拟器构建检查：发布包严格等于 tag 的内容，
-#      不受工作区里没提交的改动影响。
+#   4. 发布包在临时 worktree 里基于即将推送的提交构建，严格等于 tag 的内容，不受工作区里没提交的改动影响。
 #   5. gh release create，然后用这个 dmg 装到本机并启动；连着 iPhone / iPad 时把同一个 tag 的 iOS 版也装上。
 set -euo pipefail
 zmodload zsh/datetime # EPOCHREALTIME（计时用）
@@ -88,12 +88,29 @@ for attempt in 1 2 3; do
 		VERSION=""
 		continue
 	fi
-	(cd "$WT/desktop" && CGO_ENABLED=0 go test ./... >/dev/null) || { echo "测试没过，没有发布"; exit 1; }
+	echo "运行 Go 测试（-race）与 vet…"
+	t0=$EPOCHREALTIME
+	(cd "$WT/desktop" && go test -race ./... >/dev/null && go tool mygo vet) || { echo "测试或 vet 没过，没有发布"; exit 1; }
+	printf 'Go 测试与 vet：%.1f 秒\n' $((EPOCHREALTIME - t0))
+
+	[[ -f "$ROOT/ios/ShiJing/Local.xcconfig" ]] && command cp -f "$ROOT/ios/ShiJing/Local.xcconfig" "$WT/ios/ShiJing/" # 签名团队 ID（不进仓库）
+	echo "iOS 模拟器构建检查…"
+	t0=$EPOCHREALTIME
+	(cd "$WT/ios" && xcodebuild -project ShiJing.xcodeproj -scheme ShiJing -destination 'generic/platform=iOS Simulator' \
+		-derivedDataPath build-sim build -quiet >build-sim.log 2>&1) || { grep -m5 error "$WT/ios/build-sim.log"; echo "iOS 构建失败，没有推送 tag"; exit 1; }
+	printf 'iOS 模拟器构建：%.1f 秒\n' $((EPOCHREALTIME - t0))
+
+	echo "构建 dmg（arm64、通用版）…"
+	t0=$EPOCHREALTIME
+	(cd "$WT/desktop" && go tool mygo build -skip-notarize >build-arm64.log 2>&1) || { tail -20 "$WT/desktop/build-arm64.log"; echo "arm64 dmg 构建失败，没有推送 tag"; exit 1; }
+	(cd "$WT/desktop" && go tool mygo build -skip-notarize -platform darwin/universal >build-universal.log 2>&1) || { tail -20 "$WT/desktop/build-universal.log"; echo "通用版 dmg 构建失败，没有推送 tag"; exit 1; }
+	printf '两个 dmg：%.1f 秒\n' $((EPOCHREALTIME - t0))
+
 	git -C "$WT" commit -q -m "release(拾景): v$VERSION" -- $VERSION_FILES
 	git -C "$WT" tag "v$VERSION"
 	if [[ -n "$DRY" ]]; then
 		git tag -d "v$VERSION" >/dev/null
-		echo "（dry-run）会推送 v$VERSION：$(git -C "$WT" log --oneline -1)"
+		echo "（dry-run）检查与构建已通过，会推送 v$VERSION：$(git -C "$WT" log --oneline -1)"
 		break
 	fi
 	if git -C "$WT" push -q --atomic origin HEAD:main "v$VERSION" 2>/dev/null; then
@@ -110,20 +127,9 @@ if [[ -z "$DRY" ]]; then
 	git fetch -q origin && git merge -q --ff-only origin/main
 fi
 
-[[ -f ios/ShiJing/Local.xcconfig ]] && command cp -f ios/ShiJing/Local.xcconfig "$WT/ios/ShiJing/" # 签名团队 ID（不进仓库）
 cd "$WT/desktop"
-echo "构建 dmg（arm64、通用版）…"
-t0=$EPOCHREALTIME
-go tool mygo build -skip-notarize >build-arm64.log 2>&1 || { tail -20 build-arm64.log; exit 1; }
-go tool mygo build -skip-notarize -platform darwin/universal >build-universal.log 2>&1 || { tail -20 build-universal.log; exit 1; }
-printf '两个 dmg：%.1f 秒\n' $((EPOCHREALTIME - t0))
 ARM=build/darwin-arm64/shi-jing-$VERSION-arm64.dmg
 UNI=build/darwin-universal/shi-jing-$VERSION.dmg
-echo "iOS 模拟器构建检查…"
-t0=$EPOCHREALTIME
-(cd ../ios && xcodebuild -project ShiJing.xcodeproj -scheme ShiJing -destination 'generic/platform=iOS Simulator' \
-	-derivedDataPath build-sim build -quiet >build-sim.log 2>&1) || { grep -m5 error ../ios/build-sim.log; echo "iOS 构建失败，tag 已推送但没有建 Release"; exit 1; }
-printf 'iOS 模拟器构建：%.1f 秒\n' $((EPOCHREALTIME - t0))
 
 if [[ -z "$IOS_NOTE" ]]; then
 	IOS_NOTE="iOS 端没有上架、不提供安装包：源码在 \`ios/\`，按 \`ios/README.md\` 用 Xcode 和自己的 Apple ID 装到手机上。这一版跑过模拟器构建；连着手机时会同时装到手机上。"

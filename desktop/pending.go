@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -27,13 +26,13 @@ func (a *app) savePending() { _ = core.SavePending(a.paths.Pending, a.pending) }
 // sourceUnmounted 判断这张原图所在的图库目录现在是不是连不上。
 // 只按配置里的目录前缀和挂载状态判断，不去 stat（网络卷卡住时 stat 会阻塞）。
 func (a *app) sourceUnmounted(src string) bool {
-	src = filepath.Clean(src)
-	for _, d := range a.allDirs() {
-		d = strings.TrimRight(filepath.Clean(core.ExpandUser(d)), "/")
+	src = mountKey(src)
+	for _, raw := range a.allDirs() {
+		d := mountKey(raw)
 		if src != d && !strings.HasPrefix(src, d+"/") {
 			continue
 		}
-		switch a.mounts[d] {
+		switch a.mountStateOf(raw) {
 		case mountMissing, mountSlow:
 			return true
 		}
@@ -44,13 +43,11 @@ func (a *app) sourceUnmounted(src string) bool {
 
 // queueDelete 把一张原图记进待办队列，并把壁纸文件夹里的那份移出（可以 ⌘Z 撤销）。
 // 移出失败时队列照样记着（连上后照样删原图），把移出的错误返回给调用方。
+// 排队只在图库未挂载/挂起/删除出错时触发，这里不再在主线程调 os.Stat(src)，避免挂起卷卡死界面。
 func (a *app) queueDelete(wall, src string) error {
 	if !slices.ContainsFunc(a.pending, func(e core.PendingDelete) bool { return e.Path == src }) {
+		// 排队时拿不到安全的文件指纹，记零值：执行时只确认文件还在，不比对指纹
 		e := core.PendingDelete{Path: src, Wall: filepath.Base(wall), AddedAt: time.Now()}
-		// 排队时一般拿不到文件信息，记零值：执行时只确认文件还在，不比对指纹
-		if fi, err := os.Stat(src); err == nil {
-			e.Size, e.ModTime = fi.Size(), fi.ModTime()
-		}
 		a.pending = append(a.pending, e)
 		a.savePending()
 	}

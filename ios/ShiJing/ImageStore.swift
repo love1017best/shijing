@@ -21,8 +21,20 @@ typealias PlatformImage = NSImage
 final class ImageStore {
     static let shared = ImageStore()
 
+    private final class InflightLoad {
+        let task: Task<PlatformImage?, Never>
+        var waiters: Set<UUID> = []
+        init(task: Task<PlatformImage?, Never>) {
+            self.task = task
+        }
+    }
+
     private let cache = NSCache<NSString, PlatformImage>()
-    private var inflight: [String: Task<PlatformImage?, Never>] = [:]
+    private var inflight: [String: InflightLoad] = [:]
+    /// 前台图片加载并发上限：快速滑动网格时避免数十张图同时下载解码挤占连接与内存
+    private let maxConcurrentLoads = 6
+    private var activeLoads = 0
+    private var loadWaiters: [(id: UUID, cont: CheckedContinuation<Bool, Never>)] = []
     private var task: Task<Void, Never>?
     /// 每一轮一个编号：旧的那轮被取消后收尾时，别把新一轮的「正在缓存」标志清掉
     private var gen = 0
@@ -85,61 +97,130 @@ final class ImageStore {
         cache.object(forKey: key(session, name, kind) as NSString)
     }
 
+    /// 申请前台加载槽位；排队期间若调用方取消，立刻退出等待并返回 false。
+    private func acquireLoadSlot() async -> Bool {
+        if Task.isCancelled { return false }
+        if activeLoads < maxConcurrentLoads {
+            activeLoads += 1
+            return true
+        }
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { cont in
+                if Task.isCancelled {
+                    cont.resume(returning: false)
+                    return
+                }
+                if activeLoads < maxConcurrentLoads {
+                    activeLoads += 1
+                    cont.resume(returning: true)
+                    return
+                }
+                loadWaiters.append((id, cont))
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelLoadWaiter(id)
+            }
+        }
+    }
+
+    private func cancelLoadWaiter(_ id: UUID) {
+        guard let idx = loadWaiters.firstIndex(where: { $0.id == id }) else { return }
+        let (_, cont) = loadWaiters.remove(at: idx)
+        cont.resume(returning: false)
+    }
+
+    private func releaseLoadSlot() {
+        if !loadWaiters.isEmpty {
+            let (_, cont) = loadWaiters.removeFirst()
+            cont.resume(returning: true)
+            return
+        }
+        activeLoads = max(0, activeLoads - 1)
+    }
+
+    private func removeWaiter(key: String, entry: InflightLoad, waiterID: UUID) {
+        if entry.waiters.remove(waiterID) != nil, entry.waiters.isEmpty {
+            entry.task.cancel()
+            if inflight[key] === entry { inflight[key] = nil }
+        }
+    }
+
     /// 读一张图：内存 → 磁盘 →（有原图就本地缩）→ 在线时下载并写盘。
-    /// 连不上电脑时只认磁盘上有的，不干等网络超时。
+    /// 连不上电脑时只认磁盘上有的，不干等网络超时；所有等待视图都取消时中止底层任务。
     func load(_ session: RemoteSession, _ name: String, _ kind: ImageKind) async -> PlatformImage? {
         let k = key(session, name, kind)
         if let img = cache.object(forKey: k as NSString) { return img }
-        if let t = inflight[k] { return await t.value }
-        let demo = demo
-        let offline = session.offline
-        let macID = session.macID.uuidString
-        let client = try? session.client()
-        let t = Task<PlatformImage?, Never> {
-            var data: Data?
-            var original: URL?
-            var originalWidth = 0
-            if demo {
-                data = nil
-            } else if let d = await Task.detached(priority: .userInitiated, operation: { Self.readDisk(macID, name, kind) }).value {
-                data = d
-            } else if let w = (offline || kind == .image) ? kind.targetWidth : nil,
-                      let f = ImageStore.cachedOriginal(macID: macID, name: name) {
-                // 手机上存过这张的原图：大图不用再下载（离线时缩略图、横幅也拿原图缩）。
-                // 在线时网格的缩略图还是照常下载，一张才几十 KB，从几十 MB 的原图现缩反而拖慢滚动
-                original = f
-                originalWidth = w
-            } else if offline {
-                data = nil // 连不上电脑：只认磁盘上缓存过的
-            } else if session.offline {
-                // 开始读之前还是连着的，等排队排到这里已经断了：别再发请求干等
-                data = nil
-            } else if let client {
-                do {
-                    let d = try await client.imageData(name, kind: kind)
+        if Task.isCancelled { return nil }
+
+        let entry: InflightLoad
+        if let existing = inflight[k] {
+            entry = existing
+        } else {
+            let demo = demo
+            let macID = session.macID.uuidString
+            let t = Task<PlatformImage?, Never> {
+                guard await self.acquireLoadSlot() else { return nil }
+                defer { self.releaseLoadSlot() }
+                if Task.isCancelled { return nil }
+
+                var data: Data?
+                var original: URL?
+                var originalWidth = 0
+                let offline = session.offline
+                if demo {
+                    data = nil
+                } else if let d = await Task.detached(priority: .userInitiated, operation: { Self.readDisk(macID, name, kind) }).value {
                     data = d
-                    if !offline {
-                        await Task.detached(priority: .utility) { Self.writeDisk(macID, name, kind, d) }.value
+                } else if let w = (offline || kind == .image) ? kind.targetWidth : nil,
+                          let f = ImageStore.cachedOriginal(macID: macID, name: name) {
+                    // 手机上存过这张的原图：大图不用再下载（离线时缩略图、横幅也拿原图缩）。
+                    // 在线时网格的缩略图还是照常下载，一张才几十 KB，从几十 MB 的原图现缩反而拖慢滚动
+                    original = f
+                    originalWidth = w
+                } else if offline || session.offline {
+                    data = nil // 连不上电脑或排队期间已断开：只认磁盘上缓存过的
+                } else if let client = try? session.client() {
+                    do {
+                        let d = try await client.imageData(name, kind: kind)
+                        data = d
+                        if !Task.isCancelled {
+                            await Task.detached(priority: .utility) { Self.writeDisk(macID, name, kind, d) }.value
+                        }
+                    } catch {
+                        // 连不上电脑了：顺手把连接状态改成离线，别让后面每张图都各等一次超时
+                        session.noteNetworkFailure(error)
                     }
-                } catch {
-                    // 连不上电脑了：顺手把连接状态改成离线，别让后面每张图都各等一次超时
-                    session.noteNetworkFailure(error)
                 }
+                if Task.isCancelled { return nil }
+                let img = await Task.detached(priority: .userInitiated) { () -> PlatformImage? in
+                    if Task.isCancelled { return nil }
+                    if demo { return Self.demoImage(name, large: kind.isLarge) }
+                    if let original { return Self.downsampleFile(original, maxPixel: originalWidth) }
+                    guard let data else { return nil }
+                    return Self.decode(data)
+                }.value
+                if let img {
+                    self.cache.setObject(img, forKey: k as NSString, cost: Self.memoryCost(img))
+                }
+                return img
             }
-            return await Task.detached(priority: .userInitiated) {
-                if demo { return Self.demoImage(name, large: kind.isLarge) }
-                if let original { return Self.downsampleFile(original, maxPixel: originalWidth) }
-                guard let data else { return nil }
-                return Self.decode(data)
-            }.value
+            entry = InflightLoad(task: t)
+            inflight[k] = entry
         }
-        inflight[k] = t
-        let img = await t.value
-        inflight[k] = nil
-        if let img {
-            cache.setObject(img, forKey: k as NSString, cost: Self.memoryCost(img))
+
+        let waiterID = UUID()
+        entry.waiters.insert(waiterID)
+        let img = await withTaskCancellationHandler {
+            await entry.task.value
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.removeWaiter(key: k, entry: entry, waiterID: waiterID)
+            }
         }
-        return img
+        removeWaiter(key: k, entry: entry, waiterID: waiterID)
+        return Task.isCancelled ? nil : img
     }
 
     /// 一张图在内存里占多少，按解码后的像素算：2732 宽的大图一张十七八 MB，
@@ -323,11 +404,12 @@ final class ImageStore {
             } catch {
                 return (kind, 0, RemoteSession.isNetworkFailure(error) ? error : nil)
             }
-            defer { try? FileManager.default.removeItem(at: tmp) }
+            defer { try? FileManager.default.removeItem(at: tmp.deletingLastPathComponent()) }
             if Task.isCancelled { return (kind, 0, nil) }
             guard let f = diskFile(macID, name, .original) else { return (kind, 0, nil) }
             let fm = FileManager.default
             try? fm.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if fm.fileExists(atPath: f.path) { try? fm.removeItem(at: f) }
             guard (try? fm.moveItem(at: tmp, to: f)) != nil else { return (kind, 0, nil) }
             return (kind, Int64((try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0), nil)
         }

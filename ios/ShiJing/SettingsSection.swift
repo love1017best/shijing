@@ -146,6 +146,15 @@ struct SettingsPage: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             if showsPager { groupPicker }
         }
+        .onDisappear {
+            countTask?.cancel()
+            countTask = nil
+            resTask?.cancel()
+            resTask = nil
+            draftCount = nil
+            draftW = nil
+            draftH = nil
+        }
         .toolbar {
             if session.savingSettings {
                 ToolbarItem(placement: .automatic) { ProgressView() } // 正在把改动发给电脑
@@ -697,6 +706,7 @@ enum AppVersion {
 private struct OfflineCacheSection: View {
     let session: RemoteSession
     @State private var usage: ImageStore.Usage?
+    @State private var refreshTask: Task<Void, Never>?
     @AppStorage(ImageStore.cacheLimitKey) private var limitGB = ImageStore.defaultCacheLimitGB
     @AppStorage(ImageStore.cacheOriginalsKey) private var keepOriginals = false
 
@@ -783,6 +793,7 @@ private struct OfflineCacheSection: View {
                 }
             }
             .task(id: session.macID) { refresh() }
+            .onChange(of: session.wallsRev) { _, _ in refresh() }
             .onChange(of: store.prefetching) { _, running in if !running { refresh() } }
             .onChange(of: store.prefetchDone) { _, _ in
                 // 存的过程中不用每张都数一遍文件，隔一阵更新一次
@@ -790,6 +801,10 @@ private struct OfflineCacheSection: View {
             }
             .onChange(of: store.prefetchOriginalDone) { _, _ in
                 if store.prefetchOriginalDone % 20 == 0 { refresh() }
+            }
+            .onDisappear {
+                refreshTask?.cancel()
+                refreshTask = nil
             }
         } header: {
             HelpHeader("离线", "无法连接电脑时，概览和壁纸显示的是上次同步的内容；更换一批后，不在这批里的图片会删除。打开「保存原图」会把图库中的原文件也保存下来，离线时可以存到相册、分享原图，直到达到「缓存上限」。")
@@ -838,15 +853,19 @@ private struct OfflineCacheSection: View {
     }
 
     private func refresh() {
+        refreshTask?.cancel()
         let macID = session.macID.uuidString
         let names = session.walls.map(\.name)
-        Task {
+        refreshTask = Task {
             // 刚点过「清除」时等文件删完再数，不然显示的还是清之前的大小
             await store.waitForClear()
+            guard !Task.isCancelled else { return }
             // 一次量完：列一遍目录就有各档的张数和大小，不用一档列一遍
-            usage = await Task.detached(priority: .utility) {
+            let result = await Task.detached(priority: .utility) {
                 ImageStore.usage(macID: macID, names: names)
             }.value
+            guard !Task.isCancelled else { return }
+            usage = result
         }
     }
 }

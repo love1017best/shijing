@@ -53,7 +53,8 @@ type sourceImage struct {
 //
 // 分两步：先遍历拿到全部候选图片，再把需要检查分辨率的那些一次性并发检查
 // （逐张串行打开 NAS 上的图片曾经占了扫描阶段九成的时间），最后按遍历顺序组装结果。
-func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir func(n int)) ([]sourceImage, map[string][]sourceImage, []string) {
+func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir func(n int), stop func() bool) ([]sourceImage, map[string][]sourceImage, []string) {
+	stopped := func() bool { return stop != nil && stop() }
 	type dirScan struct {
 		root   string
 		isLeaf bool
@@ -64,11 +65,14 @@ func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir 
 	var toCheck []string
 	seen := 0
 	for _, src := range sources {
+		if stopped() {
+			return nil, nil, nil
+		}
 		if st, err := os.Stat(src); err != nil || !st.IsDir() {
 			continue
 		}
 		needCheck := filter[resolvePath(src)]
-		walk(src, func(root string, dirs, files []string) {
+		walkStop(src, stop, func(root string, dirs, files []string) {
 			seen++
 			if onDir != nil {
 				onDir(seen)
@@ -87,7 +91,13 @@ func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir 
 			}
 		})
 	}
-	ok := checkResolutions(toCheck, minW, minH)
+	if stopped() {
+		return nil, nil, nil
+	}
+	ok := checkResolutionsStop(toCheck, minW, minH, stop)
+	if stopped() {
+		return nil, nil, nil
+	}
 
 	var all []sourceImage
 	grouped := map[string][]sourceImage{}
@@ -255,9 +265,11 @@ func copyFile(src, dst string) error {
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
+		_ = os.Remove(dst)
 		return err
 	}
 	if err := out.Close(); err != nil {
+		_ = os.Remove(dst)
 		return err
 	}
 	if st, err := in.Stat(); err == nil {
@@ -427,7 +439,11 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 	if len(filter) > 0 {
 		logf("   分辨率筛选目录: %d 个 (最小 %dx%d, 横屏)", len(filter), o.MinWidth, o.MinHeight)
 	}
-	all, grouped, leafOrder := scanImages(o.Sources, filter, o.MinWidth, o.MinHeight, func(n int) { rep.progress(StageScan, n, 0) })
+	all, grouped, leafOrder := scanImages(o.Sources, filter, o.MinWidth, o.MinHeight, func(n int) { rep.progress(StageScan, n, 0) }, rep.stopped)
+	if rep.stopped() {
+		logf("\n⏹️ 已停止扫描")
+		return res, ErrCanceled
+	}
 	if len(o.Excluded) > 0 {
 		var dropped int
 		all, grouped, leafOrder, dropped = dropExcluded(all, grouped, leafOrder, o.Excluded)

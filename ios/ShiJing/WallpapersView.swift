@@ -438,11 +438,13 @@ struct AllWallpapersView: View {
 
     /// 目录筛选：搜索框下面那颗小胶囊，菜单里按目录挑（菜单里带每个目录的张数）。
     private var folderMenu: some View {
-        Menu {
+        let counts = folderCounts
+        let folders = counts.keys.sorted()
+        return Menu {
             Picker("目录", selection: $folder) {
                 Text("全部目录（\(session.walls.count)）").tag(String?.none)
-                ForEach(folderCounts.keys.sorted(), id: \.self) { f in
-                    Text("\(f)（\(folderCounts[f] ?? 0)）").tag(String?.some(f))
+                ForEach(folders, id: \.self) { f in
+                    Text("\(f)（\(counts[f] ?? 0)）").tag(String?.some(f))
                 }
             }
             .pickerStyle(.inline)
@@ -553,7 +555,7 @@ struct UndoRemoveButton: View {
                     if session.acting == name { ProgressView() } else { Image(systemName: "arrow.uturn.backward") }
                 }
             }
-            .disabled(session.acting != nil || session.state?.running == true)
+            .disabled(session.acting != nil || (!session.offline && session.state?.running == true))
         }
     }
 }
@@ -614,8 +616,8 @@ struct ShareOriginalButton: View {
         loading = true
         defer { loading = false }
         do {
-            if let cached, session.offline {
-                present(cached, deleteAfter: false) // 手机上缓存的那份不能删
+            if let cached {
+                present(cached, deleteAfter: false) // 优先复用手机上缓存的原图，不能删
             } else {
                 let url = try await session.request { try await $0.downloadOriginal(wall.name) }
                 present(url, deleteAfter: true)
@@ -629,7 +631,7 @@ struct ShareOriginalButton: View {
     @MainActor
     private func present(_ url: URL, deleteAfter: Bool) {
         SharePresenter.present([url], anchor: anchor) {
-            if deleteAfter { try? FileManager.default.removeItem(at: url) }
+            if deleteAfter { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         }
     }
 }
@@ -648,7 +650,10 @@ enum SharePresenter {
                 .compactMap({ $0 as? UIWindowScene })
                 .first(where: { $0.activationState == .foregroundActive }),
               let top = topmost(scene.windows.first(where: { $0.isKeyWindow })?.rootViewController
-                                ?? scene.windows.first?.rootViewController) else { return }
+                                ?? scene.windows.first?.rootViewController) else {
+            onFinish?()
+            return
+        }
         let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
         vc.completionWithItemsHandler = { _, _, _, _ in
             DispatchQueue.main.async { onFinish?() }

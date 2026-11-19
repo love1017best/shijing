@@ -14,7 +14,9 @@ import (
 	"hash/fnv"
 	"image"
 	"image/jpeg"
+	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -43,12 +45,16 @@ type wallsSnapshot struct {
 	hero    string            // 横幅图的文件名（和桌面概览顶部那张一样），没有时为空
 }
 
-// wallsRev 是壁纸列表的指纹：换了一批、移出了几张都会变。
-func wallsRev(all []string) string {
+// wallsRev 是壁纸列表的指纹：换了一批、移出了几张或横幅换了都会变。
+func wallsRev(all []string, heroPath string) string {
 	h := fnv.New64a()
 	for _, p := range all {
 		h.Write([]byte(filepath.Base(p)))
 		h.Write([]byte{0})
+	}
+	if heroPath != "" {
+		h.Write([]byte("hero:"))
+		h.Write([]byte(filepath.Base(heroPath)))
 	}
 	return strconv.FormatUint(h.Sum64(), 36)
 }
@@ -102,7 +108,23 @@ func (rs *remoteServer) handleWalls(w http.ResponseWriter, r *http.Request, _ st
 	writeJSON(w, http.StatusOK, map[string]any{"rev": s.rev, "hero": s.hero, "items": list})
 }
 
+func serveCachedJPEG(w http.ResponseWriter, file string) bool {
+	if file == "" {
+		return false
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	_, _ = io.Copy(w, f)
+	return true
+}
+
 // handleWallImage 返回缩小后的 JPEG。文件名带进缓存键，同一张图在手机上缓存住就不用再要。
+// 命中磁盘缓存直接流式发原 JPEG，不走二次编解码也不占解码信号量；未命中时排队监听请求取消。
 func (rs *remoteServer) handleWallImage(width int, cached bool) func(http.ResponseWriter, *http.Request, string) {
 	return func(w http.ResponseWriter, r *http.Request, _ string) {
 		name := r.PathValue("name")
@@ -111,17 +133,31 @@ func (rs *remoteServer) handleWallImage(width int, cached bool) func(http.Respon
 			writeErr(w, http.StatusNotFound, "这张壁纸已经不在壁纸文件夹里了")
 			return
 		}
-		rs.decodeSem <- struct{}{}
-		var out image.Image
+		var cacheFile string
 		if cached {
-			out = cachedScaled(path, width)
-		} else {
-			out = loadScaled(path, width)
+			cacheFile = thumbCacheFile(path, width)
+			if serveCachedJPEG(w, cacheFile) {
+				return
+			}
 		}
-		<-rs.decodeSem
+		select {
+		case rs.decodeSem <- struct{}{}:
+			defer func() { <-rs.decodeSem }()
+		case <-r.Context().Done():
+			return
+		}
+		if cached && serveCachedJPEG(w, cacheFile) {
+			return
+		}
+		var out image.Image = loadScaled(path, width)
 		if out == nil {
 			writeErr(w, http.StatusUnprocessableEntity, "无法读取这张图片")
 			return
+		}
+		if cached && cacheFile != "" && writeThumbCache(cacheFile, out) {
+			if serveCachedJPEG(w, cacheFile) {
+				return
+			}
 		}
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Header().Set("Cache-Control", "private, max-age=86400")
@@ -183,16 +219,67 @@ func (rs *remoteServer) handleWallRemove(w http.ResponseWriter, r *http.Request,
 }
 
 func (rs *remoteServer) handleWallDelete(w http.ResponseWriter, r *http.Request, dev string) {
-	rs.wallAction(w, r, func(path string) error {
+	name := r.PathValue("name")
+	var (
+		msg      string
+		path     string
+		src      string
+		queuedOK bool
+	)
+	if !rs.onMainOrFail(w, func() {
 		a := rs.a
-		if a.wallSource(path) == "" {
-			return softErr("这张由旧版本更换，找不到原图")
+		if a.running {
+			msg = "正在换壁纸，等换完再整理"
+			return
 		}
+		path = filepath.Join(a.walls.dir, name)
+		if strings.ContainsRune(name, '/') || !slices.Contains(a.walls.all, path) {
+			msg = "这张壁纸已经不在壁纸文件夹里了"
+			return
+		}
+		src = a.wallSource(path)
+		if src == "" {
+			msg = "这张由旧版本更换，找不到原图"
+			return
+		}
+		if a.sourceUnmounted(src) {
+			before := len(a.walls.all)
+			if err := a.queueDelete(path, src); err != nil {
+				msg = err.Error()
+			} else if len(a.walls.all) < before {
+				a.appendLog(fmt.Sprintf("📱 「%s」删除了原图（%s）", dev, filepath.Base(path)))
+			}
+			queuedOK = true
+		}
+	}) {
+		return
+	}
+	if msg != "" {
+		writeErr(w, http.StatusConflict, msg)
+		return
+	}
+	if queuedOK {
+		rs.writeSnapshot(w)
+		return
+	}
+	// 在 HTTP 协程里执行 NAS 原图删除（带超时），避免挂起网络卷阻塞主线程
+	outcome, permErr := removeSourceWithTimeout(src, deleteSrcTimeout)
+	if !rs.onMainOrFail(w, func() {
+		a := rs.a
 		before := len(a.walls.all)
-		err := a.deleteOriginal(path)
+		if err := a.finishDeleteOriginal(path, src, outcome, permErr); err != nil {
+			msg = err.Error()
+			return
+		}
 		if len(a.walls.all) < before {
 			a.appendLog(fmt.Sprintf("📱 「%s」删除了原图（%s）", dev, filepath.Base(path)))
 		}
-		return err
-	})
+	}) {
+		return
+	}
+	if msg != "" {
+		writeErr(w, http.StatusConflict, msg)
+		return
+	}
+	rs.writeSnapshot(w)
 }

@@ -80,6 +80,12 @@ func ImageVerdict(path string, minWidth, minHeight int) (ok bool, reason string)
 // 见 CLAUDE.md 坑 12），但 fn 仍在调用方的 goroutine 里按先序遍历的顺序逐个调用，
 // 某个目录读完、它前面的都回调过了就立刻回调，调用方可以边遍历边上报进度。
 func walk(root string, fn func(dir string, dirs, files []string)) {
+	walkStop(root, nil, fn)
+}
+
+// walkStop 与 walk 语义一致，但支持在读取目录、下钻与回调前响应 stop() 信号及时中止。
+func walkStop(root string, stop func() bool, fn func(dir string, dirs, files []string)) {
+	stopped := func() bool { return stop != nil && stop() }
 	type node struct {
 		path        string
 		dirs, files []string
@@ -90,29 +96,42 @@ func walk(root string, fn func(dir string, dirs, files []string)) {
 	sem := make(chan struct{}, metaWorkers)
 	var read func(n *node)
 	read = func(n *node) {
+		defer close(n.done)
+		if stopped() {
+			return
+		}
 		sem <- struct{}{}
+		if stopped() {
+			<-sem
+			return
+		}
 		dirs, files, descend, err := readDirSplit(n.path)
 		<-sem
-		if err == nil {
+		if err == nil && !stopped() {
 			n.ok, n.dirs, n.files = true, dirs, files
 			for _, d := range descend {
+				if stopped() {
+					break
+				}
 				c := &node{path: filepath.Join(n.path, d), done: make(chan struct{})}
 				n.children = append(n.children, c)
 				go read(c)
 			}
 		}
-		close(n.done)
 	}
 	top := &node{path: root, done: make(chan struct{})}
 	go read(top)
 	var visit func(n *node)
 	visit = func(n *node) {
 		<-n.done
-		if !n.ok {
+		if !n.ok || stopped() {
 			return
 		}
 		fn(n.path, n.dirs, n.files)
 		for _, c := range n.children {
+			if stopped() {
+				return
+			}
 			visit(c)
 		}
 	}
@@ -194,9 +213,18 @@ const (
 // parallelFor 用最多 workers 个 goroutine 对 0..n-1 调用 fn，全部完成后返回。
 // fn 只能写各自下标对应的结果，顺序相关的处理（日志、删除）留给调用方事后串行做。
 func parallelFor(n, workers int, fn func(i int)) {
+	parallelForStop(n, workers, nil, fn)
+}
+
+// parallelForStop 同 parallelFor，但在派发每个下标前检查 stop()，停止后不再继续执行剩余任务。
+func parallelForStop(n, workers int, stop func() bool, fn func(i int)) {
+	stopped := func() bool { return stop != nil && stop() }
 	workers = min(workers, n)
 	if workers <= 1 {
 		for i := range n {
+			if stopped() {
+				return
+			}
 			fn(i)
 		}
 		return
@@ -208,6 +236,9 @@ func parallelFor(n, workers int, fn func(i int)) {
 		go func() {
 			defer wg.Done()
 			for {
+				if stopped() {
+					return
+				}
 				i := int(next.Add(1) - 1)
 				if i >= n {
 					return
@@ -221,14 +252,23 @@ func parallelFor(n, workers int, fn func(i int)) {
 
 // checkResolutions 并发检查一批图片，返回与 paths 一一对应的结果。
 func checkResolutions(paths []string, minWidth, minHeight int) []bool {
-	ok, _ := checkVerdicts(paths, minWidth, minHeight)
+	ok, _ := checkVerdictsStop(paths, minWidth, minHeight, nil)
+	return ok
+}
+
+func checkResolutionsStop(paths []string, minWidth, minHeight int, stop func() bool) []bool {
+	ok, _ := checkVerdictsStop(paths, minWidth, minHeight, stop)
 	return ok
 }
 
 // checkVerdicts 同 checkResolutions，另外返回不合格的原因。
 func checkVerdicts(paths []string, minWidth, minHeight int) (ok []bool, reasons []string) {
+	return checkVerdictsStop(paths, minWidth, minHeight, nil)
+}
+
+func checkVerdictsStop(paths []string, minWidth, minHeight int, stop func() bool) (ok []bool, reasons []string) {
 	ok, reasons = make([]bool, len(paths)), make([]string, len(paths))
-	parallelFor(len(paths), metaWorkers, func(i int) {
+	parallelForStop(len(paths), metaWorkers, stop, func(i int) {
 		ok[i], reasons[i] = ImageVerdict(paths[i], minWidth, minHeight)
 	})
 	return ok, reasons

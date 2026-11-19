@@ -422,7 +422,7 @@ func overlapPercent(c core.CopyResult) string {
 
 func (a *app) checkingMounts() bool {
 	for _, d := range a.allDirs() {
-		if a.mounts[d] == mountUnknown {
+		if a.mountStateOf(d) == mountUnknown {
 			return true
 		}
 	}

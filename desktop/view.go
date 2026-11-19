@@ -26,6 +26,11 @@ func (a *app) view(c *ui.Context) {
 	}
 	if a.page != a.prevPage {
 		closeHelpPopovers() // 说明气泡不跟着换页
+		if a.prevPage == pageWalls {
+			// 切离壁纸页后释放其内存缩略图（磁盘缓存仍在，切回时几毫秒重读）
+			a.walls.browse = nil
+			a.walls.browsing = false
+		}
 		a.prevPage = a.page
 	}
 	t := applyTheme(c)

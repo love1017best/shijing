@@ -35,13 +35,17 @@ import (
 )
 
 const (
-	remotePort    = 52819
-	bonjourType   = "_shijing._tcp"
-	pairCodeTTL   = 2 * time.Minute
-	pairMaxFails  = 5
-	remoteAPIVer  = 1 // 接口有不兼容的改动时加 1，手机端据此提示升级
-	sseKeepAlive  = 15 * time.Second
-	mainThreadMax = 10 * time.Second
+	remotePort       = 52819
+	bonjourType      = "_shijing._tcp"
+	pairCodeTTL      = 2 * time.Minute
+	pairMaxFails     = 5
+	pairStartWindow  = time.Minute
+	pairStartLimit   = 6
+	pairFailCooldown = 30 * time.Second
+	remoteAPIVer     = 1 // 接口有不兼容的改动时加 1，手机端据此提示升级
+	sseKeepAlive     = 15 * time.Second
+	sseWriteTimeout  = 10 * time.Second
+	mainThreadMax    = 10 * time.Second
 )
 
 // remoteDevice 是一台配对过的手机。
@@ -78,23 +82,29 @@ type remoteServer struct {
 	online  map[string]int // 令牌哈希 → 正连着的事件流个数（在电脑上改名不影响）
 	pair    *pairRequest
 	// pairedCode 是最近一次配对成功的 code：电脑上显示二维码的弹层靠它收起
-	pairedCode string
-	state      []byte
-	subs       map[chan struct{}]struct{}
-	srv        *http.Server
-	port       int
-	listenErr  string
-	stopAd     func()
-	walls      wallsSnapshot // 壁纸列表（remotewalls.go），主线程发布
-	decodeSem  chan struct{} // 限制同时解码的大图张数
+	pairedCode    string
+	pairStarts    map[string][]time.Time // 客户端 IP → 近期 /api/pair/start 请求时间戳（防频刷与抢焦点）
+	pairLockUntil map[string]time.Time   // 客户端 IP → 输错满次后的冷却截止时间
+	now           func() time.Time       // 当前时间，测试里可替换以验证冷却窗口
+	state         []byte
+	subs          map[chan struct{}]struct{}
+	srv           *http.Server
+	port          int
+	listenErr     string
+	stopAd        func()
+	walls         wallsSnapshot // 壁纸列表（remotewalls.go），主线程发布
+	decodeSem     chan struct{} // 限制同时解码的大图张数
 }
 
 func newRemoteServer(a *app, file string) *remoteServer {
 	rs := &remoteServer{
 		a: a, file: file, host: "Mac",
-		online:    map[string]int{},
-		decodeSem: make(chan struct{}, remoteDecodeWorkers),
-		subs:      map[chan struct{}]struct{}{},
+		online:        map[string]int{},
+		pairStarts:    map[string][]time.Time{},
+		pairLockUntil: map[string]time.Time{},
+		now:           time.Now,
+		decodeSem:     make(chan struct{}, remoteDecodeWorkers),
+		subs:          map[chan struct{}]struct{}{},
 		listen: func() (net.Listener, error) {
 			ln, err := net.Listen("tcp", fmt.Sprintf(":%d", remotePort))
 			if err != nil {
@@ -206,11 +216,17 @@ func (rs *remoteServer) renameDevice(old, name string) (string, bool) {
 	return name, true
 }
 
-// unpair 取消一台手机的配对，它的令牌立刻失效（已经连着的事件流在下一次推送时断开）。
+// unpair 取消一台手机的配对，它的令牌立刻失效并立即唤醒空闲事件流使其断开。
 func (rs *remoteServer) unpair(name string) {
 	rs.mu.Lock()
 	rs.devices = slices.DeleteFunc(rs.devices, func(d remoteDevice) bool { return d.Name == name })
 	devs := slices.Clone(rs.devices)
+	for ch := range rs.subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 	rs.mu.Unlock()
 	rs.saveDevices(devs)
 }
@@ -435,6 +451,21 @@ func (rs *remoteServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil && host != "" {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func (rs *remoteServer) clock() time.Time {
+	if rs.now != nil {
+		return rs.now()
+	}
+	return time.Now()
+}
+
 func (rs *remoteServer) handlePairStart(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Device string `json:"device"`
@@ -444,10 +475,50 @@ func (rs *remoteServer) handlePairStart(w http.ResponseWriter, r *http.Request) 
 	if !readBodyOrFail(w, r, &body) {
 		return
 	}
-	rs.startPair(sanitizeDevice(body.Device), sanitizeDeviceID(body.ID), false)
-	// 弹出配对码
+	ip := clientIP(r)
+	now := rs.clock()
+	dev := sanitizeDevice(body.Device)
+	id := sanitizeDeviceID(body.ID)
+
+	rs.mu.Lock()
+	if until, ok := rs.pairLockUntil[ip]; ok && now.Before(until) {
+		rs.mu.Unlock()
+		writeErr(w, http.StatusTooManyRequests, "尝试次数过多，请稍后再试")
+		return
+	}
+	if p := rs.pair; p != nil && now.Before(p.expires) {
+		if p.qr {
+			rs.mu.Unlock()
+			writeErr(w, http.StatusConflict, "电脑上正在显示配对二维码，请先完成或关闭后再试")
+			return
+		}
+		if p.fails > 0 {
+			rs.mu.Unlock()
+			writeErr(w, http.StatusTooManyRequests, "当前配对码已输错，请继续输入或等过期后再试")
+			return
+		}
+	}
+	// 按客户端 IP 做滑动窗口频控，防止局域网内恶意高频调用抢占桌面焦点
+	recent := rs.pairStarts[ip][:0]
+	for _, ts := range rs.pairStarts[ip] {
+		if now.Sub(ts) < pairStartWindow {
+			recent = append(recent, ts)
+		}
+	}
+	if len(recent) >= pairStartLimit {
+		rs.pairStarts[ip] = recent
+		rs.mu.Unlock()
+		writeErr(w, http.StatusTooManyRequests, "请求过于频繁，请一分钟后再试")
+		return
+	}
+	rs.pairStarts[ip] = append(recent, now)
+	hadActive := rs.pair != nil && !rs.pair.qr && now.Before(rs.pair.expires)
+	rs.pair = &pairRequest{device: dev, id: id, code: randomCode(), expires: now.Add(pairCodeTTL), qr: false}
+	rs.mu.Unlock()
+	time.AfterFunc(pairCodeTTL+time.Second, rs.redraw)
+	// 仅在桌面还没有打开配对弹层时才拉起窗口，避免反复抢焦点
 	rs.a.update(func() {
-		if rs.a.showWindow != nil {
+		if !hadActive && rs.a.showWindow != nil {
 			rs.a.showWindow()
 		}
 	})
@@ -518,6 +589,7 @@ func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request)
 		msg := fmt.Sprintf("配对码不对，还可以再试 %d 次", pairMaxFails-p.fails)
 		if p.fails >= pairMaxFails {
 			rs.pair = nil
+			rs.pairLockUntil[clientIP(r)] = rs.clock().Add(pairFailCooldown)
 			msg = "错误次数太多，这次配对已取消，请重新开始"
 		}
 		rs.mu.Unlock()
@@ -583,13 +655,18 @@ func (rs *remoteServer) handleEvents(w http.ResponseWriter, r *http.Request, _ s
 		rs.redraw()
 	}()
 
+	rc := http.NewResponseController(w)
 	send := func() bool {
 		if rs.deviceFor(r) == "" { // 在电脑上取消了配对
 			return false
 		}
+		_ = rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout))
 		_, err := fmt.Fprintf(w, "data: %s\n\n", rs.snapshot())
+		if err != nil {
+			return false
+		}
 		fl.Flush()
-		return err == nil
+		return true
 	}
 	if !send() {
 		return
@@ -605,6 +682,10 @@ func (rs *remoteServer) handleEvents(w http.ResponseWriter, r *http.Request, _ s
 				return
 			}
 		case <-keep.C:
+			if rs.deviceFor(r) == "" {
+				return
+			}
+			_ = rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout))
 			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
 				return
 			}
@@ -636,7 +717,7 @@ func (rs *remoteServer) handleRun(w http.ResponseWriter, r *http.Request, dev st
 	var runErr error
 	if !rs.onMainOrFail(w, func() {
 		for i, d := range dirs {
-			rs.a.mounts[d] = states[i]
+			rs.a.setMountState(d, states[i])
 		}
 		runErr = rs.a.remoteRun(dev, body.Delete)
 	}) {
@@ -817,7 +898,7 @@ func (a *app) remoteSnapshot() remoteState {
 		Unmounted:   a.unmountedCount(),
 		WillDelete:  a.willDelete(),
 		Wallpapers:  len(a.walls.all),
-		WallsRev:    wallsRev(a.walls.all),
+		WallsRev:    wallsRev(a.walls.all, a.walls.heroPath),
 		Dest:        tildify(a.cfg.DestDir),
 		Sample:      int(a.num),
 		Library:     len(a.allDirs()),
@@ -879,7 +960,7 @@ func (a *app) remotePendingList() []remotePendingItem {
 func (a *app) remoteDirs() []remoteDir {
 	dirs := make([]remoteDir, 0, len(a.cfg.FilterAndSampleDirs)+len(a.cfg.SampleOnlyDirs))
 	add := func(d string, filter bool) {
-		r := remoteDir{Path: tildify(d), Filter: filter, Mount: mountName(a.mounts[d])}
+		r := remoteDir{Path: tildify(d), Filter: filter, Mount: mountName(a.mountStateOf(d))}
 		if st, ok := a.sourceStat(d); ok {
 			r.Images, r.Folders = st.Images, st.Folders
 		}

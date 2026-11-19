@@ -53,34 +53,44 @@ func systemDecode(path string, width int) image.Image {
 		maxPix = max(pw, ph)
 	}
 	num := io.numCreate(0, cfNumberSInt32, unsafe.Pointer(&maxPix))
+	if num == 0 {
+		return nil
+	}
+	defer io.safeRelease(num)
 	keys := [4]uintptr{io.kAlways, io.kTransform, io.kMaxSize, io.kCacheNow}
 	vals := [4]uintptr{io.kTrue, io.kTrue, num, io.kTrue}
 	opts := io.dictCreate(0, unsafe.Pointer(&keys[0]), unsafe.Pointer(&vals[0]), 4, io.keyCallBacks, io.valCallBacks)
+	if opts == 0 {
+		return nil
+	}
 	img := io.thumb(src, 0, opts)
-	io.release(opts)
-	io.release(num)
+	io.safeRelease(opts)
 	if img == 0 {
 		return nil
 	}
-	defer io.release(img)
+	defer io.safeRelease(img)
 
 	w, h := io.imgW(img), io.imgH(img)
 	if w == 0 || h == 0 {
 		return nil
 	}
-	buf := io.malloc(w * h * 4) // 位图上下文在 C 那边一直拿着这块内存，用 C 的 malloc，不用 Go 的切片
+	// 用 calloc 分配清零内存，避免含透明通道的 PNG/WebP/GIF 在透明区域露出未初始化杂色
+	buf := io.calloc(w*h, 4) // 位图上下文在 C 那边一直拿着这块内存，用 C 的堆内存，不用 Go 的切片
 	if buf == 0 {
 		return nil
 	}
 	defer io.free(buf)
 	cs := io.csCreate(io.kSRGB)
+	if cs == 0 {
+		return nil
+	}
 	ctx := io.ctxCreate(buf, w, h, 8, w*4, cs, cgImageAlphaPremultipliedLast|cgBitmapByteOrder32Big)
-	io.release(cs)
+	io.safeRelease(cs)
 	if ctx == 0 {
 		return nil
 	}
 	io.draw(ctx, cgRect{W: float64(w), H: float64(h)}, img)
-	io.release(ctx)
+	io.safeRelease(ctx)
 	out := image.NewRGBA(image.Rect(0, 0, int(w), int(h)))
 	copy(out.Pix, unsafe.Slice((*byte)(ptr(buf)), len(out.Pix)))
 	return out
@@ -108,13 +118,19 @@ type imageIO struct {
 	csCreate   func(name uintptr) uintptr
 	ctxCreate  func(data uintptr, w, h, bpc, bpr uint, cs uintptr, info uint32) uintptr
 	draw       func(ctx uintptr, r cgRect, img uintptr)
-	malloc     func(n uint) uintptr
+	calloc     func(count, size uint) uintptr
 	free       func(uintptr)
 
 	kWidth, kHeight, kOrient                 uintptr
 	kAlways, kTransform, kMaxSize, kCacheNow uintptr
 	kTrue, kSRGB                             uintptr
 	keyCallBacks, valCallBacks               uintptr
+}
+
+func (io *imageIO) safeRelease(ref uintptr) {
+	if ref != 0 {
+		io.release(ref)
+	}
 }
 
 // number 读字典里的一个整数，没有这一项时保持原值。
@@ -178,7 +194,7 @@ func loadImageIO() *imageIO {
 		purego.RegisterLibFunc(&io.csCreate, cg, "CGColorSpaceCreateWithName")
 		purego.RegisterLibFunc(&io.ctxCreate, cg, "CGBitmapContextCreate")
 		purego.RegisterLibFunc(&io.draw, cg, "CGContextDrawImage")
-		purego.RegisterLibFunc(&io.malloc, libc, "malloc")
+		purego.RegisterLibFunc(&io.calloc, libc, "calloc")
 		purego.RegisterLibFunc(&io.free, libc, "free")
 		io.kWidth = constant(iio, "kCGImagePropertyPixelWidth")
 		io.kHeight = constant(iio, "kCGImagePropertyPixelHeight")
