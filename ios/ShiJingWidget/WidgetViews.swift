@@ -1,5 +1,6 @@
 import AppIntents
 import SwiftUI
+import UIKit
 import WidgetKit
 
 // 小组件的界面。App 的 Debug 构建也编译这个文件（启动参数 -demoWidgets 把各种尺寸摆在一页上），方便在模拟器里看排版。
@@ -110,14 +111,35 @@ struct StatusView: View {
     @Environment(\.widgetFamily) private var envFamily
     @Environment(\.showsWidgetContainerBackground) private var showsContainer
     @Environment(\.widgetRenderingMode) private var renderingMode
-    /// 主屏幕用着色或透明图标（iOS 18 的着色、iOS 26 起的透明）时为 false：系统去掉背景图，
-    /// 文字和图标按系统的颜色统一渲染。这时文字用系统的主色、去掉阴影，阴影在玻璃上会糊成一片。
+    /// 主屏幕用着色或透明图标（iOS 18 的着色、iOS 26 起的透明）时为 false：系统去掉 containerBackground，
+    /// 把壁纸图画在内容里并按原色显示，再叠一层原色上下渐暗，文字和描边按钮才看得清。
     /// 两个环境值都看：透明模式下实测 `showsWidgetContainerBackground` 仍可能是 true（v0.4.18 只看它，没生效）
     private var showsBackground: Bool { showsContainer && renderingMode == .fullColor }
     private var family: WidgetFamily { familyOverride ?? envFamily }
 
     private var big: Bool { family.isBig }
     private var padding: CGFloat { family == .systemSmall ? 14 : 16 }
+
+    /// 1×64 像素的上下渐暗图：在着色 / 透明模式下通过 `fullColorInAccentedMode()` 保留真实黑色半透明，
+    /// 直接画 SwiftUI 的 `LinearGradient` 会被系统染成单色白雾，反而把壁纸和文字糊在一起。
+    private static let dimOverlay: UIImage = {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let size = CGSize(width: 1, height: 64)
+        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            let colors = [
+                UIColor.black.withAlphaComponent(0.35).cgColor,
+                UIColor.clear.cgColor,
+                UIColor.clear.cgColor,
+                UIColor.black.withAlphaComponent(0.65).cgColor,
+            ] as CFArray
+            let locations: [CGFloat] = [0, 0.3, 0.45, 1]
+            if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: locations) {
+                ctx.cgContext.drawLinearGradient(grad, start: .zero, end: CGPoint(x: 0, y: size.height), options: [])
+            }
+        }
+    }()
 
     var body: some View {
         switch family {
@@ -131,18 +153,31 @@ struct StatusView: View {
     // MARK: 主屏幕
 
     private var home: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            header
-            Spacer(minLength: 0)
-            if let s = entry.state {
-                content(s)
-            } else {
-                Text(entry.problem ?? "正在读取…").font(.footnote.weight(.medium))
+        ZStack(alignment: .leading) {
+            if !showsBackground, let image = entry.image {
+                Color.clear.overlay {
+                    Image(uiImage: image).resizable().fullColorInAccentedMode()
+                        .aspectRatio(contentMode: .fill)
+                }
+                .overlay {
+                    Image(uiImage: Self.dimOverlay).resizable().fullColorInAccentedMode()
+                }
+                .clipped()
             }
+            VStack(alignment: .leading, spacing: 4) {
+                header
+                Spacer(minLength: 0)
+                if let s = entry.state {
+                    content(s)
+                } else {
+                    Text(entry.problem ?? "正在读取…").font(.footnote.weight(.medium))
+                }
+            }
+            .foregroundStyle(showsBackground ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+            .shadow(color: .black.opacity(showsBackground ? 0.35 : 0), radius: 3, y: 1)
+            .padding(padding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .foregroundStyle(showsBackground ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-        .shadow(color: .black.opacity(showsBackground ? 0.35 : 0), radius: 3, y: 1)
-        .padding(padding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 

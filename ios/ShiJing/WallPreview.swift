@@ -49,9 +49,14 @@ struct WallPreview: View {
     /// 前置摄像头（被占用的那块玻璃）在页面里的位置：iPhone Duo 外屏竖放时在右上，横放时跟着设备转到左边或右边。
     /// 右边那一列按钮就放在这同一侧，和摄像头、状态栏对齐（`reservedRegions(kind: .occlusion)`，iOS 27.1 起）
     @State private var cameraFrame: CGRect = CGRect(x: 0, y: 0, width: 0, height: 0)
-    /// 右上角被占用的区域的下沿：前置摄像头、竖排的状态栏、灵动岛里正在显示的实时活动，取所有遮挡区里最低的那条。
-    /// Duo 外屏竖放时右边那一列按钮从它下面开始排（见 sideButtons）；量不到时为 nil
-    @State private var occlusionBottom: CGFloat?
+    /// 右上角遮挡区（前置摄像头、状态栏、灵动岛里的实时活动）：
+    /// - `bottom`：右半屏上半部分所有遮挡区的最低处（外屏竖放让开竖排状态栏，内屏竖放落到下方时也要让开）
+    /// - `topWidth`：顶栏高度内遮挡区从屏右缘往左占的宽度（内屏竖放避让状态栏和灵动岛）
+    private struct TopRightOcclusion: Equatable {
+        var bottom: CGFloat?
+        var topWidth: CGFloat = 0
+    }
+    @State private var topRightOcclusion = TopRightOcclusion()
     /// 顶栏下沿、底栏上沿（全局坐标）：竖屏完整显示时图片放在两者之间，不被底栏挡住
     @State private var topBarBottom: CGFloat = 0
     /// 窗口的安全区：整页 `ignoresSafeArea` 铺满之后，页面里量到的安全区是 0，所以从窗口上取。
@@ -192,20 +197,24 @@ struct WallPreview: View {
             } action: { f in
                 if f != cameraFrame { cameraFrame = f }
             }
-            // 右半屏上半部分所有遮挡区的最低处。Duo 外屏竖放时，状态栏竖着排在右上角，灵动岛里有实时活动
-            //（比如在放音乐）时那块会往下伸长；只看摄像头那一小块的话，按钮列居中后上面几颗会压在状态栏下面
-            //（v0.4.18 用户反馈关闭按钮被电量图标挡住）。
-            .onGeometryChange(for: CGFloat?.self) { proxy in
+            // 右上角所有遮挡区（前置摄像头、状态栏、灵动岛里的实时活动）：
+            // - 外屏竖放时状态栏竖排在右上角，有实时活动时会往下伸长，按钮列从最低处往下居中（v0.4.18）
+            // - 内屏竖放时状态栏和灵动岛横排在右上角，有实时活动时会往左伸长，顶栏右侧按左沿动态让开
+            .onGeometryChange(for: TopRightOcclusion.self) { proxy in
                 if #available(iOS 27.1, *) {
                     let size = proxy.size
-                    let bottoms = proxy.reservedRegions(kind: .occlusion).map(\.frame).filter {
-                        !$0.isEmpty && $0.midX > size.width / 2 && $0.minY < size.height / 2
-                    }.map(\.maxY)
-                    return bottoms.max()
+                    let regions = proxy.reservedRegions(kind: .occlusion).map(\.frame).filter {
+                        !$0.isEmpty && $0.maxX > size.width / 2 && $0.minY < size.height / 2
+                            && $0.width < size.width * 0.85
+                    }
+                    let bottom = regions.filter { $0.midX > size.width / 2 }.map(\.maxY).max()
+                    let topMinX = regions.filter { $0.minY < 100 }.map(\.minX).min()
+                    let topWidth = topMinX.map { max(0, size.width - $0) } ?? 0
+                    return TopRightOcclusion(bottom: bottom, topWidth: topWidth)
                 }
-                return nil
-            } action: { b in
-                if b != occlusionBottom { occlusionBottom = b }
+                return TopRightOcclusion()
+            } action: { o in
+                if o != topRightOcclusion { topRightOcclusion = o }
             }
             .contentShape(Rectangle())
             // 双击和单击要互斥：分开挂两个 onTapGesture 的话，双击的第一下会先触发一次单击，
@@ -562,9 +571,10 @@ struct WallPreview: View {
                 if let wall { topActions(wall) }
             }
         }
-        .padding(.horizontal, 20)
-        // Duo 内屏竖放：系统相册把按钮行和右上角的时间、信号放在同一行（v0.3.167）
-        .padding(.trailing, topRowBesideStatusBar ? 120 : 0)
+        .padding(.leading, 20)
+        // Duo 内屏竖放：系统相册把按钮行和右上角的时间、信号放在同一行（v0.3.167）；
+        // 有灵动岛实时活动时状态栏会往左扩展，按系统报的遮挡区动态让开。
+        .padding(.trailing, topRowBesideStatusBar ? statusBarTrailing : 20)
         // 铺满全屏后 padding 是从屏幕边缘算的，安全区得自己加：竖屏状态栏 / 灵动岛下面再留 8，
         // 横屏（安全区几乎为 0）离上边缘至少 28，不然编号贴着屏幕边。
         // Duo 内屏竖放例外：状态栏本来就占着顶上一整行（安全区 82），按钮行要跟它并排、不能落到下面
@@ -590,16 +600,30 @@ struct WallPreview: View {
             if layoutSize.width > layoutSize.height { return 28 }
             return max(windowSafe.top + 12, 40)
         }
-        return max(windowSafe.top + 8, 28)
+        let occ = duoInnerPortrait ? (topRightOcclusion.bottom ?? 0) : 0
+        return max(windowSafe.top + 8, occ + 8, 28)
     }
 
-    /// 顶部那一排按钮要不要和状态栏并排：只有 Duo 内屏竖放是这样（系统相册里关闭、分享、日期、
-    /// 滑块、删除排成一行，最右边才是时间和信号）。按屏幕形状认：宽屏竖放、宽度不到 iPad 那档
-    /// （Duo 内屏竖放 669×951，iPad 竖放最窄的 mini 也有 744 宽）。以前按窗口顶安全区 > 60 认，
-    /// 真机上读到的值和模拟器不一样，按钮行就掉到状态栏下面去了（v0.3.168）。
-    /// 右边的按钮组要让开状态栏那一块（实测内屏竖放状态栏从 558pt 起、屏宽 669），留 120。
-    private var topRowBesideStatusBar: Bool {
+    /// Duo 内屏竖放的屏形：宽屏竖放、宽度不到 iPad 那档（Duo 内屏竖放 669×951，iPad mini 竖放 744 宽）。
+    /// 以前按窗口顶安全区 > 60 认，真机上读到的值和模拟器不一样，按钮行掉到状态栏下面去了（v0.3.168）。
+    private var duoInnerPortrait: Bool {
         wide && !sideColumn && layoutSize.height > layoutSize.width && layoutSize.width < 700
+    }
+
+    /// 内屏竖放与状态栏并排时，顶栏右边需要留出的距离（屏右缘到删除按钮右缘）。
+    /// 平常状态栏占约 111pt、固定留 140pt；灵动岛有实时活动（如导航、媒体）时遮挡区往左扩，
+    /// 按系统报的遮挡宽度再加一点留白，避免最右侧的删除按钮被时间和灵动岛挡住。
+    private var statusBarTrailing: CGFloat {
+        max(140, topRightOcclusion.topWidth + 8)
+    }
+
+    /// 顶部那一排按钮要不要和状态栏并排：Duo 内屏竖放，且让开状态栏和灵动岛后还放得下整排按钮。
+    /// 若灵动岛展开得很宽导致放不下，自动退回落到状态栏下方（按钮不和编号挤在一起，也不被遮挡）。
+    private var topRowBesideStatusBar: Bool {
+        guard duoInnerPortrait else { return false }
+        // 左边距 20 + 关闭 38 + (撤销 46) + 编号 ~96 + 间距 8 + 右侧操作组 224 ≈ 386（有撤销 432）
+        let needed: CGFloat = session.undoName == nil ? 400 : 444
+        return layoutSize.width - statusBarTrailing >= needed
     }
 
     private func undoButton(_ name: String, size: CGFloat = 44) -> some View {
@@ -649,7 +673,7 @@ struct WallPreview: View {
         // 竖放：状态栏竖着排在右上角，整列放在它下面那段里居中。量不到遮挡区（iOS 27.1 以前）时按
         // 外屏竖放状态栏的高度留（模拟器量到 174）。以前整屏居中，列一高（有撤销按钮）或者灵动岛里有实时活动，
         // 关闭按钮就落到电量图标下面、点不到（v0.4.18 用户反馈）。
-        let statusBottom = occlusionBottom ?? 174
+        let statusBottom = topRightOcclusion.bottom ?? 174
         let topInset: CGFloat = landscape
             ? (tallScreen
                 ? (camNearTop && camOnColumnSide ? cameraFrame.maxY : max(windowSafe.top + button, 28))

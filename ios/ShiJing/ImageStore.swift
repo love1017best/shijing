@@ -532,13 +532,23 @@ struct WallImage: View {
     var kind: ImageKind = .thumb
     var contentMode: ContentMode = .fill
     @State private var image: PlatformImage?
+    /// `image` 对应的那张图（Mac + 文件名 + 档位）：网格列数变化（比如首次布局从 2 列变 3 列）
+    /// 或列表变更复用视图时，旧的 `load` 任务结束后不会把新位置的图覆写成旧图。
+    @State private var loadedKey: String?
     /// 切回前台时重试一次（后台时正在下载的那张会被系统掐断，回来不然一直是灰的）
     @State private var retry = 0
     @Environment(\.scenePhase) private var scenePhase
 
+    private var targetKey: String { "\(session.macID.uuidString)|\(wall.name)|\(kind.rawValue)" }
+
+    private var displayed: PlatformImage? {
+        if loadedKey == targetKey, let image { return image }
+        return ImageStore.shared.cached(session, wall.name, kind) ?? fallback
+    }
+
     var body: some View {
         ZStack {
-            if let img = image ?? fallback {
+            if let img = displayed {
                 Image(platformImage: img)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
@@ -547,14 +557,24 @@ struct WallImage: View {
                 if !session.offline { ProgressView() } // 离线时没有就是没有，别一直转圈
             }
         }
-        .task(id: wall.name + (session.offline ? "|offline" : "|online") + "|\(retry)") {
-            image = ImageStore.shared.cached(session, wall.name, kind)
-            if image == nil {
-                image = await ImageStore.shared.load(session, wall.name, kind)
+        .task(id: "\(targetKey)|\(session.offline ? "offline" : "online")|\(retry)") {
+            let key = targetKey
+            if let hit = ImageStore.shared.cached(session, wall.name, kind) {
+                loadedKey = key
+                image = hit
+                return
             }
+            if loadedKey != key {
+                image = nil
+                loadedKey = nil
+            }
+            let loaded = await ImageStore.shared.load(session, wall.name, kind)
+            guard !Task.isCancelled, targetKey == key else { return }
+            loadedKey = key
+            image = loaded
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, image == nil { retry += 1 }
+            if phase == .active, (loadedKey != targetKey || image == nil) { retry += 1 }
         }
     }
 

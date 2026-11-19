@@ -142,6 +142,7 @@ struct WallGrid: View {
                                 if i < shown.count {
                                     let w = shown[shown.startIndex + i]
                                     tile(w, number: order?[w.id] ?? i + 1)
+                                        .id(w.id)
                                 } else {
                                     Color.clear // 最后一行的空位，撑住列宽
                                 }
