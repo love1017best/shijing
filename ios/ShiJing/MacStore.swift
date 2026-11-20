@@ -32,6 +32,7 @@ final class MacStore {
         } else {
             selectedID = macs.first?.id
         }
+        syncFromCurrentMac()
         publishCurrent()
     }
 
@@ -39,13 +40,34 @@ final class MacStore {
 
     func mac(serviceName: String) -> SavedMac? { macs.first { $0.serviceName == serviceName } }
 
-    /// 配对成功：同一台 Mac（同一个服务名或同一个地址）重新配对时替换旧的那条。
-    @discardableResult
-    func add(name: String, serviceName: String?, address: MacAddress, token: String) -> SavedMac {
-        let old = macs.first {
-            (serviceName != nil && $0.serviceName == serviceName) || ($0.host == address.host && $0.port == address.port)
+    /// 判断局域网里发现的 Mac 是否已经配对过：优先按 serverID 匹配，无 serverID 时退回 serviceName。
+    func isPaired(serverID: String?, serviceName: String) -> Bool {
+        if let serverID, !serverID.isEmpty, macs.contains(where: { $0.serverID == serverID }) {
+            return true
         }
-        var mac = SavedMac(name: name, serviceName: serviceName, host: address.host, port: address.port)
+        return macs.contains { $0.serviceName == serviceName }
+    }
+
+    /// 配对成功：同一台 Mac（同一 serverID、同一服务名或同一地址）重新配对时替换旧的那条，保留本地 ID 与缓存。
+    @discardableResult
+    func add(name: String, serverID: String? = nil, serviceName: String?, address: MacAddress, token: String) -> SavedMac {
+        let cleanSID = serverID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sid = (cleanSID?.isEmpty == false) ? cleanSID : nil
+        let cleanSvc = serviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let svc = (cleanSvc?.isEmpty == false) ? cleanSvc : (name.isEmpty ? nil : name)
+
+        let old = macs.first {
+            (sid != nil && $0.serverID == sid)
+                || (svc != nil && $0.serviceName == svc)
+                || ($0.host == address.host && $0.port == address.port)
+        }
+        var mac = SavedMac(
+            name: name,
+            serverID: sid ?? old?.serverID,
+            serviceName: svc ?? old?.serviceName,
+            host: address.host,
+            port: address.port
+        )
         if let old {
             mac.id = old.id
             macs.removeAll { $0.id == old.id }
@@ -59,13 +81,72 @@ final class MacStore {
         return mac
     }
 
-    /// Mac 的 IP 变了：更新记住的地址。
-    func update(_ id: SavedMac.ID, address: MacAddress) {
-        guard let i = macs.firstIndex(where: { $0.id == id }),
-              macs[i].host != address.host || macs[i].port != address.port else { return }
-        macs[i].host = address.host
-        macs[i].port = address.port
-        save()
+    /// 更新已配对 Mac 的地址、名称或身份信息（Bonjour 自动重定位、老数据回填、手动修改地址共用）。
+    @discardableResult
+    func update(
+        _ id: SavedMac.ID,
+        address: MacAddress? = nil,
+        name: String? = nil,
+        serverID: String? = nil,
+        serviceName: String? = nil
+    ) -> SavedMac? {
+        guard let i = macs.firstIndex(where: { $0.id == id }) else { return nil }
+        var changed = false
+        if let address, macs[i].host != address.host || macs[i].port != address.port {
+            macs[i].host = address.host
+            macs[i].port = address.port
+            changed = true
+        }
+        if let name, !name.isEmpty, macs[i].name != name {
+            macs[i].name = name
+            changed = true
+        }
+        if let serverID, !serverID.isEmpty, macs[i].serverID != serverID {
+            macs[i].serverID = serverID
+            changed = true
+        }
+        if let serviceName, !serviceName.isEmpty, macs[i].serviceName != serviceName {
+            macs[i].serviceName = serviceName
+            changed = true
+        }
+        if changed {
+            save()
+        }
+        return macs[i]
+    }
+
+    /// 主 App 启动或回到前台时，若小组件/快捷指令在后台已通过 Bonjour 更新了共享钥匙串里的地址，同步回 MacStore。
+    func syncFromCurrentMac() {
+        guard let cur = CurrentMac.load() else { return }
+        let idx: Int? = if let curID = cur.id {
+            macs.firstIndex { $0.id == curID }
+        } else if let sid = cur.serverID, !sid.isEmpty {
+            macs.firstIndex { $0.serverID == sid }
+        } else {
+            nil
+        }
+        guard let i = idx else { return }
+        var changed = false
+        if macs[i].host != cur.host || macs[i].port != cur.port {
+            macs[i].host = cur.host
+            macs[i].port = cur.port
+            changed = true
+        }
+        if !cur.name.isEmpty, macs[i].name != cur.name {
+            macs[i].name = cur.name
+            changed = true
+        }
+        if let sid = cur.serverID, !sid.isEmpty, macs[i].serverID != sid {
+            macs[i].serverID = sid
+            changed = true
+        }
+        if let svc = cur.serviceName, !svc.isEmpty, macs[i].serviceName != svc {
+            macs[i].serviceName = svc
+            changed = true
+        }
+        if changed, let data = try? JSONEncoder().encode(macs) {
+            UserDefaults.standard.set(data, forKey: Self.macsKey)
+        }
     }
 
     func remove(_ id: SavedMac.ID) {
@@ -99,6 +180,14 @@ final class MacStore {
             CurrentMac.clear()
             return
         }
-        CurrentMac(id: mac.id, name: mac.name, host: mac.host, port: mac.port, token: token).save()
+        CurrentMac(
+            id: mac.id,
+            name: mac.name,
+            serverID: mac.serverID,
+            serviceName: mac.serviceName,
+            host: mac.host,
+            port: mac.port,
+            token: token
+        ).save()
     }
 }

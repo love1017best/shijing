@@ -56,11 +56,12 @@ func TestIOSContract(t *testing.T) {
 		dir := t.TempDir()
 
 		writeContractJSON(t, dir, "info.json", map[string]any{
-			"app":     "拾景",
-			"name":    "测试 Mac",
-			"api":     remoteAPIVer,
-			"version": "0.4.27",
-			"paired":  true,
+			"app":       "拾景",
+			"name":      "测试 Mac",
+			"server_id": "11111111-2222-4333-8444-555555555555",
+			"api":       remoteAPIVer,
+			"version":   "0.4.27",
+			"paired":    true,
 		})
 
 		fullState := remoteState{

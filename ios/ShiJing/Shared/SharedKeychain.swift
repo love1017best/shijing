@@ -100,8 +100,12 @@ enum Keychain {
 /// App 里选中的那台 Mac，给小组件和快捷指令用。
 struct CurrentMac: Codable, Equatable {
     /// Mac 的固定标识（旧版本钥匙串记录没有这个字段，解码时为 nil）
-    var id: UUID?
+    var id: UUID? = nil
     var name: String
+    /// 桌面端持久化的唯一标识（旧记录为 nil）
+    var serverID: String? = nil
+    /// Bonjour 服务名（旧记录为 nil）
+    var serviceName: String? = nil
     var host: String
     var port: Int
     var token: String
@@ -115,10 +119,12 @@ struct CurrentMac: Codable, Equatable {
 
     func client() throws -> APIClient { try APIClient(address: address, token: token) }
 
-    func save() {
+    func save(reloadWidgets: Bool = true) {
         guard Self.load() != self, let data = try? JSONEncoder().encode(self) else { return }
         Keychain.setData(data, account: Self.account)
-        Self.changed()
+        if reloadWidgets {
+            Self.changed()
+        }
     }
 
     static func load() -> CurrentMac? {

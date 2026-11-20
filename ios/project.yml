@@ -23,6 +23,8 @@ targets:
     platform: iOS
     sources:
       - path: ShiJing
+        excludes:
+          - Local.xcconfig
       # 小组件的界面也编进 App，Debug 下的 -demoWidgets 演示页用
       - path: ShiJingWidget/WidgetViews.swift
     settings:
@@ -81,5 +83,9 @@ targets:
       properties:
         CFBundleDisplayName: 拾景
         ShiJingKeychainGroup: $(AppIdentifierPrefix)com.love1017best.shijing.shared
+        NSBonjourServices:
+          - _shijing._tcp
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension

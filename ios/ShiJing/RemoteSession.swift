@@ -76,6 +76,12 @@ final class RemoteSession {
     /// 离线时点的「移出 / 不再选」，连上电脑后自动处理（存在 UserDefaults 里，按 Mac 分开）
     var queued: [OfflineAction] = []
     var flushing = false
+    /// 上次发起 Bonjour 重定位的时间（限制频率，避免高频扫网）
+    private var lastRelocateAt = Date.distantPast
+    private var relocating = false
+    private static let relocateCooldown: TimeInterval = 12
+    /// 老用户已配对记录缺少 serverID / serviceName 时，首次连上后补齐一次
+    private var identityChecked = false
 
     init(mac: SavedMac, store: MacStore) {
         self.mac = mac
@@ -308,14 +314,44 @@ final class RemoteSession {
         #endif
     }
 
+    /// 外部（小组件回写或用户手动修改地址）更新了这台 Mac 的地址/名称时同步到当前会话。
+    func syncMac(_ updated: SavedMac) {
+        guard updated.id == macID else { return }
+        let addrChanged = updated.address != mac.address
+        mac = updated
+        if addrChanged {
+            lastRelocateAt = .distantPast
+            if !paused, hold == nil, !networkDown, !isUnpaired {
+                connection = .connecting
+                start()
+            }
+        }
+    }
+
     private func loop() async {
         var delay: Double = 1
         var failures = 0
         while !Task.isCancelled {
             if state == nil { connection = .connecting }
+            // 旧 IP 无人占用时 TCP SYN 超时较长：超过 3 秒仍未收到 SSE 首帧时，在后台并行按 Bonjour 检查新地址
+            var fastProbe: Task<Void, Never>?
+            if !networkDown, !cellularOnly, hold == nil, mac.serverID != nil || mac.serviceName != nil {
+                fastProbe = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(3))
+                    guard !Task.isCancelled, let self else { return }
+                    if await self.tryRelocate() {
+                        if !self.paused, !self.isUnpaired, self.hold == nil {
+                            self.start()
+                        }
+                    }
+                }
+            }
+            defer { fastProbe?.cancel() }
             do {
                 var firstEvent = true
                 for try await s in try client().events() {
+                    fastProbe?.cancel()
+                    fastProbe = nil
                     let wasLive = connection == .live
                     let wasRunning = state?.running == true
                     let isFirst = firstEvent
@@ -341,6 +377,9 @@ final class RemoteSession {
                         Task { await refreshRecordsCache() }
                     }
                     if !wasLive {
+                        if !identityChecked, mac.serverID == nil || mac.serviceName == nil {
+                            Task { await backfillIdentityIfNeeded() }
+                        }
                         Task {
                             if s.wallsRev != wallsRev {
                                 // 换了一批：refreshWalls 里先收拾缓存，再按新的列表补齐
@@ -364,18 +403,19 @@ final class RemoteSession {
                 // 服务端正常关闭（遥控被关掉、应用退出）：当作断开，稍后重连
                 throw URLError(.networkConnectionLost)
             } catch APIError.unauthorized(let msg) {
+                fastProbe?.cancel()
                 markUnpaired(msg)
                 return
             } catch {
+                fastProbe?.cancel()
                 if Task.isCancelled { return }
                 failures += 1
                 connection = .offline(Self.describe(error))
-                // 连不上时试试按 Bonjour 服务名重新找：Mac 的 IP 可能变了
-                if failures % 2 == 1, let name = mac.serviceName,
-                   let addr = try? await Discovery.resolve(serviceName: name), addr != mac.address {
-                    mac.host = addr.host
-                    mac.port = addr.port
-                    store.update(macID, address: addr)
+                // 连不上且在局域网内时，按 serverID / serviceName 通过 Bonjour 查找新地址（带冷却控制）
+                if MacRelocator.isNetworkFailure(error), await tryRelocate() {
+                    delay = 1
+                    failures = 0
+                    connection = .connecting
                     continue
                 }
             }
@@ -384,6 +424,58 @@ final class RemoteSession {
             // 多半是不在同一个网络，改成 1 分钟一次，少耗电
             delay = min(delay * 2, failures >= 8 ? 60 : 15)
         }
+    }
+
+    /// 首次连上旧版遗留记录（缺少 serverID 或 serviceName）时，顺带查一次 /api/info 回填身份。
+    private func backfillIdentityIfNeeded() async {
+        guard !identityChecked else { return }
+        identityChecked = true
+        guard let info = try? await client().info(timeout: 5), info.app == "拾景" else { return }
+        let sid = info.serverId ?? mac.serverID
+        let svc = mac.serviceName ?? info.name
+        if let updated = store.update(macID, name: info.name, serverID: sid, serviceName: svc) {
+            mac = updated
+        }
+    }
+
+    /// 通过 Bonjour 重新查找 Mac 地址并经 /api/info 核对身份；命中后原地更新地址与名称，地址有变化时返回 true。
+    private func tryRelocate() async -> Bool {
+        guard !relocating, !networkDown, !cellularOnly, hold == nil, !isUnpaired else { return false }
+        guard mac.serverID != nil || mac.serviceName != nil else { return false }
+        guard Date().timeIntervalSince(lastRelocateAt) >= Self.relocateCooldown else { return false }
+
+        relocating = true
+        lastRelocateAt = Date()
+        defer { relocating = false }
+
+        let targetServerID = mac.serverID
+        let targetServiceName = mac.serviceName
+        guard let resolved = await MacRelocator.locate(
+            serverID: targetServerID,
+            serviceName: targetServiceName,
+            timeout: 3.5
+        ) else {
+            return false
+        }
+        guard !Task.isCancelled, !paused, !isUnpaired, hold == nil else { return false }
+
+        let addrChanged = resolved.address != mac.address
+        if let updated = store.update(
+            macID,
+            address: resolved.address,
+            name: resolved.name,
+            serverID: resolved.serverID,
+            serviceName: resolved.serviceName
+        ) {
+            mac = updated
+        } else {
+            mac.host = resolved.address.host
+            mac.port = resolved.address.port
+            mac.name = resolved.name
+            mac.serviceName = resolved.serviceName
+            if let sid = resolved.serverID { mac.serverID = sid }
+        }
+        return addrChanged
     }
 
     static func describe(_ error: Error) -> String {

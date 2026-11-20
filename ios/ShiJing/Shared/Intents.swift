@@ -19,12 +19,30 @@ enum IntentError: LocalizedError {
     }
 }
 
-private func currentClient() async throws -> (CurrentMac, APIClient) {
+private func currentMac() async throws -> CurrentMac {
     if let reason = await OfflinePrefs.holdReasonNow() {
         throw IntentError.offline(reason)
     }
     guard let mac = CurrentMac.load() else { throw IntentError.noMac }
-    return (mac, try mac.client())
+    return mac
+}
+
+/// 连接当前 Mac 执行操作；若因网络层错误连不上，尝试短时 Bonjour 重定位并回写钥匙串后重试一次。
+private func withRecoveredClient<T>(_ work: (CurrentMac, APIClient) async throws -> T) async throws -> T {
+    let mac = try await currentMac()
+    do {
+        return try await work(mac, try mac.client())
+    } catch {
+        if MacRelocator.isNetworkFailure(error),
+           let recovered = await MacRelocator.recoverCurrentMac(mac, timeout: 3.0) {
+            do {
+                return try await work(recovered, try recovered.client())
+            } catch {
+                throw explain(error, mac: recovered.name)
+            }
+        }
+        throw explain(error, mac: mac.name)
+    }
 }
 
 /// 把网络错误换成能直接念出来的话。
@@ -51,17 +69,15 @@ struct RunWallpaperIntent: AppIntent {
     init(deleteOriginals: Bool) { self.deleteOriginals = deleteOriginals }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let (mac, client) = try await currentClient()
-        do {
-            let before = try await client.state()
-            if before.running { return .result(dialog: "「\(mac.name)」正在更换壁纸，请等待本次更换完成。") }
-            if let b = before.blocked { return .result(dialog: "现在换不了：\(b)") }
+        let dialog: String = try await withRecoveredClient { mac, client in
+            let before = try await client.state(timeout: 6)
+            if before.running { return "「\(mac.name)」正在更换壁纸，请等待本次更换完成。" }
+            if let b = before.blocked { return "现在换不了：\(b)" }
             let s = try await client.run(deleteOriginals: deleteOriginals)
             WidgetReload.all()
-            return .result(dialog: s.running ? "好的，「\(mac.name)」开始换一批 \(s.sampleCount) 张壁纸。" : "\(s.title)")
-        } catch {
-            throw explain(error, mac: mac.name)
+            return s.running ? "好的，「\(mac.name)」开始换一批 \(s.sampleCount) 张壁纸。" : "\(s.title)"
         }
+        return .result(dialog: "\(dialog)")
     }
 }
 
@@ -70,15 +86,13 @@ struct StopWallpaperIntent: AppIntent {
     static let description = IntentDescription("停止 Mac 上正在进行的换壁纸。")
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let (mac, client) = try await currentClient()
-        do {
-            guard try await client.state().running else { return .result(dialog: "「\(mac.name)」当前没有在更换壁纸。") }
+        let dialog: String = try await withRecoveredClient { mac, client in
+            guard try await client.state(timeout: 6).running else { return "「\(mac.name)」当前没有在更换壁纸。" }
             _ = try await client.stop()
             WidgetReload.all()
-            return .result(dialog: "已经让「\(mac.name)」停下。")
-        } catch {
-            throw explain(error, mac: mac.name)
+            return "已经让「\(mac.name)」停下。"
         }
+        return .result(dialog: "\(dialog)")
     }
 }
 
@@ -87,22 +101,20 @@ struct WallpaperStatusIntent: AppIntent {
     static let description = IntentDescription("看看 Mac 上的拾景现在在做什么、上次换得怎么样。")
 
     func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
-        let (mac, client) = try await currentClient()
-        do {
-            let s = try await client.state()
-            var text: String
+        let text: String = try await withRecoveredClient { mac, client in
+            let s = try await client.state(timeout: 6)
+            var out: String
             if s.running {
-                text = "「\(mac.name)」正在更换壁纸"
-                if let l = s.label, !l.isEmpty { text += "：\(l)" }
+                out = "「\(mac.name)」正在更换壁纸"
+                if let l = s.label, !l.isEmpty { out += "：\(l)" }
             } else {
-                text = "\(s.title)。"
+                out = "\(s.title)。"
                 if let next = s.nextAutoDate {
-                    text += "下次自动换在 \(next.formatted(.dateTime.month().day().hour().minute()))。"
+                    out += "下次自动换在 \(next.formatted(.dateTime.month().day().hour().minute()))。"
                 }
             }
-            return .result(value: text, dialog: "\(text)")
-        } catch {
-            throw explain(error, mac: mac.name)
+            return out
         }
+        return .result(value: text, dialog: "\(text)")
     }
 }

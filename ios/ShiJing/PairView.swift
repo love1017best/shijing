@@ -4,10 +4,11 @@ import SwiftUI
 /// 要配对的那台 Mac：从 Bonjour 找到的（endpoint）或手动输入的（address）。
 struct PairTarget: Identifiable {
     var name: String
+    var serverID: String?
     var serviceName: String?
     var endpoint: NWEndpoint?
     var address: MacAddress?
-    var id: String { serviceName ?? address.map { "\($0.host):\($0.port)" } ?? name }
+    var id: String { serverID ?? serviceName ?? address.map { "\($0.host):\($0.port)" } ?? name }
 }
 
 /// 配对：请求后电脑上弹出 6 位配对码，在这里输入。
@@ -147,7 +148,13 @@ struct PairView: View {
         do {
             let r = try await APIClient(address: addr, token: nil).pairFinish(code: code, id: Self.deviceID)
             Self.rememberDeviceName(device)
-            store.add(name: r.name, serviceName: target.serviceName, address: addr, token: r.token)
+            store.add(
+                name: r.name,
+                serverID: r.serverId ?? target.serverID,
+                serviceName: target.serviceName ?? r.name,
+                address: addr,
+                token: r.token
+            )
             dismiss()
         } catch APIError.server(let status, let msg) {
             error = msg

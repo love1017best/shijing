@@ -101,6 +101,11 @@ struct RootView: View {
         .onChange(of: SessionKey(id: store.selectedID, pairRevision: store.pairRevision)) { old, new in
             syncSession(force: old.pairRevision != new.pairRevision)
         }
+        .onChange(of: store.selected?.address) { _, _ in
+            if let cur = store.selected {
+                session?.syncMac(cur)
+            }
+        }
         // 点开「换完了」「签名快到期」这些通知：切到对应的标签（通知里带 target）
         .onChange(of: NotificationRouter.shared.tab, initial: true) { _, target in
             guard let target else { return }
@@ -113,6 +118,10 @@ struct RootView: View {
             #endif
             switch phase {
             case .active:
+                store.syncFromCurrentMac()
+                if let cur = store.selected {
+                    session?.syncMac(cur)
+                }
                 discovery.setPaused(false)
                 session?.endBackground(disconnect: false)
                 session?.start()

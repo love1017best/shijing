@@ -68,7 +68,7 @@ private struct LogEnvelope: Codable { var lines: [String] }
 
 private func runSchemaMode(dir: URL) throws {
     let info = try verifyRoundTrip(ServerInfo.self, file: dir.appending(path: "info.json"), name: "ServerInfo")
-    try check(info.app == "拾景" && info.api == 1 && info.paired, "ServerInfo 字段值异常: \(info)")
+    try check(info.app == "拾景" && info.api == 1 && info.paired && info.serverId == "11111111-2222-4333-8444-555555555555", "ServerInfo 字段值异常: \(info)")
 
     let full = try verifyRoundTrip(RemoteState.self, file: dir.appending(path: "state_full.json"), name: "RemoteState(full)")
     try check(full.running && full.stopping, "RemoteState running/stopping 不一致")
@@ -144,7 +144,7 @@ private func runLiveMode() async throws {
 
     // 1. 未配对 /api/info 与 401 鉴权（常规接口 + SSE）
     let guestInfo = try await guest.info()
-    try check(guestInfo.app == "拾景" && guestInfo.name == "测试 Mac" && guestInfo.api == 1 && !guestInfo.paired, "未配对 info 异常: \(guestInfo)")
+    try check(guestInfo.app == "拾景" && guestInfo.name == "测试 Mac" && guestInfo.api == 1 && !guestInfo.paired && !(guestInfo.serverId ?? "").isEmpty, "未配对 info 异常: \(guestInfo)")
     try await expectUnauthorized("GET /api/state") { _ = try await guest.state() }
     try await expectUnauthorized("GET /api/events") {
         for try await _ in guest.events() { break }
@@ -152,7 +152,7 @@ private func runLiveMode() async throws {
 
     // 2. 扫码配对完成 + 新设备发起配对请求
     let paired = try await guest.pairFinish(code: qrCode, device: "契约测试 iPhone", id: "contract-ios-1")
-    try check(!paired.token.isEmpty && paired.name == "测试 Mac", "pairFinish 返回异常: \(paired)")
+    try check(!paired.token.isEmpty && paired.name == "测试 Mac" && paired.serverId == guestInfo.serverId, "pairFinish 返回异常: \(paired)")
     try await guest.pairStart(device: "第二台 iPhone", id: "contract-ios-2")
 
     let client = try APIClient(address: addr, token: paired.token)

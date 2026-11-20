@@ -145,7 +145,7 @@ enum TimelineMaker {
     static func make(_ context: TimelineProviderContext, interval: RotateInterval, photo: Bool, preview: Bool) async -> Timeline<Entry> {
         let now = Date()
         let deadline = now.addingTimeInterval(budget)
-        guard let mac = CurrentMac.load() else {
+        guard var mac = CurrentMac.load() else {
             return Timeline(entries: [Entry(problem: "打开拾景配对一台 Mac")], policy: .after(now.addingTimeInterval(3600)))
         }
         let key = mac.cacheKey
@@ -153,7 +153,7 @@ enum TimelineMaker {
         let altKey: String? = legacyKey != key ? legacyKey : nil
         let accessory = context.family.isAccessory
 
-        // 1. 状态和列表：在线就取新的并缓存，取不到用缓存
+        // 1. 状态和列表：在线就取新的并缓存，连不上且未离线时尝试短时 Bonjour 重定位，仍取不到用缓存
         var snap: WidgetCache.Snapshot?
         var offlineSince: Date?
         var problem: String?
@@ -162,8 +162,21 @@ enum TimelineMaker {
         let held = await OfflinePrefs.holdNow()
         do {
             if held { throw CancellationError() }
-            let c = try mac.client()
-            let state = try await c.state(timeout: fastTimeout)
+            var c = try mac.client()
+            let state: RemoteState
+            do {
+                state = try await c.state(timeout: fastTimeout)
+            } catch {
+                // 旧 IP 连不上时在剩余预算内短时按 Bonjour 寻找新地址，核对后回写共享钥匙串并重试
+                if MacRelocator.isNetworkFailure(error),
+                   let recovered = await MacRelocator.recoverCurrentMac(mac, timeout: 3.0) {
+                    mac = recovered
+                    c = try mac.client()
+                    state = try await c.state(timeout: fastTimeout)
+                } else {
+                    throw error
+                }
+            }
             // 锁定屏幕上的功能小组件不用图，不拉列表
             let list = (photo || !accessory) ? (try? await c.wallpapers(timeout: fastTimeout)) : nil
             let cachedList = (WidgetCache.load(key) ?? (legacyKey != key ? WidgetCache.load(legacyKey) : nil))?.list

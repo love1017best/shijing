@@ -90,9 +90,10 @@ private struct MacTitleMenu: ViewModifier {
     }
 }
 
-/// 已配对的 Mac：点一台切换过去，左滑或长按移除。
+/// 已配对的 Mac：点一台切换过去，左滑或长按修改地址、移除。
 struct ManageMacsView: View {
     let store: MacStore
+    @State private var editing: SavedMac?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -121,13 +122,15 @@ struct ManageMacsView: View {
                         }
                         .swipeActions {
                             Button("移除", role: .destructive) { store.remove(mac.id) }
+                            Button("修改地址") { editing = mac }.tint(.blue)
                         }
                         .contextMenu {
+                            Button("修改地址…", systemImage: "network") { editing = mac }
                             Button("移除这台 Mac", systemImage: "trash", role: .destructive) { store.remove(mac.id) }
                         }
                     }
                 } footer: {
-                    Text("移除后要在电脑上重新配对才能再连。电脑上的拾景也可以在「设置 › 手机遥控」里取消这台手机的配对。")
+                    Text("同一局域网内 Mac 更换地址后会自动更新；跨网段或使用 VPN 时，可长按或左滑修改地址。移除后需重新配对。")
                 }
             }
             .navigationTitle("已配对的 Mac")
@@ -136,7 +139,98 @@ struct ManageMacsView: View {
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
             }
         }
+        .sheet(item: $editing) { mac in
+            EditMacAddressView(mac: mac, store: store)
+        }
         .onChange(of: store.macs.isEmpty) { _, empty in if empty { dismiss() } }
+    }
+}
+
+/// 手动修改已配对 Mac 的 IP 和端口（跨网段、VPN 场景保留原有令牌、缓存和离线队列）。
+private struct EditMacAddressView: View {
+    let mac: SavedMac
+    let store: MacStore
+    @State private var host: String
+    @State private var port: String
+    @State private var checking = false
+    @State private var error: String?
+    @Environment(\.dismiss) private var dismiss
+
+    init(mac: SavedMac, store: MacStore) {
+        self.mac = mac
+        self.store = store
+        _host = State(initialValue: mac.host)
+        _port = State(initialValue: String(mac.port))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    LabeledContent("Mac", value: mac.name)
+                }
+                Section {
+                    TextField("IP 地址，比如 192.168.1.20", text: $host)
+                        .autocorrectionDisabled()
+                        .iOSKeyboard(.numbersAndPunctuation)
+                    TextField("端口", text: $port)
+                        .iOSKeyboard(.numberPad)
+                } footer: {
+                    Text("保存前会连接新地址核对身份，原有的配对令牌、本地缓存和待处理操作都会保留。")
+                }
+                if let error {
+                    Section { Text(error).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("修改地址")
+            .iOSInlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if checking {
+                        ProgressView()
+                    } else {
+                        Button("保存") { Task { await save() } }
+                            .disabled(host.trimmingCharacters(in: .whitespaces).isEmpty || Int(port) == nil)
+                    }
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        checking = true
+        defer { checking = false }
+        error = nil
+        let cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanHost.isEmpty, let portNum = Int(port.trimmingCharacters(in: .whitespacesAndNewlines)), (1...65535).contains(portNum) else {
+            error = "请输入有效的 IP 地址和端口。"
+            return
+        }
+        let addr = MacAddress(host: cleanHost, port: portNum)
+        do {
+            let info = try await APIClient(address: addr, token: nil).info()
+            guard info.app == "拾景" else {
+                error = "这个地址上不是拾景。"
+                return
+            }
+            if let expectedID = mac.serverID, !expectedID.isEmpty,
+               let actualID = info.serverId, !actualID.isEmpty,
+               expectedID != actualID {
+                error = "这个地址上是另一台 Mac（\(info.name)），无法替换当前配对。"
+                return
+            }
+            store.update(
+                mac.id,
+                address: addr,
+                name: info.name,
+                serverID: info.serverId ?? mac.serverID,
+                serviceName: mac.serviceName ?? info.name
+            )
+            dismiss()
+        } catch {
+            self.error = RemoteSession.describe(error)
+        }
     }
 }
 
@@ -216,14 +310,19 @@ struct NearbySection: View {
     let flow: NearbyFlow
 
     private var unpaired: [Discovery.Found] {
-        discovery.found.filter { store.mac(serviceName: $0.name) == nil }
+        discovery.found.filter { !store.isPaired(serverID: $0.serverID, serviceName: $0.name) }
     }
 
     var body: some View {
         Section {
             ForEach(unpaired) { found in
                 Button {
-                    flow.pairing = PairTarget(name: found.name, serviceName: found.name, endpoint: found.endpoint)
+                    flow.pairing = PairTarget(
+                        name: found.name,
+                        serverID: found.serverID,
+                        serviceName: found.name,
+                        endpoint: found.endpoint
+                    )
                 } label: {
                     Label(found.name, systemImage: "plus.circle")
                 }
@@ -298,7 +397,7 @@ struct ManualAddView: View {
                 error = "这个地址上不是拾景。"
                 return
             }
-            onNext(PairTarget(name: info.name, serviceName: nil, address: addr))
+            onNext(PairTarget(name: info.name, serverID: info.serverId, serviceName: info.name, address: addr))
         } catch {
             self.error = RemoteSession.describe(error)
         }

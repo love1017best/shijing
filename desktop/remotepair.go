@@ -262,5 +262,9 @@ func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request)
 	rs.mu.Unlock()
 	rs.saveDevices(devs)
 	rs.a.update(func() { rs.a.toast = fmt.Sprintf("已和「%s」配对", name) })
-	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "name": rs.host})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token":     tok,
+		"name":      rs.host,
+		"server_id": rs.serverID,
+	})
 }

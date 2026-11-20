@@ -227,6 +227,8 @@ enum ImageKind: String, CaseIterable {
 struct ServerInfo: Codable {
     var app: String
     var name: String
+    /// 桌面端持久化的唯一标识；旧版桌面端没有这个字段
+    var serverId: String?
     var api: Int
     var version: String
     var paired: Bool
@@ -250,8 +252,10 @@ enum Step: String, CaseIterable {
 struct SavedMac: Codable, Identifiable, Hashable {
     var id = UUID()
     var name: String
-    /// Bonjour 服务名；Mac 换了 IP 时靠它重新找到
-    var serviceName: String?
+    /// 桌面端持久化的唯一标识；Mac 换 IP 或改名时优先靠它精准匹配
+    var serverID: String? = nil
+    /// Bonjour 服务名；旧版桌面端没有 serverID 时靠它兜底重解析
+    var serviceName: String? = nil
     var host: String
     var port: Int
 }

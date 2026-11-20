@@ -11,6 +11,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -21,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -55,9 +57,10 @@ type remoteDevice struct {
 }
 
 type remoteServer struct {
-	a    *app
-	file string // remote_devices.json
-	host string // 广播和显示用的电脑名
+	a        *app
+	file     string // remote_devices.json
+	host     string // 广播和显示用的电脑名
+	serverID string // 持久化的本机唯一标识：电脑换 IP 或改名后手机仍能认出同一台 Mac
 	// advertise 广播 Bonjour 服务，返回停止函数；为 nil 时不广播（测试）。
 	advertise func(name string, port int, txt []string) (stop func())
 	listen    func() (net.Listener, error)
@@ -89,6 +92,7 @@ type remoteServer struct {
 func newRemoteServer(a *app, file string) *remoteServer {
 	rs := &remoteServer{
 		a: a, file: file, host: "Mac",
+		serverID:      loadOrCreateServerID(filepath.Dir(file)),
 		online:        map[string]int{},
 		pairStarts:    map[string][]time.Time{},
 		pairLockUntil: map[string]time.Time{},
@@ -107,6 +111,32 @@ func newRemoteServer(a *app, file string) *remoteServer {
 		_ = json.Unmarshal(data, &rs.devices)
 	}
 	return rs
+}
+
+// loadOrCreateServerID 读取或生成本机遥控服务的稳定标识（UUID v4），保存在应用数据目录的 remote_server_id。
+func loadOrCreateServerID(dir string) string {
+	idPath := filepath.Join(dir, "remote_server_id")
+	if data, err := os.ReadFile(idPath); err == nil {
+		if id := sanitizeDeviceID(string(data)); id != "" {
+			return id
+		}
+	}
+	id := randomUUIDv4()
+	if dir != "" && dir != "." {
+		_ = core.WriteFileAtomic(idPath, []byte(id+"\n"), 0o600)
+	}
+	return id
+}
+
+func randomUUIDv4() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err)
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 func (rs *remoteServer) clock() time.Time {
@@ -147,10 +177,14 @@ func (rs *remoteServer) start() {
 	rs.srv = &http.Server{Handler: rs.handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func(srv *http.Server) { _ = srv.Serve(ln) }(rs.srv)
 	if rs.advertise != nil {
-		rs.stopAd = rs.advertise(rs.host, rs.port, []string{
+		txt := []string{
 			fmt.Sprintf("api=%d", remoteAPIVer),
 			"version=" + rs.a.version,
-		})
+		}
+		if rs.serverID != "" {
+			txt = append(txt, "id="+rs.serverID)
+		}
+		rs.stopAd = rs.advertise(rs.host, rs.port, txt)
 	}
 }
 
@@ -391,14 +425,15 @@ func (rs *remoteServer) authed(h func(w http.ResponseWriter, r *http.Request, de
 	}
 }
 
-// handleInfo 不需要令牌：手机连上后先看看是不是拾景、令牌还有没有效。
+// handleInfo 不需要令牌：手机连上后先看看是不是拾景、是不是同一台 Mac、令牌还有没有效。
 func (rs *remoteServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"app":     "拾景",
-		"name":    rs.host,
-		"api":     remoteAPIVer,
-		"version": rs.a.version,
-		"paired":  rs.deviceFor(r) != "",
+		"app":       "拾景",
+		"name":      rs.host,
+		"server_id": rs.serverID,
+		"api":       remoteAPIVer,
+		"version":   rs.a.version,
+		"paired":    rs.deviceFor(r) != "",
 	})
 }
 

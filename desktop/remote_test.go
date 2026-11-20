@@ -594,3 +594,58 @@ func TestRemoteRenameDevice(t *testing.T) {
 		t.Fatalf("重名时 = %q %v", got, ok)
 	}
 }
+
+// 桌面端生成并持久化 server_id，同时暴露在 Bonjour TXT、GET /api/info 和 POST /api/pair/finish。
+func TestRemoteServerIDPersistenceAndExposure(t *testing.T) {
+	f, tt := newFakeApp(t)
+	var advertisedTXT []string
+	f.remote.host = "测试 Mac"
+	f.remote.listen = func() (net.Listener, error) { return net.Listen("tcp", "127.0.0.1:0") }
+	f.remote.advertise = func(_ string, _ int, txt []string) func() {
+		advertisedTXT = append([]string(nil), txt...)
+		return func() {}
+	}
+	f.cfg.FilterAndSampleDirs = []string{"/Volumes/Media0/A"}
+	f.cfg.DestDir = "/tmp/wall"
+	f.cfg.RemoteEnabled = true
+	tt.Frame()
+	port, errText := f.remote.status()
+	if port == 0 {
+		t.Fatalf("没有开始监听: %s", errText)
+	}
+	t.Cleanup(f.remote.stop)
+	h := &remoteHarness{f, tt, "http://127.0.0.1:" + strconv.Itoa(port)}
+
+	sid := f.remote.serverID
+	if sid == "" {
+		t.Fatal("serverID 为空")
+	}
+	// 同一数据目录重新创建 remoteServer，应读回同一个 server_id
+	reloaded := newRemoteServer(f.app, f.remote.file)
+	if reloaded.serverID != sid {
+		t.Fatalf("重启后 server_id 变化: got %q, want %q", reloaded.serverID, sid)
+	}
+	// Bonjour TXT 记录包含 id=<server_id>
+	wantTXT := "id=" + sid
+	if !strings.Contains(strings.Join(advertisedTXT, "\n"), wantTXT) {
+		t.Fatalf("Bonjour TXT 缺少 %s: %v", wantTXT, advertisedTXT)
+	}
+	// GET /api/info 返回 server_id
+	code, info := h.do(t, "GET", "/api/info", "", nil)
+	if code != 200 || info["server_id"] != sid {
+		t.Fatalf("GET /api/info = %d %v, want server_id=%q", code, info, sid)
+	}
+	// POST /api/pair/finish 返回 server_id
+	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": "iPhone", "id": "phone-sid"}); code != 200 {
+		t.Fatalf("pair/start = %d", code)
+	}
+	h.tt.Frame()
+	_, pin, ok := h.remote.currentPair()
+	if !ok {
+		t.Fatal("未生成配对码")
+	}
+	code, fin := h.do(t, "POST", "/api/pair/finish", "", pairBody(pin, "phone-sid"))
+	if code != 200 || fin["server_id"] != sid {
+		t.Fatalf("POST /api/pair/finish = %d %v, want server_id=%q", code, fin, sid)
+	}
+}

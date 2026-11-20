@@ -32,10 +32,12 @@
 		6E3D7151A168E47303C15F31 /* RemoteSessionDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B88EDB095551E9EE240288D1 /* RemoteSessionDemo.swift */; };
 		7012C29BB4CC01CBD3B368FA /* WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22FA460C376FBA22B55E217F /* WidgetViews.swift */; };
 		833A421C3683C30CFFAE31B1 /* RunNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */; };
+		8FEDEEDC08E431FE0539502D /* MacRelocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C083A13F84FAF5ED42216ED9 /* MacRelocator.swift */; };
 		94215927670239EE363E48CE /* ShiJingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04551D48684EF104173433F5 /* ShiJingApp.swift */; };
 		964F2B423059D88E93FE60F2 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B88ED75230843E7FF61E79A /* APIClient.swift */; };
 		99B8B378D455A9AF7560A572 /* QueuedActionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF4AF9CF2058B681076FAE56 /* QueuedActionsView.swift */; };
 		9D0938E0B664D40BA4D3694E /* ImageStore+Prefetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83240B9AEFA6986C25B369E4 /* ImageStore+Prefetch.swift */; };
+		A2AFF9E185F4042964AB8AFF /* MacRelocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C083A13F84FAF5ED42216ED9 /* MacRelocator.swift */; };
 		A7A0B1BFE267C1B704117E74 /* OfflinePrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64A1FE1104D0236E89D7D58 /* OfflinePrefs.swift */; };
 		A804E19E549A123DB5135769 /* ImageStore+Disk.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F4072400DAF280B70CD407C /* ImageStore+Disk.swift */; };
 		B3974E68230A70F75046BBA6 /* QRScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A75E638475F79200CF9DB6D /* QRScan.swift */; };
@@ -123,6 +125,7 @@
 		B5FA3660DB88F64E7D64A4B9 /* Intents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents.swift; sourceTree = "<group>"; };
 		B88EDB095551E9EE240288D1 /* RemoteSessionDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSessionDemo.swift; sourceTree = "<group>"; };
 		BCA83EAF792D5624EEA3CE11 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		C083A13F84FAF5ED42216ED9 /* MacRelocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacRelocator.swift; sourceTree = "<group>"; };
 		D312A6D521567C089FF18F3E /* ConnectionUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionUI.swift; sourceTree = "<group>"; };
 		D86F178096ED4F9BDCD820EE /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		DB7F89AA01677C0EB4EEDE4A /* WallPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallPreview.swift; sourceTree = "<group>"; };
@@ -151,6 +154,7 @@
 			children = (
 				6B88ED75230843E7FF61E79A /* APIClient.swift */,
 				B5FA3660DB88F64E7D64A4B9 /* Intents.swift */,
+				C083A13F84FAF5ED42216ED9 /* MacRelocator.swift */,
 				BCA83EAF792D5624EEA3CE11 /* Models.swift */,
 				E64A1FE1104D0236E89D7D58 /* OfflinePrefs.swift */,
 				2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */,
@@ -326,6 +330,7 @@
 				D7E126223CA530FF96744B6D /* ImageStore.swift in Sources */,
 				CB821EEC8C60F998A6F25950 /* Intents.swift in Sources */,
 				F223669D3393FCDE9438804C /* MacListView.swift in Sources */,
+				A2AFF9E185F4042964AB8AFF /* MacRelocator.swift in Sources */,
 				DA6264799C3CF66C5F9F9994 /* MacStore.swift in Sources */,
 				4BF86FE7CE0BC9485AD18F1C /* Models.swift in Sources */,
 				62AEB37BC6565BD3546A9CE1 /* OfflineCacheSection.swift in Sources */,
@@ -362,6 +367,7 @@
 			files = (
 				36635EB138FF8A4B6698EC3A /* APIClient.swift in Sources */,
 				6360079382418D5385977F25 /* Intents.swift in Sources */,
+				8FEDEEDC08E431FE0539502D /* MacRelocator.swift in Sources */,
 				ED3B0A4451922C1D686A69E1 /* Models.swift in Sources */,
 				3DC7076E29C0DD7B94D20F4D /* OfflinePrefs.swift in Sources */,
 				C1D57C628AAC10FA1D1BF907 /* RunNotifier.swift in Sources */,
