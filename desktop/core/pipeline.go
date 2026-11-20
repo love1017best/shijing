@@ -9,8 +9,7 @@ import (
 	"time"
 )
 
-// Paths 是 Go 版自己的状态文件位置（Python 版放在脚本目录，两者互不共享，
-// 各自第一次运行会全量扫描一遍）。
+// Paths 指定状态与缓存文件的位置。
 type Paths struct {
 	StateFile string // 增量筛选状态
 	DeleteLog string // 删除留痕
@@ -38,8 +37,7 @@ func PathsIn(dataDir string) Paths {
 //
 // 系统设置里「文件夹 + 随机切换」的壁纸由 WallpaperImageExtension 负责，它只在启动时读一次
 // 文件夹里有哪些图，之后一直在旧列表里轮换；文件夹被换成新的一批后，它会停在已经被删掉的旧图上，
-// 很久才更新。以前的做法是删 com.apple.wallpaper.agent 容器里的缓存目录，但那个目录受系统保护，
-// 删不掉，而且删掉也不会让它重新读文件夹（实测见 CLAUDE.md 坑 13）。
+// 很久才更新。com.apple.wallpaper.agent 容器里的缓存目录受系统保护，删不掉也不会让它重新读文件夹。
 // 结束 WallpaperAgent 后 launchd 会立刻把它和各个壁纸扩展重新拉起来，设置不受影响。
 // 是变量，测试里替换掉，免得真的重启系统的壁纸服务。
 var RefreshWallpaper = func() error {
@@ -50,7 +48,7 @@ var RefreshWallpaper = func() error {
 	return err
 }
 
-// ValidateConfig 对应 run.validate_config：源目录不存在只警告（可能卷未挂载）。
+// ValidateConfig 检查源目录是否存在；不存在只警告（可能卷未挂载）。
 func ValidateConfig(cfg Config, logf Logf) {
 	cfg = cfg.expanded()
 	for _, d := range append(append([]string{}, cfg.FilterAndSampleDirs...), cfg.SampleOnlyDirs...) {

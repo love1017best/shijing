@@ -33,9 +33,9 @@ while (( $# )); do
 done
 
 SCRIPTS=${0:A:h}
+source "$SCRIPTS/common.zsh"
 cd "${SHIJING_IOS_DIR:-$SCRIPTS/../../ios}" || exit 1
 source "$SCRIPTS/lock.zsh"
-export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode-27.2.0.app/Contents/Developer}
 [[ -d "$DEVELOPER_DIR" ]] || { echo "iOS：没找到 Xcode，跳过"; exit 0; }
 BUNDLE_ID=com.love1017best.shijing.ios
 RENEW_BEFORE_HOURS=${SHIJING_RENEW_BEFORE_HOURS:-48}
@@ -68,140 +68,18 @@ trap cleanup EXIT
 # 检查本机缓存的拾景描述文件状态，输出四列（| 分隔，避免空字段在 IFS=TAB 下被合并）：
 #   <匹配到的AppID数>|<最小剩余秒数>|<最早到期本地时间>|<匹配文件总数>
 inspect_profiles() {
-	python3 - "$BUNDLE_ID" <<'PY'
-import datetime, glob, os, plistlib, sys
-
-bundle_id = sys.argv[1]
-dirs = [
-    os.path.expanduser("~/Library/Developer/Xcode/UserData/Provisioning Profiles"),
-    os.path.expanduser("~/Library/MobileDevice/Provisioning Profiles"),
-]
-
-by_app = {}
-file_count = 0
-for d in dirs:
-    for p in glob.glob(os.path.join(d, "*.mobileprovision")):
-        try:
-            with open(p, "rb") as f:
-                data = f.read()
-            s = data.find(b"<?xml")
-            e = data.find(b"</plist>", s)
-            if s < 0 or e < 0:
-                continue
-            pl = plistlib.loads(data[s:e + 8])
-            appid = pl.get("Entitlements", {}).get("application-identifier", "")
-            exp = pl.get("ExpirationDate")
-            if not appid or not isinstance(exp, datetime.datetime):
-                continue
-            if exp.tzinfo is None:
-                exp = exp.replace(tzinfo=datetime.timezone.utc)
-            suffix = appid.split(".", 1)[1] if "." in appid else appid
-            if suffix == bundle_id or suffix.startswith(bundle_id + "."):
-                file_count += 1
-                by_app.setdefault(appid, []).append((exp, p))
-        except Exception:
-            continue
-
-if not by_app:
-    print("0|||0")
-    sys.exit(0)
-
-now = datetime.datetime.now(datetime.timezone.utc)
-earliest = min(max(items, key=lambda x: x[0])[0] for items in by_app.values())
-rem_sec = int((earliest - now).total_seconds())
-exp_local = earliest.astimezone().strftime("%Y-%m-%d %H:%M")
-print(f"{len(by_app)}|{rem_sec}|{exp_local}|{file_count}")
-PY
+	python3 "$SCRIPTS/profiles.py" inspect "$BUNDLE_ID"
 }
 
 # 备份并移除本机所有拾景描述文件，记下原路径供失败时恢复
 backup_and_remove_profiles() {
-	local backup_dir=$1
-	python3 - "$BUNDLE_ID" "$backup_dir" <<'PY'
-import glob, os, plistlib, shutil, sys
-
-bundle_id, backup_dir = sys.argv[1], sys.argv[2]
-dirs = [
-    os.path.expanduser("~/Library/Developer/Xcode/UserData/Provisioning Profiles"),
-    os.path.expanduser("~/Library/MobileDevice/Provisioning Profiles"),
-]
-
-idx = 0
-with open(os.path.join(backup_dir, "manifest.tsv"), "w", encoding="utf-8") as mf:
-    for d in dirs:
-        for p in sorted(glob.glob(os.path.join(d, "*.mobileprovision"))):
-            try:
-                with open(p, "rb") as f:
-                    data = f.read()
-                s = data.find(b"<?xml")
-                e = data.find(b"</plist>", s)
-                if s < 0 or e < 0:
-                    continue
-                pl = plistlib.loads(data[s:e + 8])
-                appid = pl.get("Entitlements", {}).get("application-identifier", "")
-                suffix = appid.split(".", 1)[1] if "." in appid else appid
-                if suffix == bundle_id or suffix.startswith(bundle_id + "."):
-                    idx += 1
-                    shutil.copy2(p, os.path.join(backup_dir, str(idx)))
-                    mf.write(f"{idx}\t{p}\n")
-                    os.remove(p)
-            except Exception:
-                continue
-PY
+	python3 "$SCRIPTS/profiles.py" backup-remove "$BUNDLE_ID" "$1"
 }
 
 # 读取已构建 .app 里实际嵌入的描述文件信息，输出三列（| 分隔）：
 #   <最早到期本地时间>|<剩余可读文本>|<嵌入描述文件内容指纹>
 inspect_embedded_profiles() {
-	local app_path=$1
-	python3 - "$app_path" <<'PY'
-import datetime, glob, hashlib, os, plistlib, sys
-
-app_path = sys.argv[1]
-paths = [os.path.join(app_path, "embedded.mobileprovision")]
-paths.extend(sorted(glob.glob(os.path.join(app_path, "PlugIns", "*.appex", "embedded.mobileprovision"))))
-
-exps = []
-digests = []
-for p in paths:
-    if not os.path.isfile(p):
-        continue
-    try:
-        with open(p, "rb") as f:
-            data = f.read()
-        digests.append(hashlib.sha256(data).hexdigest())
-        s = data.find(b"<?xml")
-        e = data.find(b"</plist>", s)
-        if s < 0 or e < 0:
-            continue
-        pl = plistlib.loads(data[s:e + 8])
-        exp = pl.get("ExpirationDate")
-        if isinstance(exp, datetime.datetime):
-            if exp.tzinfo is None:
-                exp = exp.replace(tzinfo=datetime.timezone.utc)
-            exps.append(exp)
-    except Exception:
-        continue
-
-fp = hashlib.sha256("\n".join(digests).encode()).hexdigest() if digests else ""
-if not exps:
-    print(f"||{fp}")
-    sys.exit(0)
-
-now = datetime.datetime.now(datetime.timezone.utc)
-earliest = min(exps)
-rem_sec = int((earliest - now).total_seconds())
-exp_local = earliest.astimezone().strftime("%Y-%m-%d %H:%M")
-if rem_sec <= 0:
-    rem_text = "已过期"
-elif rem_sec < 3600:
-    rem_text = f"剩余 {max(1, rem_sec // 60)} 分钟"
-elif rem_sec < 48 * 3600:
-    rem_text = f"剩余 {rem_sec // 3600} 小时"
-else:
-    rem_text = f"剩余 {round(rem_sec / 86400)} 天"
-print(f"{exp_local}|{rem_text}|{fp}")
-PY
+	python3 "$SCRIPTS/profiles.py" inspect-embedded "$1"
 }
 
 JSON=$(mktemp -t shijing-devices) || exit 0
@@ -340,6 +218,7 @@ else
 fi
 
 WORK=$(mktemp -d -t shijing-install) || exit 1
+t0=$EPOCHREALTIME
 i=0
 while IFS=$'\t' read -r UDID NAME; do
 	i=$((i + 1))
@@ -357,6 +236,7 @@ while IFS=$'\t' read -r UDID NAME; do
 		# 装和启动分开：设备锁屏时装得进去、只是启动不起来，那就记为已安装，下次不用再等一遍
 		if ! OUT=$(xcrun devicectl device install app --device "$UDID" "$APP" 2>&1); then
 			echo "$HASH" >"$STAMPS/$UDID.failed"
+			printf '\n=== devicectl install 失败：%s (%s) ===\n%s\n' "$NAME" "$UDID" "$OUT" >"$WORK/$i.log"
 			echo "iOS：装到「$NAME」失败（没连上或没信任这台电脑？日志：$LOG）"
 			print -r -- "$OUT" | grep -iE "unable|could not|error|locked" | tail -2 | sed 's/^/  /'
 			echo fail >"$WORK/$i.state"
@@ -376,6 +256,7 @@ done <<<"$DEVICES"
 wait
 STATUS=0
 for ((n = 1; n <= i; n++)); do
+	[[ -f "$WORK/$n.log" ]] && cat "$WORK/$n.log" >>"$LOG"
 	cat "$WORK/$n.out" 2>/dev/null
 	[[ -f "$WORK/$n.state" && "$(<"$WORK/$n.state")" == fail ]] && STATUS=1
 done

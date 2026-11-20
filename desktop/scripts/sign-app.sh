@@ -24,9 +24,15 @@ if [[ -z "$IDENTITY" ]]; then
 	exit 0
 fi
 
+USED_LOCAL=1
 if ! codesign --force --deep --sign "$IDENTITY" "$APP" >/dev/null 2>&1; then
 	echo "用「$IDENTITY」签名失败，改回 ad-hoc"
 	codesign --force --deep --sign - "$APP"
+	USED_LOCAL=0
 fi
 codesign --verify --deep --strict "$APP"
-echo "已用稳定的本地签名「$IDENTITY」：$APP"
+if ((USED_LOCAL)); then
+	echo "已用稳定的本地签名「$IDENTITY」：$APP"
+else
+	echo "已改为 ad-hoc 签名：$APP"
+fi

@@ -37,8 +37,8 @@ done
 
 ROOT=${0:A:h:h:h}
 cd "$ROOT"
+source desktop/scripts/common.zsh
 source desktop/scripts/lock.zsh
-export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode-27.2.0.app/Contents/Developer}
 VERSION_FILES=(desktop/mygo.json ios/project.yml ios/ShiJing.xcodeproj/project.pbxproj)
 
 [[ $(git branch --show-current) == main ]] || { echo "要在 main 上发布"; exit 1; }
@@ -76,13 +76,13 @@ for attempt in 1 2 3; do
 	WT=$(mktemp -d -t shijing-release)
 	git worktree add -q --detach "$WT" HEAD
 	if [[ -n "$WANT" ]]; then
-		CUR=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' desktop/mygo.json | head -1)
+		CUR=$(read_version desktop/mygo.json)
 		if [[ "$WANT" == "$CUR" || "$(printf '%s\n%s\n' "$CUR" "$WANT" | sort -V | tail -1)" != "$WANT" ]]; then
 			echo "--version $WANT 不比当前的 $CUR 大"; cleanup; exit 2
 		fi
 	fi
 	"$WT/desktop/scripts/bump-version.sh" ${WANT:+"$WANT"} >/dev/null
-	VERSION=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$WT/desktop/mygo.json" | head -1)
+	VERSION=$(read_version "$WT/desktop/mygo.json")
 	if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
 		echo "远端已经有 v$VERSION，同步后重来"
 		VERSION=""
@@ -113,12 +113,20 @@ for attempt in 1 2 3; do
 		echo "（dry-run）检查与构建已通过，会推送 v$VERSION：$(git -C "$WT" log --oneline -1)"
 		break
 	fi
-	if git -C "$WT" push -q --atomic origin HEAD:main "v$VERSION" 2>/dev/null; then
+	PUSH_ERR=""
+	if PUSH_ERR=$(git -C "$WT" push -q --atomic origin HEAD:main "v$VERSION" 2>&1); then
 		break
 	fi
-	echo "推送被拒（另一个会话刚发布过），放弃 v$VERSION 后重来"
 	git tag -d "v$VERSION" >/dev/null
-	VERSION=""
+	# 仅在远端因并发发布拒绝时重试；网络断连、认证失败等直接打印错误并退出
+	if [[ "$PUSH_ERR" == *"non-fast-forward"* || "$PUSH_ERR" == *"fetch first"* || "$PUSH_ERR" == *"already exists"* || "$PUSH_ERR" == *"remote rejected"* ]]; then
+		echo "推送被拒（另一个会话刚发布过），放弃 v$VERSION 后重来"
+		VERSION=""
+	else
+		echo "推送失败，已放弃 v$VERSION："
+		print -r -- "$PUSH_ERR"
+		exit 1
+	fi
 done
 [[ -n "$VERSION" ]] || { echo "试了 3 次都没推上去，放弃"; exit 1; }
 if [[ -z "$DRY" ]]; then

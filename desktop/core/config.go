@@ -1,5 +1,4 @@
-// Package core 是拾景的核心流程：筛选删除 → 采样复制/归档 → 清理壁纸缓存。
-// 最初从 Python 版（已不再维护）移植而来，踩坑记录见仓库根目录 CLAUDE.md。
+// Package core 实现拾景的核心流程：筛选删除 → 采样复制/归档 → 刷新系统壁纸。
 package core
 
 import (
@@ -11,7 +10,7 @@ import (
 	"time"
 )
 
-// Config 与 Python 版 config.json 的字段一一对应，两个版本可以互相读写同一份文件。
+// Config 保存桌面端与命令行共用的配置，持久化在 config.json 中。
 type Config struct {
 	FilterAndSampleDirs []string `json:"filter_and_sample_dirs"`
 	SampleOnlyDirs      []string `json:"sample_only_dirs"`
@@ -53,7 +52,7 @@ const (
 	DefaultArchiveSubdir  = "_WallpaperArchive"
 )
 
-// Defaults 对应 run.DEFAULTS，GUI 和 CLI 都从这里取默认值，避免两份漂移。
+// Defaults 返回默认配置，GUI 和 CLI 共用，避免两份漂移。
 func Defaults() Config {
 	return Config{
 		FilterAndSampleDirs: []string{},
@@ -97,7 +96,7 @@ func LoadConfig(path string) (Config, error) {
 	return cfg, nil
 }
 
-// SaveConfig 以与 Python 版相同的格式（2 空格缩进、不转义中文）写回配置。
+// SaveConfig 以 2 空格缩进、不转义中文的 JSON 格式写回配置。
 func SaveConfig(path string, cfg Config) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

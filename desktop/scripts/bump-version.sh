@@ -6,8 +6,10 @@
 # 以及 ios/ShiJing.xcodeproj（用 xcodegen 重新生成；没装 xcodegen 时直接改工程文件里的两个字段）。
 set -euo pipefail
 
-cd "${0:A:h}/../.."
-OLD=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' desktop/mygo.json | head -1)
+SCRIPTS=${0:A:h}
+source "$SCRIPTS/common.zsh"
+cd "$SCRIPTS/../.."
+OLD=$(read_version desktop/mygo.json)
 if [[ -n "${1:-}" ]]; then
 	NEW=${1#v}
 else

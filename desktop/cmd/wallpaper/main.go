@@ -1,15 +1,18 @@
-// wallpaper 是拾景的命令行入口，等价于 python run.py：读取配置，依次筛选 → 采样复制 → 刷新系统壁纸。
+// wallpaper 是拾景的命令行入口：读取配置，依次执行筛选、采样复制与刷新系统壁纸。
 //
-//	go run ./cmd/wallpaper                      # 用桌面版同一份配置
+//	go run ./cmd/wallpaper                      # 使用桌面版同一份配置
 //	go run ./cmd/wallpaper -config ../config.json
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"desktop/core"
 )
@@ -34,9 +37,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	logf := func(format string, args ...any) { fmt.Printf(format+"\n", args...) }
 	core.ValidateConfig(cfg, logf)
-	if _, err := core.RunPipeline(cfg, core.PathsIn(dataDir), core.Reporter{Log: logf}, nil); err != nil {
+	rep := core.Reporter{
+		Log:  logf,
+		Stop: func() bool { return ctx.Err() != nil },
+	}
+	if _, err := core.RunPipeline(cfg, core.PathsIn(dataDir), rep, nil); err != nil {
+		if errors.Is(err, core.ErrCanceled) {
+			fmt.Fprintln(os.Stderr, "⏹️ 已收到中断信号，已安全停止")
+			os.Exit(130)
+		}
 		fmt.Fprintln(os.Stderr, "❌", err)
 		os.Exit(1)
 	}

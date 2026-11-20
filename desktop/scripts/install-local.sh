@@ -13,10 +13,11 @@ set -euo pipefail
 zmodload zsh/datetime # EPOCHREALTIME（计时用）
 
 cd "${0:A:h}/.."
+source scripts/common.zsh
 source scripts/lock.zsh
 BUNDLE_ID=com.love1017best.shijing
 APP=/Applications/拾景.app
-VERSION=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' mygo.json | head -1)
+VERSION=$(read_version mygo.json)
 BUILT=build/darwin-arm64/拾景.app
 DMG=build/darwin-arm64/shi-jing-$VERSION-arm64.dmg
 TOTAL=$EPOCHREALTIME
@@ -28,6 +29,7 @@ for arg in "$@"; do
 	--force) IOS_ARGS+=(--force) ;;
 	--refresh-signing) IOS_ARGS+=(--refresh-signing) ;;
 	--no-ios) NO_IOS=1 ;;
+	*) echo "不认识的参数：$arg"; exit 2 ;;
 	esac
 done
 
@@ -45,10 +47,26 @@ fi
 t0=$EPOCHREALTIME
 # 先正常退出旧版（关窗只是隐藏，要用 quit），等它真正退出
 osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
+app_pid() {
+	lsappinfo info -only pid -app "$BUNDLE_ID" 2>/dev/null | sed -n 's/.*"pid"=\([0-9][0-9]*\).*/\1/p' | head -1
+}
 for _ in {1..20}; do
-	lsappinfo info -only pid -app "$BUNDLE_ID" 2>/dev/null | grep -q '[0-9]' || break
+	[[ -n "$(app_pid)" ]] || break
 	sleep 0.25
 done
+# 仍未退出时再发送 SIGTERM 并等待，避免直接覆盖运行中的应用
+PID=$(app_pid)
+if [[ -n "$PID" ]]; then
+	kill "$PID" 2>/dev/null || true
+	for _ in {1..12}; do
+		[[ -n "$(app_pid)" ]] || break
+		sleep 0.25
+	done
+fi
+if [[ -n "$(app_pid)" ]]; then
+	echo "旧版拾景仍未退出，请手动退出后再重试安装"
+	exit 1
+fi
 
 MNT=""
 if [[ -n "$SRC_DMG" ]]; then

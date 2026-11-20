@@ -79,7 +79,7 @@ func saveState(path string, s sorterState) error {
 	return WriteFileAtomic(path, data, 0o644)
 }
 
-// SortOptions 对应 image_sorter.scan_and_process_directories 的参数。
+// SortOptions 是 SortImages 的筛选配置。
 type SortOptions struct {
 	Sources     []string
 	MinWidth    int
@@ -176,11 +176,13 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 	if o.Incremental {
 		state = loadState(o.StateFile)
 	}
-	// 阈值变了就让旧缓存整体失效（CLAUDE.md 坑 10），否则调严分辨率后没变化的目录会被一直跳过
+	// 阈值或判断规则变化时让旧缓存整体失效，否则调严分辨率后未变化的目录会被一直跳过
 	th := thresholds{o.MinWidth, o.MinHeight, verdictRules}
+	stateDirty := false
 	if o.Incremental && (state.Thresholds == nil || *state.Thresholds != th) {
-		if len(state.Dirs) > 0 {
+		if len(state.Dirs) > 0 || len(state.Rejected) > 0 {
 			logf("🔄 筛选阈值或判断规则与上次不同，增量缓存已失效，本次将全量重新检查")
+			stateDirty = true
 		}
 		state = sorterState{}
 	}
@@ -192,9 +194,8 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 	dirRejected := map[string][]string{}
 
 	// 先遍历出所有含图片的目录（边遍历边上报找到了几个文件夹），再按遍历顺序逐个处理：
-	// 增量模式下各目录的 mtime 在后台并发计算（dirMtime 要 lstat 目录下每个文件，
-	// SMB 冷缓存时约 1ms/文件，见 CLAUDE.md 坑 12），算好一个就判断一个，
-	// 没变化的直接跳过，有变化的立刻检查——进度和日志随之一个个往前走，而不是等全部算完。
+	// 增量模式下各目录的 mtime 在后台并发计算（dirMtime 需 lstat 目录下每个文件，SMB 冷缓存时约 1ms/文件），
+	// 算好一个就判断一个，没变化的直接跳过，有变化的立刻检查——进度和日志随之往前走。
 	type found struct {
 		source string
 		dirImages
@@ -281,7 +282,7 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 		logf("\n📂 处理文件夹: %s", rel)
 		dirDelete := 0
 		var kept []string                                                              // 不合格但没删掉的
-		ok, reasons := checkVerdictsStop(d.images, o.MinWidth, o.MinHeight, rep.stopped) // 并发读文件头，删除和日志仍按顺序串行
+		ok, reasons := checkVerdicts(d.images, o.MinWidth, o.MinHeight, rep.stopped) // 并发读文件头，删除和日志仍按顺序串行
 		if rep.stopped() {
 			logf("\n⏹️ 已停止筛选，剩下的文件夹下次再检查")
 			break
@@ -319,12 +320,14 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 				dirMtimes[d.root] = mtimes[i]
 			}
 			dirRejected[d.root] = kept
+			stateDirty = true
 		}
 		rep.progress(StageFilter, i+1, len(dirs))
 	}
 	res.Dirs, res.Images, res.Rejected, res.Deleted = processedDirs, totalImages, deleteCount, deleted
 
-	if o.Incremental && len(dirMtimes) > 0 {
+	stateSaved := false
+	if o.Incremental && stateDirty {
 		if state.Dirs == nil {
 			state.Dirs = map[string]float64{}
 		}
@@ -343,6 +346,8 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 		}
 		if err := saveState(o.StateFile, state); err != nil {
 			logf("⚠️ 保存增量状态失败: %v", err)
+		} else {
+			stateSaved = true
 		}
 	}
 
@@ -357,7 +362,7 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 	} else {
 		logf("⚠️ 提示: 此为模拟运行，未实际删除文件")
 	}
-	if o.Incremental {
+	if stateSaved {
 		logf("💾 状态已保存到: %s", o.StateFile)
 	}
 	logf("%s", sep)

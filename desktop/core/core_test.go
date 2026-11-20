@@ -192,20 +192,20 @@ func TestCopySamplesNoImagesKeepsDest(t *testing.T) {
 	}
 }
 
-// 叶子文件夹多于采样数时，不同的随机种子要覆盖到不同的文件夹（坑 8）。
+// 叶子文件夹多于采样数时，不同的随机种子要覆盖到不同的文件夹。
 func TestSampleBalancedShuffle(t *testing.T) {
 	src := t.TempDir()
 	for i := range 20 {
 		writePNG(t, filepath.Join(src, fmt.Sprintf("f%02d", i), "a.png"), 80, 40)
 	}
-	_, grouped, order := scanImages([]string{src}, nil, tw, th, nil, nil)
-	if len(grouped) != 20 {
-		t.Fatalf("叶子文件夹数 %d", len(grouped))
+	pool := scanImages([]string{src}, nil, tw, th, nil, nil)
+	if len(pool.grouped) != 20 {
+		t.Fatalf("叶子文件夹数 %d", len(pool.grouped))
 	}
 	union := map[string]bool{}
 	sets := map[string]bool{}
 	for seed := range uint64(8) {
-		sel := sampleBalanced(grouped, order, 5, rand.New(rand.NewPCG(seed, seed)))
+		sel := pool.sampleBalanced(5, rand.New(rand.NewPCG(seed, seed)))
 		if len(sel) != 5 {
 			t.Fatalf("应选 5 张，实际 %d", len(sel))
 		}
@@ -352,7 +352,7 @@ func TestGenerateFilenameConflicts(t *testing.T) {
 	}
 }
 
-func TestLoadConfigMergesDefaultsAndReadsPythonConfig(t *testing.T) {
+func TestLoadConfigMergesDefaults(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
 	os.WriteFile(p, []byte(`{"sample_count": 12, "archive_enabled": true}`), 0o644)
 	cfg, err := LoadConfig(p)
@@ -365,16 +365,17 @@ func TestLoadConfigMergesDefaultsAndReadsPythonConfig(t *testing.T) {
 	if _, err := LoadConfig(filepath.Join(t.TempDir(), "none.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("缺失文件应返回 ErrNotExist: %v", err)
 	}
-	// 仓库里的 Python 版配置可以直接读，保存后字段名不变
-	if py, err := LoadConfig("../../config.json"); err == nil {
-		out := filepath.Join(t.TempDir(), "c.json")
-		if err := SaveConfig(out, py); err != nil {
-			t.Fatal(err)
-		}
-		back, _ := LoadConfig(out)
-		if fmt.Sprint(back) != fmt.Sprint(py) {
-			t.Error("保存再读取后配置应一致")
-		}
+	// 保存再读取后字段与值保持一致
+	out := filepath.Join(t.TempDir(), "c.json")
+	if err := SaveConfig(out, cfg); err != nil {
+		t.Fatal(err)
+	}
+	back, err := LoadConfig(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(back) != fmt.Sprint(cfg) {
+		t.Error("保存再读取后配置应一致")
 	}
 	home, _ := os.UserHomeDir()
 	if ExpandUser("~/x") != filepath.Join(home, "x") || ExpandUser("/a/~") != "/a/~" {
@@ -504,16 +505,16 @@ func TestScanImagesKeepsOrderWithParallelChecks(t *testing.T) {
 			}
 		}
 	})
-	all, grouped, leaves := scanImages([]string{root}, map[string]bool{resolvePath(root): true}, tw, th, nil, nil)
+	pool := scanImages([]string{root}, map[string]bool{resolvePath(root): true}, tw, th, nil, nil)
 	var got []string
-	for _, img := range all {
+	for _, img := range pool.all {
 		got = append(got, img.path)
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("顺序或内容不一致:\ngot  %v\nwant %v", got, want)
 	}
-	if len(grouped) != 5 || len(leaves) != 5 {
-		t.Fatalf("应有 5 个叶子文件夹，got %d / %d", len(grouped), len(leaves))
+	if len(pool.grouped) != 5 || len(pool.leafOrder) != 5 {
+		t.Fatalf("应有 5 个叶子文件夹，got %d / %d", len(pool.grouped), len(pool.leafOrder))
 	}
 }
 

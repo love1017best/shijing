@@ -85,6 +85,33 @@ func (w *wallpapers) shownHero() (*ui.Bitmap, string) {
 	return w.hero, w.heroPath
 }
 
+// firstWideImage 从候选路径中解码出第一张宽度不小于 thumbWidth*2 的图片（用于横幅）。
+func firstWideImage(candidates []string) (image.Image, string) {
+	for _, f := range candidates {
+		if im := cachedScaled(f, heroWidth); im != nil && im.Bounds().Dx() >= thumbWidth*2 {
+			return im, f
+		}
+	}
+	return nil, ""
+}
+
+// storeBitmaps 在主线程上把后台解码好的图片批量写入 dst（只写入仍在 all 中的条目）。
+func storeBitmaps(dst *map[string]*ui.Bitmap, all []string, imgs map[string]image.Image) {
+	if *dst == nil {
+		*dst = map[string]*ui.Bitmap{}
+	}
+	for p, img := range imgs {
+		if !slices.Contains(all, p) {
+			continue
+		}
+		if img != nil {
+			(*dst)[p] = ui.NewBitmap(img)
+		} else {
+			(*dst)[p] = nil
+		}
+	}
+}
+
 // advanceHero 轮播概览横幅：按 all 的顺序换到当前这张后面第一张够宽的图（读不了、太窄的跳过）。
 // 在后台解码（有磁盘缓存，第二次起几毫秒），解好再换上。只在概览页、没在运行、没开大图预览时换；
 // 窗口隐藏时 main.go 不调它。
@@ -102,14 +129,7 @@ func (a *app) advanceHero() {
 	dir, gen := w.dir, a.wallsGen
 	w.sliding = true
 	go func() {
-		var img image.Image
-		var path string
-		for _, f := range candidates {
-			if im := cachedScaled(f, heroWidth); im != nil && im.Bounds().Dx() >= thumbWidth*2 {
-				img, path = im, f
-				break
-			}
-		}
+		img, path := firstWideImage(candidates)
 		a.update(func() {
 			w := &a.walls
 			w.sliding = false
@@ -316,15 +336,7 @@ func (a *app) reloadHero() {
 	candidates := slices.Clone(a.walls.all)
 	gen := a.wallsGen
 	go func() {
-		var img image.Image
-		var path string
-		for _, f := range candidates {
-			im := cachedScaled(f, heroWidth)
-			if im != nil && im.Bounds().Dx() >= thumbWidth*2 {
-				img, path = im, f
-				break
-			}
-		}
+		img, path := firstWideImage(candidates)
 		a.update(func() {
 			if a.walls.dir != dir || a.wallsGen != gen {
 				return // 期间重新读过壁纸文件夹，那次会自己定横幅
@@ -383,19 +395,7 @@ func (a *app) loadBrowseThumbs(window []string, keepSet map[string]bool) {
 				return
 			}
 			w.browsing = false
-			if w.browse == nil {
-				w.browse = map[string]*ui.Bitmap{}
-			}
-			for p, img := range imgs {
-				if !slices.Contains(w.all, p) {
-					continue
-				}
-				if img != nil {
-					w.browse[p] = ui.NewBitmap(img)
-				} else {
-					w.browse[p] = nil
-				}
-			}
+			storeBitmaps(&w.browse, w.all, imgs)
 		})
 	}()
 }
@@ -425,19 +425,7 @@ func (a *app) loadMoreThumbs(want int) {
 				return
 			}
 			w.more = false
-			if w.thumbs == nil {
-				w.thumbs = map[string]*ui.Bitmap{}
-			}
-			for p, img := range imgs {
-				if !slices.Contains(w.all, p) {
-					continue
-				}
-				if img != nil {
-					w.thumbs[p] = ui.NewBitmap(img)
-				} else {
-					w.thumbs[p] = nil
-				}
-			}
+			storeBitmaps(&w.thumbs, w.all, imgs)
 		})
 	}()
 }

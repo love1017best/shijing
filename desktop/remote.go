@@ -1,27 +1,22 @@
 package main
 
-// 手机遥控：局域网里配对过的 iPhone 通过 HTTP 看进度、换一批壁纸、停止运行。
+// 手机遥控服务：局域网里配对过的 iPhone 通过 HTTP 查看进度、换一批壁纸、停止运行。
 //
-//   - 只有设置里打开「允许手机遥控」才监听端口（默认 remotePort，被占用时随便挑一个），
-//     并用 macOS 自带的 dns-sd 广播 Bonjour 服务 _shijing._tcp，手机不用填 IP。
-//   - 第一次连接要配对：手机请求后桌面弹出 6 位配对码，手机输对了拿到令牌，
-//     之后每个请求都带 Authorization: Bearer <令牌>。令牌只存 SHA-256，在数据目录的 remote_devices.json。
-//   - 界面状态只在主线程改：要改状态的请求（运行、停止）通过 app.update 回主线程做；
-//     读状态的请求读主线程发布的快照（publishRemote），不用等主线程。
-//   - 手机端用 /api/events（SSE）实时收状态快照，状态变了才推。
+//   - 仅在开启「允许手机遥控」时监听端口（默认 remotePort，被占用时随机分配），
+//     并用 macOS 自带的 dns-sd 广播 Bonjour 服务 _shijing._tcp。
+//   - 配对协议在 remotepair.go，状态快照与遥控控制在 remotesnap.go，壁纸接口在 remotewalls.go，
+//     设置与记录接口在 remoteextra.go。
+//   - 界面状态只在主线程修改：写请求经 app.update 回主线程执行；读请求直接读取主线程发布的快照。
 
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -43,7 +38,7 @@ const (
 	pairStartWindow  = time.Minute
 	pairStartLimit   = 6
 	pairFailCooldown = 30 * time.Second
-	remoteAPIVer     = 1 // 接口有不兼容的改动时加 1，手机端据此提示升级
+	remoteAPIVer     = 1 // 接口有不兼容改动时递增，手机端据此提示升级
 	sseKeepAlive     = 15 * time.Second
 	sseWriteTimeout  = 10 * time.Second
 	mainThreadMax    = 10 * time.Second
@@ -57,16 +52,6 @@ type remoteDevice struct {
 	ID        string    `json:"id,omitempty"`
 	TokenHash string    `json:"token_sha256"`
 	PairedAt  time.Time `json:"paired_at"`
-}
-
-// pairRequest 是正在进行的配对：桌面上显示 code，手机要在过期前输对。
-type pairRequest struct {
-	device  string
-	id      string
-	code    string
-	expires time.Time
-	fails   int
-	qr      bool // 电脑上显示二维码发起的（手机扫码直接提交，不用在电脑上点确认）
 }
 
 type remoteServer struct {
@@ -124,7 +109,14 @@ func newRemoteServer(a *app, file string) *remoteServer {
 	return rs
 }
 
-// ── 开关 ──────────────────────────────────────────────────────────────────
+func (rs *remoteServer) clock() time.Time {
+	if rs.now != nil {
+		return rs.now()
+	}
+	return time.Now()
+}
+
+// ── 服务启停 ──────────────────────────────────────────────────────────────
 
 // setEnabled 由界面每帧调用（主线程），只在值变化时启动或关闭服务。
 func (rs *remoteServer) setEnabled(on bool) {
@@ -183,7 +175,7 @@ func (rs *remoteServer) status() (port int, errText string) {
 	return rs.port, rs.listenErr
 }
 
-// ── 设备 ──────────────────────────────────────────────────────────────────
+// ── 设备与鉴权 ────────────────────────────────────────────────────────────
 
 type deviceInfo struct {
 	remoteDevice
@@ -201,8 +193,6 @@ func (rs *remoteServer) deviceList() []deviceInfo {
 }
 
 // renameDevice 改一台已配对手机在列表里显示的名字，返回改后的名字。
-// 系统不给 App 用户的设备名（iOS 16 起要有 Apple 批准的授权），名字都是「iPhone」，
-// 所以在电脑上手动改：只动这里的记录，手机上不用重新配对。
 func (rs *remoteServer) renameDevice(old, name string) (string, bool) {
 	rs.mu.Lock()
 	i := slices.IndexFunc(rs.devices, func(d remoteDevice) bool { return d.Name == old })
@@ -274,73 +264,7 @@ func (rs *remoteServer) deviceFor(r *http.Request) string {
 	return ""
 }
 
-// ── 配对 ──────────────────────────────────────────────────────────────────
-
-// currentPair 是正在等桌面这边看的配对请求（过期的不算）。扫码发起的不算：那一种是电脑主动开的，不用再确认。
-func (rs *remoteServer) currentPair() (device, code string, ok bool) {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-	if p := rs.pair; p != nil && !p.qr && time.Now().Before(p.expires) {
-		return p.device, p.code, true
-	}
-	return "", "", false
-}
-
-// qrPair 是电脑上显示二维码的那个配对码（过期的不算）。
-func (rs *remoteServer) qrPair() (code string, ok bool) {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-	if p := rs.pair; p != nil && p.qr && time.Now().Before(p.expires) {
-		return p.code, true
-	}
-	return "", false
-}
-
-// startPair 建一个配对请求。qr 为 true 时是电脑上显示二维码发起的，id 是手机的固定标识。
-func (rs *remoteServer) startPair(device, id string, qr bool) pairRequest {
-	rs.mu.Lock()
-	rs.pair = &pairRequest{device: device, id: id, code: randomCode(), expires: time.Now().Add(pairCodeTTL), qr: qr}
-	p := *rs.pair
-	rs.mu.Unlock()
-	time.AfterFunc(pairCodeTTL+time.Second, rs.redraw) // 过期后画一帧让弹层消失
-	return p
-}
-
-// takePaired 判断 code 这次配对是不是刚成功（每次成功只回答一次，弹层据此收起）。
-func (rs *remoteServer) takePaired(code string) bool {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-	if code != "" && rs.pairedCode == code {
-		rs.pairedCode = ""
-		return true
-	}
-	return false
-}
-
-// cancelPair 取消正在进行的配对（桌面上点了「拒绝」）。
-func (rs *remoteServer) cancelPair() {
-	rs.mu.Lock()
-	rs.pair = nil
-	rs.mu.Unlock()
-}
-
-func randomCode() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
-	if err != nil {
-		panic(err)
-	}
-	return fmt.Sprintf("%06d", n.Int64())
-}
-
-func randomToken() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
-	return hex.EncodeToString(b)
-}
-
-// ── 状态快照 ──────────────────────────────────────────────────────────────
+// ── 状态发布与主线程调度 ──────────────────────────────────────────────────
 
 // publish 由主线程调用：快照变了才通知各个事件流。
 func (rs *remoteServer) publish(state []byte) {
@@ -365,7 +289,6 @@ func (rs *remoteServer) snapshot() []byte {
 }
 
 // onMainOrFail 在主线程上执行 fn，主线程太久没反应时回 503 并返回 false。
-// 接口里改状态的操作用它，别每处各写一遍「电脑上的拾景没有响应」。
 func (rs *remoteServer) onMainOrFail(w http.ResponseWriter, fn func()) bool {
 	if rs.onMain(fn) {
 		return true
@@ -416,7 +339,7 @@ func (rs *remoteServer) onMain(fn func()) bool {
 // redraw 让界面重画一帧（设备上下线、配对请求来了），并重新发布快照。
 func (rs *remoteServer) redraw() { rs.a.update(func() {}) }
 
-// ── HTTP ──────────────────────────────────────────────────────────────────
+// ── HTTP 路由与 SSE ───────────────────────────────────────────────────────
 
 func (rs *remoteServer) handler() http.Handler {
 	mux := http.NewServeMux()
@@ -477,190 +400,6 @@ func (rs *remoteServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"version": rs.a.version,
 		"paired":  rs.deviceFor(r) != "",
 	})
-}
-
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
-	if err == nil && host != "" {
-		return host
-	}
-	return strings.TrimSpace(r.RemoteAddr)
-}
-
-func (rs *remoteServer) clock() time.Time {
-	if rs.now != nil {
-		return rs.now()
-	}
-	return time.Now()
-}
-
-func (rs *remoteServer) handlePairStart(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Device string `json:"device"`
-		// ID 是手机的固定标识，旧版手机端不带
-		ID string `json:"id"`
-	}
-	if !readBodyOrFail(w, r, &body) {
-		return
-	}
-	ip := clientIP(r)
-	now := rs.clock()
-	dev := sanitizeDevice(body.Device)
-	id := sanitizeDeviceID(body.ID)
-
-	rs.mu.Lock()
-	if until, ok := rs.pairLockUntil[ip]; ok && now.Before(until) {
-		rs.mu.Unlock()
-		writeErr(w, http.StatusTooManyRequests, "尝试次数过多，请稍后再试")
-		return
-	}
-	if p := rs.pair; p != nil && now.Before(p.expires) {
-		if p.qr {
-			rs.mu.Unlock()
-			writeErr(w, http.StatusConflict, "电脑上正在显示配对二维码，请先完成或关闭后再试")
-			return
-		}
-	}
-	// 按客户端 IP 做滑动窗口频控，防止局域网内恶意高频调用抢占桌面焦点
-	recent := rs.pairStarts[ip][:0]
-	for _, ts := range rs.pairStarts[ip] {
-		if now.Sub(ts) < pairStartWindow {
-			recent = append(recent, ts)
-		}
-	}
-	if len(recent) >= pairStartLimit {
-		rs.pairStarts[ip] = recent
-		rs.mu.Unlock()
-		writeErr(w, http.StatusTooManyRequests, "请求过于频繁，请一分钟后再试")
-		return
-	}
-	if p := rs.pair; p != nil && now.Before(p.expires) && p.fails > 0 {
-		// 同一设备离开配对页再进时，复用当前未过期的配对码并保留已累计的错误次数（不换码、不重置计数），
-		// 让手机端重新显示 6 位码输入框继续输入；其他设备仍拒绝，防止绕过错误上限。
-		same := (id != "" && p.id == id) || (id == "" && p.id == "" && p.device == dev)
-		if same {
-			rs.pairStarts[ip] = append(recent, now)
-			remain := max(1, int(p.expires.Sub(now).Seconds()))
-			rs.mu.Unlock()
-			writeJSON(w, http.StatusOK, map[string]any{"expires_in": remain})
-			return
-		}
-		rs.mu.Unlock()
-		writeErr(w, http.StatusTooManyRequests, "当前配对码已输错，请继续输入或等过期后再试")
-		return
-	}
-	rs.pairStarts[ip] = append(recent, now)
-	hadActive := rs.pair != nil && !rs.pair.qr && now.Before(rs.pair.expires)
-	rs.pair = &pairRequest{device: dev, id: id, code: randomCode(), expires: now.Add(pairCodeTTL), qr: false}
-	rs.mu.Unlock()
-	time.AfterFunc(pairCodeTTL+time.Second, rs.redraw)
-	// 仅在桌面还没有打开配对弹层时才拉起窗口，避免反复抢焦点
-	rs.a.update(func() {
-		if !hadActive && rs.a.showWindow != nil {
-			rs.a.showWindow()
-		}
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"expires_in": int(pairCodeTTL.Seconds())})
-}
-
-// sanitizeDevice 是手机上来的设备名：空的用 iPhone，太长截断。
-func sanitizeDevice(dev string) string {
-	dev = strings.TrimSpace(dev)
-	if dev == "" {
-		return "iPhone"
-	}
-	if r := []rune(dev); len(r) > 40 {
-		dev = string(r[:40])
-	}
-	return dev
-}
-
-// sanitizeDeviceID 是手机上来的固定标识：只留常见的 UUID 字符，太长截断。
-func sanitizeDeviceID(id string) string {
-	id = strings.TrimSpace(id)
-	if r := []rune(id); len(r) > 64 {
-		id = string(r[:64])
-	}
-	for _, c := range id {
-		if !(c == '-' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
-			return ""
-		}
-	}
-	return id
-}
-
-// uniqueDeviceName 在一台手机要用的名字已经被别的手机占用时加序号：「iPhone」→「iPhone 2」。
-func uniqueDeviceName(devs []remoteDevice, name string) string {
-	taken := func(n string) bool {
-		return slices.ContainsFunc(devs, func(d remoteDevice) bool { return d.Name == n })
-	}
-	if !taken(name) {
-		return name
-	}
-	for i := 2; ; i++ {
-		if n := fmt.Sprintf("%s %d", name, i); !taken(n) {
-			return n
-		}
-	}
-}
-
-func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Code string `json:"code"`
-		// Device 和 ID 只在扫码配对时带：二维码里的请求是电脑发起的，手机报上自己的名字和标识
-		Device string `json:"device"`
-		ID     string `json:"id"`
-	}
-	if !readBodyOrFail(w, r, &body) {
-		return
-	}
-	rs.mu.Lock()
-	p := rs.pair
-	switch {
-	case p == nil || time.Now().After(p.expires):
-		rs.pair = nil
-		rs.mu.Unlock()
-		writeErr(w, http.StatusGone, "配对码已过期或被拒绝，请重新开始配对")
-		return
-	case subtle.ConstantTimeCompare([]byte(strings.TrimSpace(body.Code)), []byte(p.code)) != 1:
-		p.fails++
-		msg := fmt.Sprintf("配对码不对，还可以再试 %d 次", pairMaxFails-p.fails)
-		if p.fails >= pairMaxFails {
-			rs.pair = nil
-			rs.pairLockUntil[clientIP(r)] = rs.clock().Add(pairFailCooldown)
-			msg = "错误次数太多，这次配对已取消，请重新开始"
-		}
-		rs.mu.Unlock()
-		rs.redraw()
-		writeErr(w, http.StatusForbidden, msg)
-		return
-	}
-	name := p.device
-	if d := strings.TrimSpace(body.Device); d != "" {
-		name = sanitizeDevice(d)
-	}
-	id := p.id
-	if d := sanitizeDeviceID(body.ID); d != "" {
-		id = d
-	}
-	tok := randomToken()
-	// 同一台手机重新配对时替换掉旧的那条，免得越积越多；别的手机名字撞了就加个序号，
-	// 不能按名字替换——两台手机默认名字都叫「iPhone」，后配的会把先配的令牌顶掉。
-	if id != "" {
-		rs.devices = slices.DeleteFunc(rs.devices, func(d remoteDevice) bool { return d.ID == id })
-	} else {
-		// 旧版手机端没有标识，只能按名字认
-		rs.devices = slices.DeleteFunc(rs.devices, func(d remoteDevice) bool { return d.ID == "" && d.Name == name })
-	}
-	name = uniqueDeviceName(rs.devices, name)
-	rs.devices = append(rs.devices, remoteDevice{Name: name, ID: id, TokenHash: hashToken(tok), PairedAt: time.Now()})
-	devs := slices.Clone(rs.devices)
-	rs.pairedCode = p.code
-	rs.pair = nil
-	rs.mu.Unlock()
-	rs.saveDevices(devs)
-	rs.a.update(func() { rs.a.toast = fmt.Sprintf("已和「%s」配对", name) })
-	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "name": rs.host})
 }
 
 func (rs *remoteServer) handleState(w http.ResponseWriter, r *http.Request, _ string) {
@@ -732,409 +471,10 @@ func (rs *remoteServer) handleEvents(w http.ResponseWriter, r *http.Request, _ s
 	}
 }
 
-// handleRun 开始换一批。delete 为 false 时这次只模拟筛选（手机上已经确认过要不要删原图）。
-// 运行前重新检查一遍图库目录能不能访问：桌面上的挂载状态只在启动时查过，NAS 可能后来才挂上。
-func (rs *remoteServer) handleRun(w http.ResponseWriter, r *http.Request, dev string) {
-	var body struct {
-		Delete bool `json:"delete"`
-	}
-	if !readBodyOrFail(w, r, &body) {
-		return
-	}
-	var dirs []string
-	if !rs.onMainOrFail(w, func() { dirs = rs.a.allDirs() }) {
-		return
-	}
-	states := make([]mountState, len(dirs))
-	var wg sync.WaitGroup
-	for i, d := range dirs {
-		wg.Go(func() { states[i] = probeMount(rs.a.statDir, d) })
-	}
-	wg.Wait()
+// ── Bonjour 与本机局域网地址 ──────────────────────────────────────────────
 
-	var runErr error
-	if !rs.onMainOrFail(w, func() {
-		for i, d := range dirs {
-			rs.a.setMountState(d, states[i])
-		}
-		runErr = rs.a.remoteRun(dev, body.Delete)
-	}) {
-		return
-	}
-	if runErr != nil {
-		writeErr(w, http.StatusConflict, runErr.Error())
-		return
-	}
-	rs.writeSnapshot(w)
-}
-
-func (rs *remoteServer) handleStop(w http.ResponseWriter, r *http.Request, dev string) {
-	if !rs.onMainOrFail(w, func() {
-		if rs.a.running && !rs.a.stopReq.Load() {
-			rs.a.appendLog(fmt.Sprintf("📱 「%s」请求停止", dev))
-		}
-		rs.a.stopRun()
-	}) {
-		return
-	}
-	rs.writeSnapshot(w)
-}
-
-// handleMountsCheck 让电脑重新检查每个图库目录能不能访问（手机上的「重新检查挂载」）。
-// 检查在后台做（网络卷卡住时 stat 会阻塞），结果随状态快照推给手机。
-func (rs *remoteServer) handleMountsCheck(w http.ResponseWriter, r *http.Request, dev string) {
-	if !rs.onMainOrFail(w, func() {
-		rs.a.appendLog("📱 「" + dev + "」重新检查了图库挂载")
-		rs.a.checkMounts()
-	}) {
-		return
-	}
-	rs.writeSnapshot(w)
-}
-
-// handlePendingCancel 取消电脑上排队的删除原图：{"path": ...} 或 {"all": true}。
-// 只取消队列，不动已经移出的壁纸（和电脑概览里的待删除条一样）。
-func (rs *remoteServer) handlePendingCancel(w http.ResponseWriter, r *http.Request, dev string) {
-	var body struct {
-		Path string `json:"path"`
-		All  bool   `json:"all"`
-	}
-	if err := readBody(r, &body); err != nil || (!body.All && body.Path == "") {
-		writeErr(w, http.StatusBadRequest, "请求格式不对")
-		return
-	}
-	var removed int
-	if !rs.onMainOrFail(w, func() {
-		a := rs.a
-		if body.All {
-			removed = len(a.pending)
-			if removed > 0 {
-				a.cancelAllPending()
-			}
-		} else if i := slices.IndexFunc(a.pending, func(e core.PendingDelete) bool { return e.Path == body.Path }); i >= 0 {
-			a.cancelPending(i)
-			removed = 1
-		}
-		if removed > 0 {
-			a.appendLog(fmt.Sprintf("📱 「%s」取消了 %d 项排队删除", dev, removed))
-		}
-	}) {
-		return
-	}
-	rs.writeSnapshot(w)
-}
-
-// ── 主线程上的部分 ────────────────────────────────────────────────────────
-
-// remoteBlocked 是手机上「换一批」为什么点不了，能点时返回 ""。
-// 不看挂载状态：遥控运行前会重新检查一遍（见 handleRun）。
-func (a *app) remoteBlocked() string {
-	switch {
-	case a.running:
-		return "正在运行"
-	case len(a.allDirs()) == 0:
-		return "尚未添加图库目录，请先在电脑上添加"
-	case strings.TrimSpace(a.cfg.DestDir) == "":
-		return "尚未设置壁纸文件夹，请先在电脑上设置"
-	}
-	return ""
-}
-
-// remoteRun 是手机上点了「换一批」（主线程）。
-func (a *app) remoteRun(device string, allowDelete bool) error {
-	if reason := a.remoteBlocked(); reason != "" {
-		return errors.New(reason)
-	}
-	if !a.canRun() {
-		return errors.New("图库目录都无法访问，图库可能没有挂载")
-	}
-	a.startRunWith(runOpts{noDelete: !allowDelete, from: device})
-	return nil
-}
-
-// remoteState 是推给手机的状态快照，手机端的 RemoteState 与它一一对应。
-type remoteState struct {
-	Version  string `json:"version"`
-	Eyebrow  string `json:"eyebrow"`
-	Title    string `json:"title"`
-	Running  bool   `json:"running"`
-	Stopping bool   `json:"stopping"`
-	// 运行中：这次会走哪几步（filter / scan / copy / refresh）、当前是哪一步、进度
-	Steps    []string `json:"steps"`
-	Stage    string   `json:"stage,omitempty"`
-	Done     int      `json:"done"`
-	Total    int      `json:"total"`
-	Fraction float64  `json:"fraction"` // 0~1，-1 表示进度未知
-	Label    string   `json:"label,omitempty"`
-	LastLine string   `json:"last_line,omitempty"`
-	// 筛选阶段的删除情况：真删时数已删除，模拟运行时数不合格
-	RunDelete    bool `json:"run_delete"`
-	Rejected     int  `json:"rejected"`
-	Deleted      int  `json:"deleted"`
-	DeleteFailed int  `json:"delete_failed"`
-
-	Blocked    string      `json:"blocked,omitempty"` // 「换一批」点不了的原因
-	Unmounted  int         `json:"unmounted"`         // 上次检查时访问不了的图库目录数
-	WillDelete bool        `json:"will_delete"`       // 手动运行会删除不合格原图
-	DeleteNote string      `json:"delete_note,omitempty"`
-	Last       *remoteLast `json:"last,omitempty"`
-	NextAuto   int64       `json:"next_auto,omitempty"` // Unix 秒，0 表示没开自动换
-	Wallpapers int         `json:"wallpapers"`          // 壁纸文件夹里现在有几张
-	WallsRev   string      `json:"walls_rev"`           // 壁纸列表的指纹，变了手机就重新拉 /api/wallpapers
-	Dest       string      `json:"dest"`
-	Sample     int         `json:"sample_count"`
-	Library    int         `json:"library_dirs"`
-	// 第 3 期（remoteextra.go）
-	Settings *remoteSettings `json:"settings,omitempty"`  // 手机上能改的几项设置
-	UndoName string          `json:"undo_name,omitempty"` // 最近一次可以撤销的移出
-	Excluded int             `json:"excluded"`            // 「不再选」名单里有几张
-	// 图库没连上时排队的删除原图（pending.go）；手机上显示「N 项等电脑连上图库后执行」，可以逐条取消
-	Pending     int                 `json:"pending"`
-	PendingList []remotePendingItem `json:"pending_items,omitempty"`
-	// 图库目录（手机上只读显示）：路径、是筛选还是仅采样、挂载状态、统计
-	Dirs []remoteDir `json:"dirs,omitempty"`
-}
-
-// remotePendingItem 是待删除队列里的一条（路径原样传回来取消）。
-type remotePendingItem struct {
-	Path    string `json:"path"`
-	Display string `json:"display"` // ~ 缩写
-	Wall    string `json:"wall,omitempty"`
-	At      int64  `json:"at"` // Unix 秒
-}
-
-// remoteDir 是一个图库目录（只读）。
-type remoteDir struct {
-	Path    string `json:"path"`   // ~ 缩写
-	Filter  bool   `json:"filter"` // true = 筛选 + 采样，false = 仅采样
-	Mount   string `json:"mount"`  // ok / missing / slow / unknown
-	Images  int    `json:"images"` // 上次成功运行时扫描到的合格图片数
-	Folders int    `json:"folders"`
-	Deleted int    `json:"deleted"` // 删除记录里这个目录下删过几张
-}
-
-type remoteLast struct {
-	At       int64   `json:"at"`     // Unix 秒（手机端解析起来最省事）
-	Status   string  `json:"status"` // ok / stopped / failed
-	Error    string  `json:"error,omitempty"`
-	Selected int     `json:"selected"`
-	Copied   int     `json:"copied"`
-	Failed   int     `json:"failed"`
-	Elapsed  float64 `json:"elapsed"` // 秒
-	Brief    string  `json:"brief,omitempty"`
-	Detail   string  `json:"detail,omitempty"`
-}
-
-var stageIDs = []string{"filter", "scan", "copy", "refresh"}
-
-func (a *app) remoteSnapshot() remoteState {
-	s := remoteState{
-		Version: a.version, Eyebrow: a.heroEyebrow(), Title: a.heroTitle(),
-		Running: a.running, Stopping: a.running && a.stopReq.Load(),
-		Fraction:    -1,
-		Blocked:     a.remoteBlocked(),
-		Unmounted:   a.unmountedCount(),
-		WillDelete:  a.willDelete(),
-		Wallpapers:  len(a.walls.all),
-		WallsRev:    a.walls.cachedRev(),
-		Dest:        tildify(a.cfg.DestDir),
-		Sample:      int(a.num),
-		Library:     len(a.allDirs()),
-		Settings:    a.remoteSettings(),
-		UndoName:    a.undoName(),
-		Excluded:    len(a.cfg.Excluded),
-		Pending:     len(a.pending),
-		PendingList: a.remotePendingList(),
-		Dirs:        a.remoteDirs(),
-	}
-	if s.WillDelete {
-		s.DeleteNote = a.deleteNotice()
-	}
-	if len(a.cfg.FilterAndSampleDirs) > 0 {
-		s.Steps = append(s.Steps, stageIDs[0])
-	}
-	s.Steps = append(s.Steps, stageIDs[1:]...)
-	if a.running {
-		p := a.prog
-		s.Stage = stageIDs[p.stage]
-		s.Done, s.Total = p.done, p.total
-		if p.total > 0 && (p.stage == 0 || p.stage == 2) {
-			s.Fraction = float64(p.done) / float64(p.total)
-		}
-		s.Label = a.progressLabel()
-		s.LastLine = stripEmoji(cleanLogLine(a.lastLogLine()))
-		s.RunDelete = a.runDelete
-		s.Rejected, s.Deleted, s.DeleteFailed = a.runRejected, a.runDeleted, a.runDelFailed
-	}
-	if l := a.last; l != nil {
-		rl := &remoteLast{At: l.at.Unix(), Status: "ok", Selected: l.sum.Copy.Selected, Copied: l.sum.Copy.Copied,
-			Failed: l.sum.Copy.Failed, Elapsed: l.sum.Elapsed.Seconds()}
-		switch {
-		case errors.Is(l.err, core.ErrCanceled):
-			rl.Status = "stopped"
-		case l.err != nil:
-			rl.Status, rl.Error = "failed", l.err.Error()
-		default:
-			rl.Brief, rl.Detail = a.resultBrief(), a.resultDetail()
-		}
-		s.Last = rl
-	}
-	if next := a.nextAutoRun(); !next.IsZero() {
-		s.NextAuto = next.Unix()
-	}
-	return s
-}
-
-// remotePendingList 是待删除队列给手机看的那一份（主线程调用）。
-func (a *app) remotePendingList() []remotePendingItem {
-	items := make([]remotePendingItem, 0, len(a.pending))
-	for _, e := range a.pending {
-		items = append(items, remotePendingItem{Path: e.Path, Display: tildify(e.Path), Wall: e.Wall, At: e.AddedAt.Unix()})
-	}
-	return items
-}
-
-// remoteDirs 是图库目录列表（只读；主线程调用）。
-func (a *app) remoteDirs() []remoteDir {
-	dirs := make([]remoteDir, 0, len(a.cfg.FilterAndSampleDirs)+len(a.cfg.SampleOnlyDirs))
-	add := func(d string, filter bool) {
-		r := remoteDir{Path: tildify(d), Filter: filter, Mount: mountName(a.mountStateOf(d))}
-		if st, ok := a.sourceStat(d); ok {
-			r.Images, r.Folders = st.Images, st.Folders
-		}
-		r.Deleted = a.deletedIn(d)
-		dirs = append(dirs, r)
-	}
-	for _, d := range a.cfg.FilterAndSampleDirs {
-		add(d, true)
-	}
-	for _, d := range a.cfg.SampleOnlyDirs {
-		add(d, false)
-	}
-	return dirs
-}
-
-// mountName 是挂载状态给手机的值。
-func mountName(s mountState) string {
-	switch s {
-	case mountOK:
-		return "ok"
-	case mountMissing:
-		return "missing"
-	case mountSlow:
-		return "slow"
-	default:
-		return "unknown"
-	}
-}
-
-// remoteStamp 是 publishRemote 用来零开销判断是否需要重新生成与序列化状态快照的指纹。
-// 所有影响 remoteSnapshot() 的状态都在这里以标量或短指针表达，未变化时直接短路。
-type remoteStamp struct {
-	port          int
-	version       string
-	cfgRev        uint64
-	running       bool
-	stopping      bool
-	stage         core.Stage
-	done, total   int
-	runDelete     bool
-	runRejected   int
-	runDeleted    int
-	runDelFailed  int
-	logSeq        uint64
-	runningSec    int64 // 运行中按秒刷新进度文案（如剩余时间），空闲时恒为 0
-	last          *runResult
-	lastGood      *core.Summary
-	wallsDir      string
-	wallsRev      string
-	wallsSrcLen   int
-	undoName      string
-	pendingLen    int
-	pendingFirst  string
-	pendingLast   string
-	pendingFirstT int64
-	mountHash     uint64
-	delSize       int64
-	delMod        int64
-	nextAuto      int64
-}
-
-func (a *app) currentRemoteStamp(port int) remoteStamp {
-	var mountHash uint64
-	for _, d := range a.cfg.FilterAndSampleDirs {
-		mountHash = mountHash*31 + uint64(a.mountStateOf(d)) + 1
-	}
-	for _, d := range a.cfg.SampleOnlyDirs {
-		mountHash = mountHash*31 + uint64(a.mountStateOf(d)) + 1
-	}
-	_ = a.deleteRecords() // 短 TTL 缓存，常规重绘无 syscall
-	st := remoteStamp{
-		port:        port,
-		version:     a.version,
-		cfgRev:      a.cfgRev,
-		running:     a.running,
-		stopping:    a.running && a.stopReq.Load(),
-		last:        a.last,
-		lastGood:    a.lastGood,
-		wallsDir:    a.walls.dir,
-		wallsRev:    a.walls.cachedRev(),
-		wallsSrcLen: len(a.walls.sources),
-		undoName:    a.undoName(),
-		pendingLen:  len(a.pending),
-		mountHash:   mountHash,
-		delSize:     a.delCache.size,
-		delMod:      a.delCache.mod.UnixNano(),
-	}
-	if a.running {
-		st.stage, st.done, st.total = a.prog.stage, a.prog.done, a.prog.total
-		st.runDelete = a.runDelete
-		st.runRejected, st.runDeleted, st.runDelFailed = a.runRejected, a.runDeleted, a.runDelFailed
-		st.logSeq = a.logSeq
-		st.runningSec = time.Now().Unix()
-	}
-	if len(a.pending) > 0 {
-		st.pendingFirst = a.pending[0].Path
-		st.pendingLast = a.pending[len(a.pending)-1].Path
-		st.pendingFirstT = a.pending[0].AddedAt.UnixNano()
-	}
-	if next := a.nextAutoRun(); !next.IsZero() {
-		st.nextAuto = next.Unix()
-	}
-	return st
-}
-
-// publishRemote 在主线程上把最新状态交给手机遥控服务（没开启或状态未变化时跳过序列化）。
-func (a *app) publishRemote() {
-	if a.remote == nil {
-		return
-	}
-	a.remote.setEnabled(a.cfg.RemoteEnabled)
-	port, _ := a.remote.status()
-	if port == 0 {
-		a.remotePublished = false
-		return
-	}
-	stamp := a.currentRemoteStamp(port)
-	if a.remotePublished && stamp == a.lastRemoteStamp {
-		return
-	}
-	snap := a.remoteSnapshot()
-	a.remote.publishWalls(snap.WallsRev, &a.walls)
-	data, err := json.Marshal(snap)
-	if err != nil {
-		return
-	}
-	a.remote.publish(data)
-	a.lastRemoteStamp = stamp
-	a.remotePublished = true
-}
-
-// ── Bonjour ───────────────────────────────────────────────────────────────
-
-// advertiseBonjour 用系统自带的 dns-sd 注册服务（走 mDNSResponder，比自己实现 mDNS 可靠）。
-// dns-sd 会一直运行直到被结束；外面包一层 sh，拾景的 stdin 管道断了（包括崩溃）它就跟着退出，
-// 不会留下一个指向旧端口的广播。
+// advertiseBonjour 用系统自带的 dns-sd 注册服务（依赖 mDNSResponder）。
+// 外面包一层 sh，拾景的 stdin 管道断了（包括崩溃）它就跟着退出，不会留下指向旧端口的广播。
 func advertiseBonjour(name string, port int, txt []string) func() {
 	args := []string{"-R", name, bonjourType, "local", fmt.Sprint(port)}
 	args = append(args, txt...)

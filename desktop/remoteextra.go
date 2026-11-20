@@ -182,7 +182,7 @@ func (rs *remoteServer) handleSettings(w http.ResponseWriter, r *http.Request, d
 		set(&a.cfg.Incremental, body.Incremental, "增量筛选")
 		set(&a.cfg.ArchiveEnabled, body.Archive, "归档")
 		if len(changed) > 0 {
-			a.appendLog("📱 「" + dev + "」改了设置：" + joinCN(changed))
+			a.appendLog("📱 「" + dev + "」改了设置：" + strings.Join(changed, "，"))
 		}
 	}) {
 		return
@@ -203,17 +203,6 @@ func onOff(v bool) string {
 		return "：打开"
 	}
 	return "：关闭"
-}
-
-func joinCN(s []string) string {
-	out := ""
-	for i, x := range s {
-		if i > 0 {
-			out += "，"
-		}
-		out += x
-	}
-	return out
 }
 
 // handleLog 给最近的运行日志（和电脑上「日志」里看到的一样，按行）。

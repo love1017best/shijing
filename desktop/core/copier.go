@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 )
 
-// ErrNoImages 对应 Python 版的 CopyError：扫描不到图片时不动目标目录。
+// ErrNoImages 在扫描不到任何符合条件的图片时返回，此时不会改动目标目录。
 var ErrNoImages = errors.New("未找到符合条件的图片文件（源目录可能未挂载）；目标目录未被改动")
 
-// CopyOptions 对应 image_copyer.run_copy 的 cfg（只保留 run.py 用到的字段）。
+// CopyOptions 是 CopySamples 的采样复制配置。
 type CopyOptions struct {
 	Sources       []string
 	Dest          string
@@ -48,12 +48,107 @@ type sourceImage struct {
 	path      string
 }
 
-// scanImages 一次遍历同时得到扁平列表和按叶子文件夹（没有子目录的文件夹）分组的结果
-// （CLAUDE.md 坑 9：以前遍历两遍）。filter 里的源目录才做分辨率检查。
-//
-// 分两步：先遍历拿到全部候选图片，再把需要检查分辨率的那些一次性并发检查
-// （逐张串行打开 NAS 上的图片曾经占了扫描阶段九成的时间），最后按遍历顺序组装结果。
-func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir func(n int), stop func() bool) ([]sourceImage, map[string][]sourceImage, []string) {
+// imagePool 封装一次扫描得到的候选图片：扁平列表和按叶子文件夹分组的视图。
+type imagePool struct {
+	all       []sourceImage
+	grouped   map[string][]sourceImage
+	leafOrder []string
+}
+
+// drop 从候选池里移除指定路径的图片，返回过滤后的池和移除张数。
+func (p imagePool) drop(paths []string) (imagePool, int) {
+	excluded := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		excluded[path] = true
+	}
+	next := p.subset(func(img sourceImage) bool { return !excluded[img.path] })
+	return next, len(p.all) - len(next.all)
+}
+
+// subset 按 keep 过滤候选池的三种视图，去掉过滤后为空的叶子文件夹。
+func (p imagePool) subset(keep func(sourceImage) bool) imagePool {
+	var outAll []sourceImage
+	for _, img := range p.all {
+		if keep(img) {
+			outAll = append(outAll, img)
+		}
+	}
+	outGrouped := map[string][]sourceImage{}
+	var outLeaves []string
+	for _, leaf := range p.leafOrder {
+		var here []sourceImage
+		for _, img := range p.grouped[leaf] {
+			if keep(img) {
+				here = append(here, img)
+			}
+		}
+		if len(here) > 0 {
+			outGrouped[leaf] = here
+			outLeaves = append(outLeaves, leaf)
+		}
+	}
+	return imagePool{all: outAll, grouped: outGrouped, leafOrder: outLeaves}
+}
+
+// sampleBalanced 先给每个叶子文件夹选 1 张，再从剩下的图片里随机补足。
+// 第一轮之前打乱文件夹顺序，避免叶子文件夹多于采样数时靠后的文件夹始终选不到。
+func (p imagePool) sampleBalanced(total int, r *rand.Rand) []sourceImage {
+	leaves := append([]string(nil), p.leafOrder...)
+	r.Shuffle(len(leaves), func(i, j int) { leaves[i], leaves[j] = leaves[j], leaves[i] })
+
+	var selected []sourceImage
+	chosen := map[string]bool{}
+	for _, leaf := range leaves {
+		if len(selected) >= total {
+			return selected
+		}
+		imgs := p.grouped[leaf]
+		img := imgs[r.IntN(len(imgs))]
+		selected = append(selected, img)
+		chosen[img.path] = true
+	}
+	var rest []sourceImage
+	for _, leaf := range p.leafOrder {
+		for _, img := range p.grouped[leaf] {
+			if !chosen[img.path] {
+				rest = append(rest, img)
+			}
+		}
+	}
+	return append(selected, sampleN(rest, total-len(selected), r)...)
+}
+
+// sample 从候选池里选出 n 张；平衡模式下若叶子目录图数不足，再从非叶子目录补齐。
+func (p imagePool) sample(n int, balanceFirst bool, r *rand.Rand) []sourceImage {
+	if !balanceFirst {
+		return sampleN(p.all, n, r)
+	}
+	sel := p.sampleBalanced(n, r)
+	need := n - len(sel)
+	if need <= 0 {
+		return sel
+	}
+	inGrouped := make(map[string]bool, len(sel))
+	for _, leaf := range p.leafOrder {
+		for _, img := range p.grouped[leaf] {
+			inGrouped[img.path] = true
+		}
+	}
+	var extra []sourceImage
+	for _, img := range p.all {
+		if !inGrouped[img.path] {
+			extra = append(extra, img)
+		}
+	}
+	if len(extra) > 0 {
+		sel = append(sel, sampleN(extra, need, r)...)
+	}
+	return sel
+}
+
+// scanImages 一次遍历同时得到扁平列表和按叶子文件夹（没有子目录的文件夹）分组的结果。
+// filter 里的源目录才做分辨率检查：先遍历拿到全部候选图片，再并发检查分辨率，最后按遍历顺序组装。
+func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir func(n int), stop func() bool) imagePool {
 	stopped := func() bool { return stop != nil && stop() }
 	type dirScan struct {
 		root   string
@@ -66,7 +161,7 @@ func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir 
 	seen := 0
 	for _, src := range sources {
 		if stopped() {
-			return nil, nil, nil
+			return imagePool{}
 		}
 		if st, err := os.Stat(src); err != nil || !st.IsDir() {
 			continue
@@ -92,11 +187,11 @@ func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir 
 		})
 	}
 	if stopped() {
-		return nil, nil, nil
+		return imagePool{}
 	}
-	ok := checkResolutionsStop(toCheck, minW, minH, stop)
+	ok := checkResolutions(toCheck, minW, minH, stop)
 	if stopped() {
-		return nil, nil, nil
+		return imagePool{}
 	}
 
 	var all []sourceImage
@@ -123,36 +218,7 @@ func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir 
 			grouped[d.root] = append(grouped[d.root], here...)
 		}
 	}
-	return all, grouped, leafOrder
-}
-
-// sampleBalanced 先给每个叶子文件夹选 1 张，再从剩下的图片里随机补足。
-// 第一轮之前必须打乱文件夹顺序（CLAUDE.md 坑 8），否则叶子文件夹多于采样数时
-// 遍历顺序靠后的文件夹永远选不到。
-func sampleBalanced(grouped map[string][]sourceImage, leafOrder []string, total int, r *rand.Rand) []sourceImage {
-	leaves := append([]string(nil), leafOrder...)
-	r.Shuffle(len(leaves), func(i, j int) { leaves[i], leaves[j] = leaves[j], leaves[i] })
-
-	var selected []sourceImage
-	chosen := map[string]bool{}
-	for _, leaf := range leaves {
-		if len(selected) >= total {
-			return selected
-		}
-		imgs := grouped[leaf]
-		img := imgs[r.IntN(len(imgs))]
-		selected = append(selected, img)
-		chosen[img.path] = true
-	}
-	var rest []sourceImage
-	for _, leaf := range leafOrder {
-		for _, img := range grouped[leaf] {
-			if !chosen[img.path] {
-				rest = append(rest, img)
-			}
-		}
-	}
-	return append(selected, sampleN(rest, total-len(selected), r)...)
+	return imagePool{all: all, grouped: grouped, leafOrder: leafOrder}
 }
 
 // sampleN 等价于 random.sample：不放回地随机取 n 个（n 超过长度时取全部）。
@@ -194,16 +260,8 @@ func generateFilename(src, destDir string, taken map[string]bool) string {
 	return dest
 }
 
-// cleanDirectory 删除目录再重建（只用于本地的 dest_dir）。
-func cleanDirectory(dir string) error {
-	if err := os.RemoveAll(dir); err != nil {
-		return err
-	}
-	return os.MkdirAll(dir, 0o755)
-}
-
-// clearDirectoryContents 只清空内容、不删目录本身（CLAUDE.md 坑 3）：
-// 网络卷上或正被 Finder 打开的目录，rmdir 自身容易 Resource busy。
+// clearDirectoryContents 清空目录内的条目而不删目录本身：
+// 网络卷上或正被 Finder 打开的目录，删除目录自身容易触发 Resource busy。
 func clearDirectoryContents(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -230,7 +288,7 @@ func resolveArchiveDir(sourceDir, override, subdir string) string {
 }
 
 // translateSourceForArchive 把 SMB 挂载点下的源路径换算成 NFS 挂载点下的等价路径，
-// 只用于建归档硬链接（CLAUDE.md 坑 5：硬链接两端必须在同一个挂载点）。
+// 用于建归档硬链接（硬链接要求两端在同一个挂载点）。
 func translateSourceForArchive(src, smbRoot, nfsRoot string) string {
 	if smbRoot == "" || nfsRoot == "" {
 		return src
@@ -251,8 +309,7 @@ func cleanupNFSAppleDoubleSidecar(path string) {
 }
 
 // copyFile 先复制内容，再尽力还原权限和时间戳。还原失败不算复制失败
-// （CLAUDE.md 坑 4：NAS 文件带 SF_ARCHIVED 等 flags 时 copystat 会假性报错）。
-// Go 本来就不复制 st_flags，这里只还原 mode 和 mtime/atime。
+// （NAS 文件带 SF_ARCHIVED 等 flags 时修改元数据可能报错；Go 不复制 st_flags，只还原 mode 与时间戳）。
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -332,7 +389,7 @@ func planCopies(images []sourceImage, destDir string, o CopyOptions, archiveOver
 }
 
 // processImages 并发复制/链接选中的图片，返回成功数、失败数和归档成功数。
-// 实测串行复制只有约 60 MB/s，6 路并发能到 110~120 MB/s（CLAUDE.md 坑 12）。
+// 6 路并发可以把 SMB 的往返等待重叠起来，显著提升吞吐。
 // dests 与 images 一一对应，是复制成功后在壁纸文件夹里的文件名（失败为空）；bytes 是复制的总字节数。
 func processImages(images []sourceImage, destDir string, o CopyOptions, archiveOverride string, rep Reporter) (copied, failed, archived int, dests []string, bytes int64) {
 	jobs := planCopies(images, destDir, o, archiveOverride)
@@ -345,11 +402,8 @@ func processImages(images []sourceImage, destDir string, o CopyOptions, archiveO
 	var nCopied, nFailed, nArchived, nDone, nBytes atomic.Int64
 	dests = make([]string, len(jobs))
 	rep.progress(StageCopy, 0, len(jobs))
-	parallelFor(len(jobs), copyWorkers, func(i int) {
+	parallelForStop(len(jobs), copyWorkers, rep.stopped, func(i int) {
 		j := jobs[i]
-		if rep.stopped() {
-			return // 不再开始新的图片，已经在复制的会复制完
-		}
 		defer func() { rep.progress(StageCopy, int(nDone.Add(1)), len(jobs)) }()
 		srcName, destName := filepath.Base(j.img.path), filepath.Base(j.dest)
 		msg := fmt.Sprintf("%s: %s", action, srcName)
@@ -385,7 +439,7 @@ func processImages(images []sourceImage, destDir string, o CopyOptions, archiveO
 			return
 		}
 		archiveSrc := translateSourceForArchive(j.img.path, o.ArchiveSMBRoot, o.ArchiveNFSRoot)
-		// 优先硬链接；SMB 上必然失败（CLAUDE.md 坑 1），降级为相对路径软链接
+		// 优先硬链接；SMB 上不支持硬链接，失败时降级为相对路径软链接
 		if err := os.Link(archiveSrc, j.archivePath); err == nil {
 			cleanupNFSAppleDoubleSidecar(archiveSrc)
 			nArchived.Add(1)
@@ -400,32 +454,30 @@ func processImages(images []sourceImage, destDir string, o CopyOptions, archiveO
 	return int(nCopied.Load()), int(nFailed.Load()), int(nArchived.Load()), dests, nBytes.Load()
 }
 
-// CopySamples 扫描 → 采样 → 确认选出图片后才清空目标/归档目录并复制（CLAUDE.md 坑 10）。
-func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) {
-	logf := rep.logf
-	var res CopyResult
-	if r == nil {
-		r = rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
-	}
+// normalizeCopyOptions 补齐默认值并展开路径，返回目标目录和归档覆盖父路径。
+func normalizeCopyOptions(o CopyOptions) (CopyOptions, string, string) {
 	destDir := ExpandUser(o.Dest)
-	res.Dest = destDir
 	if o.ArchiveSubdirName == "" {
 		o.ArchiveSubdirName = DefaultArchiveSubdir
 	}
 	o.ArchiveSMBRoot = ExpandUser(o.ArchiveSMBRoot)
 	o.ArchiveNFSRoot = ExpandUser(o.ArchiveNFSRoot)
-	// 没单独指定归档父路径时，配置了 NFS 根路径就默认归档到 NFS 挂载点下
+	// 未单独指定归档父路径时，配置了 NFS 根路径就默认归档到 NFS 挂载点下
 	archiveOverride := ExpandUser(o.ArchiveDirOverride)
 	if archiveOverride == "" {
 		archiveOverride = o.ArchiveNFSRoot
 	}
+	return o, destDir, archiveOverride
+}
 
-	resolvedSources := map[string]bool{}
-	for _, s := range o.Sources {
+// buildFilterSet 构建需要按分辨率过滤的源目录集合，忽略不在 sources 中的条目。
+func buildFilterSet(sources, filterSources []string, logf Logf) map[string]bool {
+	resolvedSources := make(map[string]bool, len(sources))
+	for _, s := range sources {
 		resolvedSources[resolvePath(s)] = true
 	}
 	filter := map[string]bool{}
-	for _, s := range o.FilterSources {
+	for _, s := range filterSources {
 		rs := resolvePath(s)
 		if !resolvedSources[rs] {
 			logf("⚠️ filter_sources 中的目录 %s 不在 sources 中，已忽略", rs)
@@ -433,195 +485,208 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 		}
 		filter[rs] = true
 	}
+	return filter
+}
+
+// selectFromPool 结合轮换历史和平衡模式从候选池选出 sampleSize 张图。
+func selectFromPool(pool imagePool, sampleSize int, o CopyOptions, r *rand.Rand, logf Logf) (selected []sourceImage, history map[string]bool, newCycle bool) {
+	primary := pool
+	var fallback imagePool
+	if o.PreferUnseen && o.HistoryFile != "" {
+		history = loadHistory(o.HistoryFile)
+		unseen := pool.subset(func(img sourceImage) bool { return !history[img.path] })
+		if len(unseen.all) >= sampleSize {
+			primary = unseen
+		} else {
+			newCycle = len(history) > 0
+			if newCycle {
+				logf("🌀 未更换过的只剩 %d 张，全部选中，整个图库已轮换完一遍，开始新一轮", len(unseen.all))
+			}
+			primary = unseen
+			fallback = pool.subset(func(img sourceImage) bool { return history[img.path] })
+		}
+	}
+	selected = primary.sample(sampleSize, o.BalanceFirst, r)
+	if need := sampleSize - len(selected); need > 0 && len(fallback.all) > 0 {
+		selected = append(selected, fallback.sample(need, o.BalanceFirst, r)...)
+	}
+	return selected, history, newCycle
+}
+
+// reportBalanceCoverage 统计并输出平衡模式下的叶子文件夹覆盖率。
+func reportBalanceCoverage(pool imagePool, selected []sourceImage, sampleSize int, logf Logf) int {
+	leafCount := len(pool.grouped)
+	logf("⚖️ 平衡采样：%d 个叶子文件夹，共 %d 张符合条件的图片", leafCount, len(pool.all))
+	if sampleSize < leafCount {
+		logf("⚠️ 采样数量 (%d) 少于叶子文件夹数量 (%d)，无法保证每文件夹都选中", sampleSize, leafCount)
+	}
+	covered := map[string]bool{}
+	for _, img := range selected {
+		dir := filepath.Dir(img.path)
+		if _, ok := pool.grouped[dir]; ok {
+			covered[dir] = true
+		}
+	}
+	coverage := 0.0
+	if leafCount > 0 {
+		coverage = float64(len(covered)) / float64(leafCount) * 100
+	}
+	logf("📊 叶子文件夹覆盖率: %d/%d (%.1f%%)", len(covered), leafCount, coverage)
+	return len(covered)
+}
+
+// prepareOutputDirs 清空壁纸目标目录内容与各归档目录内容。
+func prepareOutputDirs(destDir string, o CopyOptions, archiveOverride string, logf Logf) error {
+	if exists(destDir) {
+		logf("🔄 清空目标目录...")
+		if err := clearDirectoryContents(destDir); err != nil {
+			return fmt.Errorf("清空目标目录失败: %w", err)
+		}
+	} else if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return fmt.Errorf("创建目标目录失败: %w", err)
+	}
+	if !o.ArchiveEnabled {
+		return nil
+	}
+	seen := map[string]bool{}
+	var valid []string
+	for _, s := range o.Sources {
+		ad := resolveArchiveDir(s, archiveOverride, o.ArchiveSubdirName)
+		if seen[ad] {
+			continue
+		}
+		seen[ad] = true
+		if !exists(filepath.Dir(ad)) {
+			logf("⚠️ 归档父路径不存在，跳过: %s", filepath.Dir(ad))
+			continue
+		}
+		valid = append(valid, ad)
+	}
+	logf("🔄 清空归档目录 (%d 个)...", len(valid))
+	for _, ad := range valid {
+		if err := clearDirectoryContents(ad); err != nil {
+			logf("⚠️ 清空归档目录失败，跳过（可能被 Finder 或其他程序占用）: %s - %v", ad, err)
+		}
+	}
+	return nil
+}
+
+// savePartialSelection 在复制中途停止时，按实际已写入的文件重写选图映射，
+// 避免保留上一批映射导致后续「删除原图」删错文件。
+func savePartialSelection(file, destDir string, selected []sourceImage, dests []string, copied int, logf Logf) {
+	doneSrc := make([]string, 0, copied)
+	doneDst := make([]string, 0, copied)
+	for i, d := range dests {
+		if d != "" {
+			doneSrc = append(doneSrc, selected[i].path)
+			doneDst = append(doneDst, d)
+		}
+	}
+	saveSelection(file, destDir, doneSrc, doneDst, logf)
+}
+
+// updateRotationHistory 更新图库轮换历史并返回本轮累计已更换张数。
+func updateRotationHistory(o CopyOptions, history map[string]bool, newCycle bool, selected, all []sourceImage, logf Logf) int {
+	if !o.PreferUnseen || o.HistoryFile == "" {
+		return 0
+	}
+	if newCycle || history == nil {
+		history = map[string]bool{}
+	}
+	for _, img := range selected {
+		history[img.path] = true
+	}
+	if err := saveHistory(o.HistoryFile, history); err != nil {
+		logf("⚠️ 记录轮换进度失败: %v", err)
+	}
+	rotated := 0
+	for _, img := range all {
+		if history[img.path] {
+			rotated++
+		}
+	}
+	logf("🌀 图库轮换进度：已更换 %d / %d 张（%.0f%%）", rotated, len(all), float64(rotated)/float64(max(1, len(all)))*100)
+	return rotated
+}
+
+// CopySamples 扫描 → 采样 → 确认选出图片后才清空目标/归档目录并复制。
+func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) {
+	logf := rep.logf
+	var res CopyResult
+	if r == nil {
+		r = rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
+	}
+	var destDir, archiveOverride string
+	o, destDir, archiveOverride = normalizeCopyOptions(o)
+	res.Dest = destDir
+
+	filter := buildFilterSet(o.Sources, o.FilterSources, logf)
 
 	logf("🔍 扫描图片文件...")
 	rep.progress(StageScan, 0, 0)
 	if len(filter) > 0 {
 		logf("   分辨率筛选目录: %d 个 (最小 %dx%d, 横屏)", len(filter), o.MinWidth, o.MinHeight)
 	}
-	all, grouped, leafOrder := scanImages(o.Sources, filter, o.MinWidth, o.MinHeight, func(n int) { rep.progress(StageScan, n, 0) }, rep.stopped)
+	pool := scanImages(o.Sources, filter, o.MinWidth, o.MinHeight, func(n int) { rep.progress(StageScan, n, 0) }, rep.stopped)
 	if rep.stopped() {
 		logf("\n⏹️ 已停止扫描")
 		return res, ErrCanceled
 	}
 	if len(o.Excluded) > 0 {
 		var dropped int
-		all, grouped, leafOrder, dropped = dropExcluded(all, grouped, leafOrder, o.Excluded)
+		pool, dropped = pool.drop(o.Excluded)
 		if dropped > 0 {
 			logf("🚫 跳过 %d 张已排除的图片", dropped)
 		}
 	}
 	if len(o.Rejected) > 0 {
 		var dropped int
-		all, grouped, leafOrder, dropped = dropExcluded(all, grouped, leafOrder, o.Rejected)
+		pool, dropped = pool.drop(o.Rejected)
 		if dropped > 0 {
 			logf("🚫 跳过 %d 张不合格的图片（筛选查出来、这次没有删除）", dropped)
 		}
 	}
-	res.Candidates, res.LeafFolders = len(all), len(grouped)
-	res.Sources = sourceStats(o.Sources, all)
-	if len(all) == 0 {
+	res.Candidates, res.LeafFolders = len(pool.all), len(pool.grouped)
+	res.Sources = sourceStats(o.Sources, pool.all)
+	if len(pool.all) == 0 {
 		return res, ErrNoImages
 	}
 	if o.Num <= 0 {
 		return res, errors.New("采样数量必须大于 0")
 	}
-	sampleSize := min(o.Num, len(all))
+	sampleSize := min(o.Num, len(pool.all))
 	logf("🎯 随机选择 %d 张图片", sampleSize)
 
-	// 优先选这一轮轮换里还没换上过的：没换上过的够数就只从里面选，不够就全选上、差的从换上过的里补，
-	// 并开始新一轮（历史只留这一批）
-	var history map[string]bool
-	poolAll, poolGrouped, poolLeaves := all, grouped, leafOrder
-	var fillAll []sourceImage
-	var fillGrouped map[string][]sourceImage
-	var fillLeaves []string
-	if o.PreferUnseen && o.HistoryFile != "" {
-		history = loadHistory(o.HistoryFile)
-		unseen := func(img sourceImage) bool { return !history[img.path] }
-		uAll, uGrouped, uLeaves := subsetImages(all, grouped, leafOrder, unseen)
-		switch {
-		case len(uAll) >= sampleSize:
-			poolAll, poolGrouped, poolLeaves = uAll, uGrouped, uLeaves
-		default:
-			res.NewCycle = len(history) > 0
-			if res.NewCycle {
-				logf("🌀 未更换过的只剩 %d 张，全部选中，整个图库已轮换完一遍，开始新一轮", len(uAll))
-			}
-			poolAll, poolGrouped, poolLeaves = uAll, uGrouped, uLeaves
-			fillAll, fillGrouped, fillLeaves = subsetImages(all, grouped, leafOrder, func(img sourceImage) bool { return history[img.path] })
-		}
-	}
-	sample := func(all []sourceImage, grouped map[string][]sourceImage, leaves []string, n int) []sourceImage {
-		if o.BalanceFirst {
-			sel := sampleBalanced(grouped, leaves, n, r)
-			if need := n - len(sel); need > 0 {
-				// 叶子目录里的图片凑不够（例如图片都在非叶子目录，或叶子目录大多被排除），
-				// 再从其余符合条件的图片里补足，避免非叶子目录图片被丢弃或选出 0 张。
-				inGrouped := make(map[string]bool, len(sel))
-				for _, leaf := range leaves {
-					for _, img := range grouped[leaf] {
-						inGrouped[img.path] = true
-					}
-				}
-				var extra []sourceImage
-				for _, img := range all {
-					if !inGrouped[img.path] {
-						extra = append(extra, img)
-					}
-				}
-				if len(extra) > 0 {
-					sel = append(sel, sampleN(extra, need, r)...)
-				}
-			}
-			return sel
-		}
-		return sampleN(all, n, r)
-	}
-	selected := sample(poolAll, poolGrouped, poolLeaves, sampleSize)
-	if need := sampleSize - len(selected); need > 0 && len(fillAll) > 0 {
-		selected = append(selected, sample(fillAll, fillGrouped, fillLeaves, need)...)
-	}
+	selected, history, newCycle := selectFromPool(pool, sampleSize, o, r, logf)
+	res.NewCycle = newCycle
 	res.Selected = len(selected)
 	if len(selected) == 0 {
 		logf("⚠️ 未能选出任何可用图片，保留现有壁纸目录不变")
 		return res, ErrNoImages
 	}
 	if o.BalanceFirst {
-		leafCount := len(grouped)
-		logf("⚖️ 平衡采样：%d 个叶子文件夹，共 %d 张符合条件的图片", leafCount, len(all))
-		if sampleSize < leafCount {
-			logf("⚠️ 采样数量 (%d) 少于叶子文件夹数量 (%d)，无法保证每文件夹都选中", sampleSize, leafCount)
-		}
-		covered := map[string]bool{}
-		for _, img := range selected {
-			dir := filepath.Dir(img.path)
-			if _, ok := grouped[dir]; ok {
-				covered[dir] = true
-			}
-		}
-		coverage := 0.0
-		if leafCount > 0 {
-			coverage = float64(len(covered)) / float64(leafCount) * 100
-		}
-		logf("📊 叶子文件夹覆盖率: %d/%d (%.1f%%)", len(covered), leafCount, coverage)
-		res.CoveredFolders = len(covered)
+		res.CoveredFolders = reportBalanceCoverage(pool, selected, sampleSize, logf)
 	}
 
-	// 清空壁纸目录之前是最后一个"什么都没动"的时刻
+	// 清空壁纸目录之前是最后一个未改动任何文件的检查点
 	if rep.stopped() {
 		return res, ErrCanceled
 	}
 	prev := loadPrevSelection(o.SelectionFile, destDir)
-	if exists(destDir) {
-		logf("🔄 清空目标目录...")
-		if err := cleanDirectory(destDir); err != nil {
-			return res, fmt.Errorf("清空目标目录失败: %w", err)
-		}
-	}
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return res, fmt.Errorf("创建目标目录失败: %w", err)
-	}
-
-	if o.ArchiveEnabled {
-		seen := map[string]bool{}
-		var valid []string
-		for _, s := range o.Sources {
-			ad := resolveArchiveDir(s, archiveOverride, o.ArchiveSubdirName)
-			if seen[ad] {
-				continue
-			}
-			seen[ad] = true
-			if !exists(filepath.Dir(ad)) {
-				logf("⚠️ 归档父路径不存在，跳过: %s", filepath.Dir(ad))
-				continue
-			}
-			valid = append(valid, ad)
-		}
-		logf("🔄 清空归档目录 (%d 个)...", len(valid))
-		for _, ad := range valid {
-			if err := clearDirectoryContents(ad); err != nil {
-				logf("⚠️ 清空归档目录失败，跳过（可能被 Finder 或其他程序占用）: %s - %v", ad, err)
-			}
-		}
+	if err := prepareOutputDirs(destDir, o, archiveOverride, logf); err != nil {
+		return res, err
 	}
 
 	logf("🚀 开始处理图片...")
 	var dests []string
 	res.Copied, res.Failed, res.Archived, dests, res.Bytes = processImages(selected, destDir, o, archiveOverride, rep)
 	if rep.stopped() && res.Copied+res.Failed < len(selected) {
-		// 已经清空过壁纸目录：按实际复制成功的图重写 last_selection.json，
-		// 避免保留上一批映射导致后续「删除原图」按旧记录删错 NAS 文件。
-		doneSrc := make([]string, 0, res.Copied)
-		doneDst := make([]string, 0, res.Copied)
-		for i, d := range dests {
-			if d != "" {
-				doneSrc = append(doneSrc, selected[i].path)
-				doneDst = append(doneDst, d)
-			}
-		}
-		saveSelection(o.SelectionFile, destDir, doneSrc, doneDst, logf)
+		savePartialSelection(o.SelectionFile, destDir, selected, dests, res.Copied, logf)
 		logf("⏹️ 已停止：壁纸目录里保留已复制的 %d 张", res.Copied)
 		return res, ErrCanceled
 	}
 	compareSelection(o.SelectionFile, destDir, prev, selected, dests, &res, logf)
-	if o.PreferUnseen && o.HistoryFile != "" {
-		if res.NewCycle {
-			history = map[string]bool{}
-		}
-		for _, img := range selected {
-			history[img.path] = true
-		}
-		if err := saveHistory(o.HistoryFile, history); err != nil {
-			logf("⚠️ 记录轮换进度失败: %v", err)
-		}
-		for _, img := range all {
-			if history[img.path] {
-				res.Rotated++
-			}
-		}
-		logf("🌀 图库轮换进度：已更换 %d / %d 张（%.0f%%）", res.Rotated, len(all), float64(res.Rotated)/float64(max(1, len(all)))*100)
-	}
+	res.Rotated = updateRotationHistory(o, history, newCycle, selected, pool.all, logf)
 	logf("✅ 完成! 已处理 %d 张图片", len(selected))
 	logf("💾 目标目录: %s", destDir)
 	if o.ArchiveEnabled {
@@ -745,41 +810,6 @@ func saveSelection(file, destDir string, sources, dests []string, logf Logf) {
 	if err != nil {
 		logf("⚠️ 记录本轮选中的图片失败: %v", err)
 	}
-}
-
-// dropExcluded 从扫描结果里去掉排除名单里的图片，返回去掉的张数。
-func dropExcluded(all []sourceImage, grouped map[string][]sourceImage, leafOrder []string, excluded []string) ([]sourceImage, map[string][]sourceImage, []string, int) {
-	ex := make(map[string]bool, len(excluded))
-	for _, p := range excluded {
-		ex[p] = true
-	}
-	a, g, l := subsetImages(all, grouped, leafOrder, func(img sourceImage) bool { return !ex[img.path] })
-	return a, g, l, len(all) - len(a)
-}
-
-// subsetImages 按 keep 过滤扫描结果的三种视图，去掉过滤后为空的叶子文件夹。
-func subsetImages(all []sourceImage, grouped map[string][]sourceImage, leafOrder []string, keep func(sourceImage) bool) ([]sourceImage, map[string][]sourceImage, []string) {
-	var outAll []sourceImage
-	for _, img := range all {
-		if keep(img) {
-			outAll = append(outAll, img)
-		}
-	}
-	outGrouped := map[string][]sourceImage{}
-	var outLeaves []string
-	for _, leaf := range leafOrder {
-		var here []sourceImage
-		for _, img := range grouped[leaf] {
-			if keep(img) {
-				here = append(here, img)
-			}
-		}
-		if len(here) > 0 {
-			outGrouped[leaf] = here
-			outLeaves = append(outLeaves, leaf)
-		}
-	}
-	return outAll, outGrouped, outLeaves
 }
 
 // sourceStats 按图库目录统计可参与采样的图片数和含图片的文件夹数，顺序与 sources 一致。

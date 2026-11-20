@@ -19,13 +19,13 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-// 与 image_utils.VALID_IMAGE_EXTENSIONS 一致。
+// 支持的图片扩展名。
 var validImageExtensions = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
 	".bmp": true, ".tiff": true, ".webp": true,
 }
 
-// Logf 是各步骤输出日志的方式（对应 Python 版的 print/logger.info）。
+// Logf 是各步骤输出日志的回调函数。
 type Logf func(format string, args ...any)
 
 // IsValidImage 只按扩展名判断是否为支持的图片格式。
@@ -34,8 +34,7 @@ func IsValidImage(path string) bool {
 }
 
 // CheckImageResolution 判断图片是否横屏（宽高比 > 1.1）且不小于最小分辨率；按显示方向（EXIF）算宽高。
-// image.DecodeConfig 只解析文件头，不解码整张图（PIL 的 Image.open 同样是惰性读取）。
-// 打不开/解析失败的图片视为不合格，与 Python 版一致。
+// image.DecodeConfig 只解析文件头，不解码整张图；打不开或解析失败的图片视为不合格。
 func CheckImageResolution(path string, minWidth, minHeight int) bool {
 	ok, _ := ImageVerdict(path, minWidth, minHeight)
 	return ok
@@ -72,18 +71,17 @@ func ImageVerdict(path string, minWidth, minHeight int) (ok bool, reason string)
 	return true, ""
 }
 
-// walk 按 Python os.walk(top, followlinks=False) 的语义遍历目录：
-// 自顶向下，dirs 里包含指向目录的软链接但不下钻，读目录出错的子树静默跳过。
-// Python 的 os.walk 默认 onerror=None，同样是静默跳过。
+// walk 自顶向下遍历目录：dirs 里包含指向目录的软链接但不下钻，读目录出错的子树静默跳过。
 //
-// 读目录是并发的（SMB 冷缓存时每次 readdir 要几十毫秒，串行遍历几百个文件夹要二十多秒，
-// 见 CLAUDE.md 坑 12），但 fn 仍在调用方的 goroutine 里按先序遍历的顺序逐个调用，
+// 读目录是并发的（SMB 冷缓存时每次 readdir 要几十毫秒，串行遍历几百个文件夹要二十多秒），
+// 但 fn 仍在调用方的 goroutine 里按先序遍历的顺序逐个调用，
 // 某个目录读完、它前面的都回调过了就立刻回调，调用方可以边遍历边上报进度。
 func walk(root string, fn func(dir string, dirs, files []string)) {
 	walkStop(root, nil, fn)
 }
 
-// walkStop 与 walk 语义一致，但支持在读取目录、下钻与回调前响应 stop() 信号及时中止。
+// walkStop 与 walk 语义一致，支持在读取目录、下钻与回调前响应 stop() 信号及时中止，
+// 返回前会等待所有已派发的读目录 goroutine 退出。
 func walkStop(root string, stop func() bool, fn func(dir string, dirs, files []string)) {
 	stopped := func() bool { return stop != nil && stop() }
 	type node struct {
@@ -94,8 +92,10 @@ func walkStop(root string, stop func() bool, fn func(dir string, dirs, files []s
 		done        chan struct{}
 	}
 	sem := make(chan struct{}, metaWorkers)
+	var wg sync.WaitGroup
 	var read func(n *node)
 	read = func(n *node) {
+		defer wg.Done()
 		defer close(n.done)
 		if stopped() {
 			return
@@ -115,12 +115,15 @@ func walkStop(root string, stop func() bool, fn func(dir string, dirs, files []s
 				}
 				c := &node{path: filepath.Join(n.path, d), done: make(chan struct{})}
 				n.children = append(n.children, c)
+				wg.Add(1)
 				go read(c)
 			}
 		}
 	}
 	top := &node{path: root, done: make(chan struct{})}
+	wg.Add(1)
 	go read(top)
+	defer wg.Wait()
 	var visit func(n *node)
 	visit = func(n *node) {
 		<-n.done
@@ -138,7 +141,7 @@ func walkStop(root string, stop func() bool, fn func(dir string, dirs, files []s
 	visit(top)
 }
 
-// 遍历图库与计算目录 mtime 时忽略的元数据/缓存条目（CLAUDE.md 坑 7）：
+// 遍历图库与计算目录 mtime 时忽略的元数据/缓存条目：
 // AppleDouble 影子文件和 NAS 索引/回收站目录既不参与采样筛选，也不应把真实图片目录判成非叶子目录。
 var ignoredNames = map[string]bool{
 	".DS_Store": true, "Thumbs.db": true, "desktop.ini": true,
@@ -204,7 +207,7 @@ func resolvePath(p string) string {
 }
 
 // 访问 NAS 时的并发数。SMB 上每次 stat / 打开文件都是一次网络往返，冷缓存下约 1ms，
-// 串行时几乎全部时间都在等网络；并发能把这些等待重叠起来（实测见 CLAUDE.md 坑 12）。
+// 串行时几乎全部时间都在等网络；并发能把这些等待重叠起来。
 const (
 	metaWorkers = 8 // stat、读图片文件头
 	copyWorkers = 6 // 复制整张图片：再多带宽也不涨了
@@ -250,23 +253,14 @@ func parallelForStop(n, workers int, stop func() bool, fn func(i int)) {
 	wg.Wait()
 }
 
-// checkResolutions 并发检查一批图片，返回与 paths 一一对应的结果。
-func checkResolutions(paths []string, minWidth, minHeight int) []bool {
-	ok, _ := checkVerdictsStop(paths, minWidth, minHeight, nil)
+// checkResolutions 并发检查一批图片，返回与 paths 一一对应的结果；stop 非空时支持提前中止。
+func checkResolutions(paths []string, minWidth, minHeight int, stop func() bool) []bool {
+	ok, _ := checkVerdicts(paths, minWidth, minHeight, stop)
 	return ok
 }
 
-func checkResolutionsStop(paths []string, minWidth, minHeight int, stop func() bool) []bool {
-	ok, _ := checkVerdictsStop(paths, minWidth, minHeight, stop)
-	return ok
-}
-
-// checkVerdicts 同 checkResolutions，另外返回不合格的原因。
-func checkVerdicts(paths []string, minWidth, minHeight int) (ok []bool, reasons []string) {
-	return checkVerdictsStop(paths, minWidth, minHeight, nil)
-}
-
-func checkVerdictsStop(paths []string, minWidth, minHeight int, stop func() bool) (ok []bool, reasons []string) {
+// checkVerdicts 同 checkResolutions，另外返回不合格的原因；stop 非空时支持提前中止。
+func checkVerdicts(paths []string, minWidth, minHeight int, stop func() bool) (ok []bool, reasons []string) {
 	ok, reasons = make([]bool, len(paths)), make([]string, len(paths))
 	parallelForStop(len(paths), metaWorkers, stop, func(i int) {
 		ok[i], reasons[i] = ImageVerdict(paths[i], minWidth, minHeight)
