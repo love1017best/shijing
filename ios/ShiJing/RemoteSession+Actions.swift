@@ -218,8 +218,8 @@ extension RemoteSession {
                 }
                 return true
             } catch {
-                // 列表拉不到不影响别的，下次状态推送再试
-                self.noteNetworkFailure(error)
+                // 列表拉不到不影响别的，但网络失败或 401 未配对需要同步连接状态
+                self.handleRequestError(error, showMessage: false)
                 return false
             }
         }

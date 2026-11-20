@@ -210,7 +210,7 @@ extension RemoteSession {
                 removeQueued(act.id)
                 expired += 1
             } catch APIError.unauthorized(let msg) {
-                connection = .unpaired(msg)
+                markUnpaired(msg)
                 break
             } catch {
                 // 又断了：保留在队列里，留着下次
@@ -286,7 +286,7 @@ extension RemoteSession {
             actionError = msg
             return .expired
         } catch APIError.unauthorized(let msg) {
-            connection = .unpaired(msg)
+            markUnpaired(msg)
             return .queued
         } catch {
             actionError = Self.describe(error)

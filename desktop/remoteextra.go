@@ -2,8 +2,8 @@ package main
 
 // 手机遥控第 3 期：手机上改常用设置、看完整日志和删除记录、管理「不再选」名单、撤销移出、拿原图分享。
 //
-//   - 常用设置随状态快照一起推（remoteState.Settings），手机改了走 POST /api/settings，只改传了的字段；
-//     改的是界面状态（a.num、a.autoIdx、a.cfg.*），下一帧 autosave 照常写盘，和在电脑上改一样。
+//   - 常用设置随状态快照一起推（remoteState.Settings），手机改了通过 POST /api/settings 调用
+//     app.applySettings 统一更新 a.cfg 与界面影子字段，再由 commitState 自动落盘。
 //   - 撤销移出用桌面现成的 undoRemove（同一个撤销栈：手机上撤销的可能是电脑上刚移出的那张，反过来也一样）。
 //   - 删除记录直接读日志文件（不用主线程）；日志、不再选名单在主线程上读。
 
@@ -97,21 +97,9 @@ func (rs *remoteServer) writeSnapshot(w http.ResponseWriter) {
 	_, _ = w.Write(rs.snapshot())
 }
 
-// handleSettings 改常用设置：只改请求里带了的字段。
+// handleSettings 改常用设置：只改请求里带了的字段，统一通过 app.applySettings 落入状态。
 func (rs *remoteServer) handleSettings(w http.ResponseWriter, r *http.Request, dev string) {
-	var body struct {
-		SampleCount  *int    `json:"sample_count"`
-		AutoRunHours *int    `json:"auto_run_hours"`
-		Delete       *bool   `json:"delete_during_filter"`
-		PreferUnseen *bool   `json:"prefer_unseen"`
-		Refresh      *bool   `json:"refresh_wallpaper"`
-		BalanceFirst *bool   `json:"balance_first"`
-		Incremental  *bool   `json:"incremental"`
-		Mode         *string `json:"mode"`
-		MinWidth     *int    `json:"min_width"`
-		MinHeight    *int    `json:"min_height"`
-		Archive      *bool   `json:"archive_enabled"`
-	}
+	var body settingsPatch
 	if !readBodyOrFail(w, r, &body) {
 		return
 	}
@@ -119,19 +107,13 @@ func (rs *remoteServer) handleSettings(w http.ResponseWriter, r *http.Request, d
 		writeErr(w, http.StatusBadRequest, "每次张数要在 1 到 9999 之间")
 		return
 	}
-	idx := -1
-	if h := body.AutoRunHours; h != nil {
-		if idx = slices.Index(autoRunHours, *h); idx < 0 {
-			writeErr(w, http.StatusBadRequest, "不支持这个自动换的间隔")
-			return
-		}
+	if h := body.AutoRunHours; h != nil && slices.Index(autoRunHours, *h) < 0 {
+		writeErr(w, http.StatusBadRequest, "不支持这个自动换的间隔")
+		return
 	}
-	modeIdx := -1
-	if m := body.Mode; m != nil {
-		if modeIdx = slices.Index(modes, *m); modeIdx < 0 {
-			writeErr(w, http.StatusBadRequest, "不支持这个存放方式")
-			return
-		}
+	if m := body.Mode; m != nil && slices.Index(modes, *m) < 0 {
+		writeErr(w, http.StatusBadRequest, "不支持这个存放方式")
+		return
 	}
 	for _, p := range []*int{body.MinWidth, body.MinHeight} {
 		if p != nil && (*p < 1 || *p > remoteMaxPixels) {
@@ -139,49 +121,9 @@ func (rs *remoteServer) handleSettings(w http.ResponseWriter, r *http.Request, d
 			return
 		}
 	}
-	var changed []string
 	if !rs.onMainOrFail(w, func() {
 		a := rs.a
-		if n := body.SampleCount; n != nil && int(a.num) != *n {
-			a.num = float64(*n)
-			changed = append(changed, "每次张数 "+strconv.Itoa(*n))
-		}
-		if idx >= 0 && a.autoIdx != idx {
-			a.autoIdx = idx
-			changed = append(changed, "自动换 "+autoRunLabel(autoRunHours[idx]))
-		}
-		if modeIdx >= 0 && a.modeIdx != modeIdx {
-			a.modeIdx = modeIdx
-			changed = append(changed, "存放方式 "+modeLabel(modes[modeIdx]))
-		}
-		if body.MinWidth != nil || body.MinHeight != nil {
-			w, h := int(a.minW), int(a.minH)
-			if body.MinWidth != nil {
-				w = *body.MinWidth
-			}
-			if body.MinHeight != nil {
-				h = *body.MinHeight
-			}
-			if int(a.minW) != w || int(a.minH) != h {
-				a.minW, a.minH = float64(w), float64(h)
-				// 桌面设置页的预设选择跟着变（对不上任何预设就是「自定义」）
-				a.preset = presetFor(w, h)
-				changed = append(changed, fmt.Sprintf("最低分辨率 %d×%d", w, h))
-			}
-		}
-		set := func(p *bool, v *bool, name string) {
-			if v != nil && *p != *v {
-				*p = *v
-				changed = append(changed, name+onOff(*v))
-			}
-		}
-		set(&a.cfg.DeleteDuringFilter, body.Delete, "删除不合格原图")
-		set(&a.cfg.PreferUnseen, body.PreferUnseen, "优先选未更换过的")
-		set(&a.cfg.RefreshWallpaper, body.Refresh, "刷新系统壁纸")
-		set(&a.cfg.BalanceFirst, body.BalanceFirst, "平衡采样")
-		set(&a.cfg.Incremental, body.Incremental, "增量筛选")
-		set(&a.cfg.ArchiveEnabled, body.Archive, "归档")
-		if len(changed) > 0 {
+		if changed := a.applySettings(body); len(changed) > 0 {
 			a.appendLog("📱 「" + dev + "」改了设置：" + strings.Join(changed, "，"))
 		}
 	}) {

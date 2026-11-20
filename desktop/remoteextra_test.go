@@ -24,24 +24,31 @@ func TestRemoteSettings(t *testing.T) {
 	}
 
 	// 只改传了的字段
-	code, data := h.do(t, "POST", "/api/settings", tok, map[string]any{"sample_count": 120, "auto_run_hours": 24, "prefer_unseen": true})
+	code, data := h.do(t, "POST", "/api/settings", tok, map[string]any{
+		"sample_count": 120, "auto_run_hours": 24, "prefer_unseen": true, "min_width": 2560, "min_height": 1440,
+	})
 	if code != 200 {
 		t.Fatalf("settings = %d %v", code, data)
 	}
 	got := data["settings"].(map[string]any)
-	if got["sample_count"] != float64(120) || got["auto_run_hours"] != float64(24) || got["prefer_unseen"] != true {
+	if got["sample_count"] != float64(120) || got["auto_run_hours"] != float64(24) || got["prefer_unseen"] != true ||
+		got["min_width"] != float64(2560) || got["min_height"] != float64(1440) {
 		t.Fatalf("响应里的设置没变: %v", got)
+	}
+	// applySettings 同步更新 a.cfg、影子字段与分辨率预设下标
+	if h.preset != 2 || h.cfg.MinWidth != 2560 || h.cfg.MinHeight != 1440 || h.cfg.SampleCount != 120 || h.cfg.AutoRunHours != 24 {
+		t.Fatalf("单一入口未同步: preset=%d cfg=%+v", h.preset, h.cfg)
 	}
 	h.tt.Frame() // 下一帧自动保存
 	cfg := h.buildConfig()
-	if cfg.SampleCount != 120 || cfg.AutoRunHours != 24 || !cfg.PreferUnseen {
+	if cfg.SampleCount != 120 || cfg.AutoRunHours != 24 || !cfg.PreferUnseen || cfg.MinWidth != 2560 || cfg.MinHeight != 1440 {
 		t.Fatalf("配置 = %+v", cfg)
 	}
 	saved, err := core.LoadConfig(h.cfgPath)
-	if err != nil || saved.SampleCount != 120 {
+	if err != nil || saved.SampleCount != 120 || saved.MinWidth != 2560 || saved.MinHeight != 1440 {
 		t.Fatalf("没写盘: %v %+v", err, saved)
 	}
-	if !strings.Contains(strings.Join(h.log, "\n"), "「iPhone」改了设置：每次张数 120，自动换 每天") {
+	if !strings.Contains(strings.Join(h.log, "\n"), "「iPhone」改了设置：每次张数 120，自动换 每天，最低分辨率 2560×1440") {
 		t.Fatalf("日志: %v", h.log)
 	}
 

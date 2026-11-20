@@ -191,8 +191,8 @@ final class ImageStore {
                             await Task.detached(priority: .utility) { Self.writeDisk(macID, name, kind, d) }.value
                         }
                     } catch {
-                        // 连不上电脑了：顺手把连接状态改成离线，别让后面每张图都各等一次超时
-                        session.noteNetworkFailure(error)
+                        // 连不上电脑或令牌已失效：同步连接状态（离线 / 未配对），避免后续图片静默失败或逐张超时
+                        session.handleRequestError(error, showMessage: false)
                     }
                 }
                 if Task.isCancelled { return nil }

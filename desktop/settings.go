@@ -76,7 +76,8 @@ func (a *app) settingsPage(c *ui.Context) {
 					}
 					labels = append(labels, "自定义")
 					if ui.Segmented(c, &a.preset, labels...).Changed() && a.preset < len(resPresets) {
-						a.minW, a.minH = float64(resPresets[a.preset].w), float64(resPresets[a.preset].h)
+						w, h := resPresets[a.preset].w, resPresets[a.preset].h
+						a.applySettings(settingsPatch{MinWidth: &w, MinHeight: &h})
 					}
 				})
 			},

@@ -97,11 +97,11 @@ extension ImageStore {
                 for _ in 0..<workers where addNext() {}
                 while let (kind, bytes, error) = await group.next() {
                     if let error {
-                        // 连不上电脑了：这一轮先停（已经存下的留着），连上以后会接着补
+                        // 连不上电脑或令牌已失效：这一轮先停（已经存下的留着），同步离线 / 未配对状态
                         group.cancelAll()
                         if g == gen {
                             prefetching = false
-                            session.noteNetworkFailure(error)
+                            session.handleRequestError(error, showMessage: false)
                         }
                         return
                     }
@@ -164,8 +164,13 @@ extension ImageStore {
         prefetching = false
     }
 
-    /// 下载一张存到磁盘；已经有了就不动。返回写下的字节数，以及「连不上电脑」时的那个错误
-    /// （调用方据此停掉这一轮，别把后面几百张各等一次超时）。
+    /// 下载一张存到磁盘；已经有了就不动。返回写下的字节数，以及需要中止本轮缓存的错误
+    /// （连不上电脑或 401 未配对：调用方据此停掉这一轮，别把后面几百张各等一次超时或静默吃 401）。
+    private nonisolated static func shouldAbortPrefetch(_ error: Error) -> Bool {
+        if case APIError.unauthorized = error { return true }
+        return RemoteSession.isNetworkFailure(error)
+    }
+
     private nonisolated static func fetchOne(_ client: APIClient, macID: String, _ name: String,
                                              _ kind: ImageKind) async -> (ImageKind, Int64, Error?) {
         // 只 stat 不读整张图：补齐几百张时每张都按几十万字节读一遍纯属白读
@@ -176,7 +181,7 @@ extension ImageStore {
             do {
                 tmp = try await client.downloadOriginal(name)
             } catch {
-                return (kind, 0, RemoteSession.isNetworkFailure(error) ? error : nil)
+                return (kind, 0, shouldAbortPrefetch(error) ? error : nil)
             }
             defer { try? FileManager.default.removeItem(at: tmp.deletingLastPathComponent()) }
             if Task.isCancelled { return (kind, 0, nil) }
@@ -191,7 +196,7 @@ extension ImageStore {
         do {
             data = try await client.imageData(name, kind: kind)
         } catch {
-            return (kind, 0, RemoteSession.isNetworkFailure(error) ? error : nil)
+            return (kind, 0, shouldAbortPrefetch(error) ? error : nil)
         }
         if Task.isCancelled { return (kind, 0, nil) }
         writeDisk(macID, name, kind, data)

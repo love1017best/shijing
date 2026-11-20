@@ -2,10 +2,12 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -270,6 +272,98 @@ func newApp(cfgPath string, paths core.Paths) *app {
 	return a
 }
 
+// settingsPatch 是需要局部修改的设置项；nil 字段保持原值。
+// 设置页的派生切换与手机遥控 POST /api/settings 都通过 app.applySettings 应用，
+// 保证 a.cfg 与界面影子字段（num/minW/minH/modeIdx/autoIdx/preset）始终同步。
+type settingsPatch struct {
+	SampleCount  *int    `json:"sample_count"`
+	AutoRunHours *int    `json:"auto_run_hours"`
+	Delete       *bool   `json:"delete_during_filter"`
+	PreferUnseen *bool   `json:"prefer_unseen"`
+	Refresh      *bool   `json:"refresh_wallpaper"`
+	BalanceFirst *bool   `json:"balance_first"`
+	Incremental  *bool   `json:"incremental"`
+	Mode         *string `json:"mode"`
+	MinWidth     *int    `json:"min_width"`
+	MinHeight    *int    `json:"min_height"`
+	Archive      *bool   `json:"archive_enabled"`
+}
+
+// syncShadowFromConfig 从 a.cfg 刷新界面控件绑定的影子字段。
+func (a *app) syncShadowFromConfig() {
+	a.num = float64(a.cfg.SampleCount)
+	a.minW = float64(a.cfg.MinWidth)
+	a.minH = float64(a.cfg.MinHeight)
+	a.modeIdx = max(0, slices.Index(modes, a.cfg.Mode))
+	a.autoIdx = slices.Index(autoRunHours, a.cfg.AutoRunHours)
+	a.preset = presetFor(a.cfg.MinWidth, a.cfg.MinHeight)
+}
+
+// syncConfigFromShadow 把界面控件直绑的影子字段写回 a.cfg，消除两套表示之间的漂移。
+func (a *app) syncConfigFromShadow() {
+	a.cfg.SampleCount = int(a.num)
+	a.cfg.MinWidth = int(a.minW)
+	a.cfg.MinHeight = int(a.minH)
+	a.cfg.Mode = modes[max(0, a.modeIdx)]
+	if a.autoIdx >= 0 {
+		a.cfg.AutoRunHours = autoRunHours[a.autoIdx]
+	}
+}
+
+// applySettings 是修改常用设置的统一入口：同时更新 a.cfg 和界面影子字段（含分辨率预设下标），
+// 返回实际发生变化的字段描述列表供日志记录。调用方负责前置参数范围校验。
+func (a *app) applySettings(p settingsPatch) (changed []string) {
+	a.syncConfigFromShadow()
+	if n := p.SampleCount; n != nil && a.cfg.SampleCount != *n {
+		a.cfg.SampleCount = *n
+		a.num = float64(*n)
+		changed = append(changed, "每次张数 "+strconv.Itoa(*n))
+	}
+	if h := p.AutoRunHours; h != nil {
+		if idx := slices.Index(autoRunHours, *h); idx >= 0 && a.autoIdx != idx {
+			a.cfg.AutoRunHours = autoRunHours[idx]
+			a.autoIdx = idx
+			changed = append(changed, "自动换 "+autoRunLabel(autoRunHours[idx]))
+		}
+	}
+	if m := p.Mode; m != nil {
+		if idx := slices.Index(modes, *m); idx >= 0 && a.modeIdx != idx {
+			a.cfg.Mode = modes[idx]
+			a.modeIdx = idx
+			changed = append(changed, "存放方式 "+modeLabel(modes[idx]))
+		}
+	}
+	if p.MinWidth != nil || p.MinHeight != nil {
+		w, h := a.cfg.MinWidth, a.cfg.MinHeight
+		if p.MinWidth != nil {
+			w = *p.MinWidth
+		}
+		if p.MinHeight != nil {
+			h = *p.MinHeight
+		}
+		if a.cfg.MinWidth != w || a.cfg.MinHeight != h {
+			a.cfg.MinWidth, a.cfg.MinHeight = w, h
+			a.minW, a.minH = float64(w), float64(h)
+			// 桌面设置页的预设选择跟着同步（对不上任何预设就是「自定义」）
+			a.preset = presetFor(w, h)
+			changed = append(changed, fmt.Sprintf("最低分辨率 %d×%d", w, h))
+		}
+	}
+	setBool := func(dst *bool, v *bool, name string) {
+		if v != nil && *dst != *v {
+			*dst = *v
+			changed = append(changed, name+onOff(*v))
+		}
+	}
+	setBool(&a.cfg.DeleteDuringFilter, p.Delete, "删除不合格原图")
+	setBool(&a.cfg.PreferUnseen, p.PreferUnseen, "优先选未更换过的")
+	setBool(&a.cfg.RefreshWallpaper, p.Refresh, "刷新系统壁纸")
+	setBool(&a.cfg.BalanceFirst, p.BalanceFirst, "平衡采样")
+	setBool(&a.cfg.Incremental, p.Incremental, "增量筛选")
+	setBool(&a.cfg.ArchiveEnabled, p.Archive, "归档")
+	return changed
+}
+
 // setConfig 把配置载入界面状态。
 func (a *app) setConfig(cfg core.Config) {
 	a.cfg = cfg
@@ -277,45 +371,31 @@ func (a *app) setConfig(cfg core.Config) {
 	a.sample.dirs = &a.cfg.SampleOnlyDirs
 	a.filter.chosen.Clear()
 	a.sample.chosen.Clear()
-	a.num = float64(cfg.SampleCount)
-	a.minW = float64(cfg.MinWidth)
-	a.minH = float64(cfg.MinHeight)
-	a.modeIdx = max(0, slices.Index(modes, cfg.Mode))
-	a.autoIdx = slices.Index(autoRunHours, cfg.AutoRunHours)
 	a.prevDelete = cfg.DeleteDuringFilter
-	a.preset = presetFor(cfg.MinWidth, cfg.MinHeight)
+	a.syncShadowFromConfig()
 	a.cfgRev++
 }
 
 // buildConfig 从界面状态生成配置（目录列表复制一份，后台运行不受界面编辑影响）。
 func (a *app) buildConfig() core.Config {
+	a.syncConfigFromShadow()
 	cfg := a.cfg
 	cfg.FilterAndSampleDirs = slices.Clone(a.cfg.FilterAndSampleDirs)
 	cfg.SampleOnlyDirs = slices.Clone(a.cfg.SampleOnlyDirs)
-	cfg.SampleCount = int(a.num)
-	cfg.MinWidth = int(a.minW)
-	cfg.MinHeight = int(a.minH)
-	cfg.Mode = modes[a.modeIdx]
 	cfg.Excluded = slices.Clone(a.cfg.Excluded)
 	cfg.Shortcuts = maps.Clone(a.cfg.Shortcuts)
-	if a.autoIdx >= 0 {
-		cfg.AutoRunHours = autoRunHours[a.autoIdx]
-	}
 	return cfg
 }
 
 // configMatchesSaved 无分配比较当前界面状态与上次落盘的 saved 是否一致。
 func (a *app) configMatchesSaved() bool {
+	a.syncConfigFromShadow()
 	c, s := &a.cfg, &a.saved
-	autoHours := c.AutoRunHours
-	if a.autoIdx >= 0 {
-		autoHours = autoRunHours[a.autoIdx]
-	}
 	return c.DestDir == s.DestDir &&
-		int(a.num) == s.SampleCount &&
-		int(a.minW) == s.MinWidth &&
-		int(a.minH) == s.MinHeight &&
-		modes[a.modeIdx] == s.Mode &&
+		c.SampleCount == s.SampleCount &&
+		c.MinWidth == s.MinWidth &&
+		c.MinHeight == s.MinHeight &&
+		c.Mode == s.Mode &&
 		c.BalanceFirst == s.BalanceFirst &&
 		c.Incremental == s.Incremental &&
 		c.DeleteDuringFilter == s.DeleteDuringFilter &&
@@ -326,7 +406,7 @@ func (a *app) configMatchesSaved() bool {
 		c.ArchiveSMBRoot == s.ArchiveSMBRoot &&
 		c.ArchiveNFSRoot == s.ArchiveNFSRoot &&
 		c.PreferUnseen == s.PreferUnseen &&
-		autoHours == s.AutoRunHours &&
+		c.AutoRunHours == s.AutoRunHours &&
 		c.RemoteEnabled == s.RemoteEnabled &&
 		slices.Equal(c.FilterAndSampleDirs, s.FilterAndSampleDirs) &&
 		slices.Equal(c.SampleOnlyDirs, s.SampleOnlyDirs) &&

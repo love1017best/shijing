@@ -18,23 +18,23 @@ final class RemoteSession {
     }
 
     let macID: SavedMac.ID
-    internal(set) var mac: SavedMac
-    internal(set) var connection: Connection = .connecting
-    internal(set) var state: RemoteState?
+    var mac: SavedMac
+    var connection: Connection = .connecting
+    var state: RemoteState?
     /// 正在等「换一批」「停止」的响应
-    internal(set) var busy = false
+    var busy = false
     /// 上一次操作失败的原因（界面上弹提示）
     var actionError: String?
     /// 壁纸文件夹里的图（和桌面同样的顺序）；walls_rev 变了就重新拉
-    internal(set) var walls: [Wallpaper] = []
-    internal(set) var wallsRev: String?
+    var walls: [Wallpaper] = []
+    var wallsRev: String?
     /// 横幅图的文件名（桌面概览顶部那张）；旧版桌面端没给时用第一张
-    internal(set) var heroName: String?
+    var heroName: String?
     var hero: Wallpaper? { walls.first { $0.name == heroName } ?? walls.first }
     /// 正在移出 / 删除的那张
-    internal(set) var acting: String?
+    var acting: String?
     /// 现在显示的状态是从磁盘快照来的（还没连上过）：界面上标「离线 · X 前同步」
-    internal(set) var snapshotAt: Date?
+    var snapshotAt: Date?
 
     private let store: MacStore
     private var task: Task<Void, Never>?
@@ -44,7 +44,7 @@ final class RemoteSession {
     private let pathMonitor = NWPathMonitor()
     private var networkDown = false
     /// 手机现在只有蜂窝网络（没有 Wi‑Fi、有线）
-    internal(set) var cellularOnly = false
+    var cellularOnly = false
     /// 是否已经收到过一次 pathMonitor 回调（冷启动时等首帧，避免抢先发起蜂窝连接）
     private var pathReady = false
     /// start() 调用时 pathMonitor 首帧尚未到达，首帧到位后再按真实网络状态决定是否连接
@@ -66,15 +66,15 @@ final class RemoteSession {
     var deletionsETag: String?
     var cachedDeletions: DeletionList?
     /// 正在保存的设置项（界面上对应那一行转圈）
-    internal(set) var savingSettings = false
+    var savingSettings = false
     /// 正在下载 / 存到相册的那张
-    internal(set) var saving: String?
+    var saving: String?
     /// 要打开大图的那张（从小组件点进来），概览页看到就打开
     var openRequest: String?
     /// 一闪而过的提示（「已存到相册」），界面上显示两秒
     var notice: String?
     /// 离线时点的「移出 / 不再选」，连上电脑后自动处理（存在 UserDefaults 里，按 Mac 分开）
-    internal(set) var queued: [OfflineAction] = []
+    var queued: [OfflineAction] = []
     var flushing = false
 
     init(mac: SavedMac, store: MacStore) {
@@ -364,7 +364,7 @@ final class RemoteSession {
                 // 服务端正常关闭（遥控被关掉、应用退出）：当作断开，稍后重连
                 throw URLError(.networkConnectionLost)
             } catch APIError.unauthorized(let msg) {
-                connection = .unpaired(msg)
+                markUnpaired(msg)
                 return
             } catch {
                 if Task.isCancelled { return }
@@ -400,12 +400,20 @@ final class RemoteSession {
         return error.localizedDescription
     }
 
+    /// 令牌失效（401）：切到未配对状态，并立刻停掉事件流和后台图片预取。
+    func markUnpaired(_ msg: String) {
+        connection = .unpaired(msg)
+        task?.cancel()
+        task = nil
+        ImageStore.shared.cancelPrefetch()
+    }
+
     /// 一次请求失败：令牌失效就转「未配对」；其余弹提示，网络层失败立刻转离线。
     /// 会话里每个请求、视图层自己发请求的地方都调它，别各抄一份。
     /// `showMessage` 为 false 时只改连接状态（页面自己有行内错误，或者后台刷新不想打扰用户）。
     func handleRequestError(_ error: Error, showMessage: Bool = true) {
         if case APIError.unauthorized(let msg) = error {
-            connection = .unpaired(msg)
+            markUnpaired(msg)
             return
         }
         if showMessage { actionError = Self.describe(error) }
