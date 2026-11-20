@@ -224,6 +224,7 @@ func (rs *remoteServer) handleWallDelete(w http.ResponseWriter, r *http.Request,
 		msg      string
 		path     string
 		src      string
+		gen      int
 		queuedOK bool
 	)
 	if !rs.onMainOrFail(w, func() {
@@ -235,6 +236,10 @@ func (rs *remoteServer) handleWallDelete(w http.ResponseWriter, r *http.Request,
 		path = filepath.Join(a.walls.dir, name)
 		if strings.ContainsRune(name, '/') || !slices.Contains(a.walls.all, path) {
 			msg = "这张壁纸已经不在壁纸文件夹里了"
+			return
+		}
+		if a.deletingWalls[path] {
+			msg = "正在删除这张原图，请稍候"
 			return
 		}
 		src = a.wallSource(path)
@@ -250,7 +255,13 @@ func (rs *remoteServer) handleWallDelete(w http.ResponseWriter, r *http.Request,
 				a.appendLog(fmt.Sprintf("📱 「%s」删除了原图（%s）", dev, filepath.Base(path)))
 			}
 			queuedOK = true
+			return
 		}
+		if a.deletingWalls == nil {
+			a.deletingWalls = map[string]bool{}
+		}
+		a.deletingWalls[path] = true
+		gen = a.wallsGen
 	}) {
 		return
 	}
@@ -266,15 +277,17 @@ func (rs *remoteServer) handleWallDelete(w http.ResponseWriter, r *http.Request,
 	outcome, permErr := removeSourceWithTimeout(src, deleteSrcTimeout)
 	if !rs.onMainOrFail(w, func() {
 		a := rs.a
-		before := len(a.walls.all)
-		if err := a.finishDeleteOriginal(path, src, outcome, permErr); err != nil {
+		delete(a.deletingWalls, path)
+		if err := a.finishDeleteOriginal(path, src, gen, outcome, permErr); err != nil {
 			msg = err.Error()
 			return
 		}
-		if len(a.walls.all) < before {
-			a.appendLog(fmt.Sprintf("📱 「%s」删除了原图（%s）", dev, filepath.Base(path)))
-		}
+		a.appendLog(fmt.Sprintf("📱 「%s」删除了原图（%s）", dev, filepath.Base(path)))
 	}) {
+		// 主线程回写超时时仍异步归还 deletingWalls，避免该路径永久锁死
+		if rs.a.update != nil {
+			rs.a.update(func() { delete(rs.a.deletingWalls, path) })
+		}
 		return
 	}
 	if msg != "" {

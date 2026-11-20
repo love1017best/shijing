@@ -15,44 +15,55 @@ enum RunNotifier {
     private static let freshness: TimeInterval = 15 * 60
 
     private static let lock = NSLock()
-    /// macKey → 已观察过的最近一次运行时间戳（内存缓存，避免高频重复查钥匙串）
+    /// macKey → 本进程已知至少已处理到的运行时间戳（快路径短路用，避免高频 SSE 帧重复查钥匙串；
+    /// 发现更新的时间戳时仍会重读一次钥匙串，确保 App 与小组件两个进程间同步去重）
     nonisolated(unsafe) private static var cache: [String: Double] = [:]
 
     private static func account(for macKey: String) -> String {
         macKey.isEmpty ? legacyAccount : "\(legacyAccount).\(macKey)"
     }
 
-    private static func readMark(for macKey: String) -> Double? {
+    private static func cachedMark(for macKey: String) -> Double? {
         lock.lock()
-        if let hit = cache[macKey] {
-            lock.unlock()
-            return hit
-        }
-        lock.unlock()
+        defer { lock.unlock() }
+        return cache[macKey]
+    }
 
+    private static func updateCache(_ value: Double, for macKey: String) {
+        lock.lock()
+        if let cur = cache[macKey], cur >= value {
+            lock.unlock()
+            return
+        }
+        cache[macKey] = value
+        lock.unlock()
+    }
+
+    private static func readKeychainMark(for macKey: String) -> Double? {
         let acc = account(for: macKey)
         let stored = Keychain.data(account: acc)
             ?? (acc != legacyAccount ? Keychain.data(account: legacyAccount) : nil)
         guard let raw = stored, let val = Double(String(decoding: raw, as: UTF8.self)) else {
             return nil
         }
-        lock.lock()
-        cache[macKey] = val
-        lock.unlock()
+        updateCache(val, for: macKey)
         return val
     }
 
     private static func writeMark(_ value: Double, for macKey: String) {
-        lock.lock()
-        cache[macKey] = value
-        lock.unlock()
+        updateCache(value, for: macKey)
         Keychain.setData(Data(String(value).utf8), account: account(for: macKey))
     }
 
     static func observe(new: RemoteState, mac: String, macKey: String? = nil) {
         guard !new.running, let last = new.last else { return }
         let key = macKey ?? mac
-        guard let seen = readMark(for: key) else {
+        // 快路径：本进程已经见过这次或更新的运行，直接跳过钥匙串 I/O
+        if let cached = cachedMark(for: key), last.at <= cached {
+            return
+        }
+        // 疑似有新运行：向共享钥匙串复核一次，防止另一进程（App / 小组件）已处理过而本进程内存缓存陈旧
+        guard let seen = readKeychainMark(for: key) else {
             writeMark(last.at, for: key) // 第一次：只记下，不通知以前的
             return
         }

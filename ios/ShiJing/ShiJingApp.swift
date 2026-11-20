@@ -98,8 +98,9 @@ struct RootView: View {
             tab = .overview // 大图预览挂在概览上
             deliverPendingWall()
         }
-        .onChange(of: store.selectedID) { syncSession() }
-        .onChange(of: store.pairRevision) { syncSession(force: true) }
+        .onChange(of: SessionKey(id: store.selectedID, pairRevision: store.pairRevision)) { old, new in
+            syncSession(force: old.pairRevision != new.pairRevision)
+        }
         // 点开「换完了」「签名快到期」这些通知：切到对应的标签（通知里带 target）
         .onChange(of: NotificationRouter.shared.tab, initial: true) { _, target in
             guard let target else { return }
@@ -215,6 +216,11 @@ struct RootView: View {
         session = s
         s.start()
         deliverPendingWall()
+    }
+
+    private struct SessionKey: Equatable {
+        let id: SavedMac.ID?
+        let pairRevision: Int
     }
 
     private func deliverPendingWall() {

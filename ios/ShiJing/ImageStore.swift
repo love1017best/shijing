@@ -40,6 +40,8 @@ final class ImageStore {
     private var gen = 0
     /// 正在删缓存的磁盘操作：补齐之前要等它做完，否则 `diskUsage()` 会把还没删掉的文件算进「已用」
     private var clearTask: Task<Void, Never>?
+    /// 每次启动或触发磁盘清理递增，避免旧的 `waitForClear` 清掉并发新创建的 `clearTask`
+    private var clearGen: UInt64 = 0
     /// 演示模式（Debug）：不请求网络，按文件名画一张渐变图
     var demo = false
 
@@ -80,6 +82,7 @@ final class ImageStore {
         // 清理旧版本（v0.4.20 及以前）平铺在 images/ 根目录的缓存文件，
         // 以及此前异常退出可能留在 tmp/originals/ 的过期临时原图；
         // 挂到 clearTask 上让首次统计磁盘占用和后台缓存都等它删完再量。
+        clearGen &+= 1
         clearTask = Task.detached(priority: .utility) {
             Self.purgeLegacyRootFiles()
             Self.purgeStaleTempOriginals()
@@ -372,7 +375,14 @@ final class ImageStore {
     /// 等还在跑的「清除」做完：删文件是后台任务，量磁盘之前不等它，
     /// 数出来的还是删之前的大小（设置页点完「清除」看着像没清掉）。
     func waitForClear() async {
-        if let clear = clearTask { await clear.value; clearTask = nil }
+        while let clear = clearTask {
+            let g = clearGen
+            await clear.value
+            if clearGen == g {
+                clearTask = nil
+                break
+            }
+        }
     }
 
     /// 进入离线模式或切换 Mac：停掉这一轮缓存。和「暂停」不同，退出离线模式、重新连上后会自动接着补。
@@ -585,6 +595,7 @@ final class ImageStore {
         cache.removeAllObjects()
         let clearAll = kinds.count == ImageKind.allCases.count
         let prev = clearTask
+        clearGen &+= 1
         clearTask = Task.detached(priority: .utility) {
             _ = await prev?.value
             if clearAll {

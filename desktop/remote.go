@@ -520,11 +520,6 @@ func (rs *remoteServer) handlePairStart(w http.ResponseWriter, r *http.Request) 
 			writeErr(w, http.StatusConflict, "电脑上正在显示配对二维码，请先完成或关闭后再试")
 			return
 		}
-		if p.fails > 0 {
-			rs.mu.Unlock()
-			writeErr(w, http.StatusTooManyRequests, "当前配对码已输错，请继续输入或等过期后再试")
-			return
-		}
 	}
 	// 按客户端 IP 做滑动窗口频控，防止局域网内恶意高频调用抢占桌面焦点
 	recent := rs.pairStarts[ip][:0]
@@ -537,6 +532,21 @@ func (rs *remoteServer) handlePairStart(w http.ResponseWriter, r *http.Request) 
 		rs.pairStarts[ip] = recent
 		rs.mu.Unlock()
 		writeErr(w, http.StatusTooManyRequests, "请求过于频繁，请一分钟后再试")
+		return
+	}
+	if p := rs.pair; p != nil && now.Before(p.expires) && p.fails > 0 {
+		// 同一设备离开配对页再进时，复用当前未过期的配对码并保留已累计的错误次数（不换码、不重置计数），
+		// 让手机端重新显示 6 位码输入框继续输入；其他设备仍拒绝，防止绕过错误上限。
+		same := (id != "" && p.id == id) || (id == "" && p.id == "" && p.device == dev)
+		if same {
+			rs.pairStarts[ip] = append(recent, now)
+			remain := max(1, int(p.expires.Sub(now).Seconds()))
+			rs.mu.Unlock()
+			writeJSON(w, http.StatusOK, map[string]any{"expires_in": remain})
+			return
+		}
+		rs.mu.Unlock()
+		writeErr(w, http.StatusTooManyRequests, "当前配对码已输错，请继续输入或等过期后再试")
 		return
 	}
 	rs.pairStarts[ip] = append(recent, now)

@@ -535,7 +535,10 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 		}
 		covered := map[string]bool{}
 		for _, img := range selected {
-			covered[filepath.Dir(img.path)] = true
+			dir := filepath.Dir(img.path)
+			if _, ok := grouped[dir]; ok {
+				covered[dir] = true
+			}
 		}
 		coverage := 0.0
 		if leafCount > 0 {

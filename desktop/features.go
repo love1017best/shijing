@@ -289,9 +289,15 @@ func removeSourceWithTimeout(src string, timeout time.Duration) (removeSrcOutcom
 }
 
 // finishDeleteOriginal 在主线程把后台删原图的结果落地（记日志、删本地壁纸，或转入待删队列）。
-func (a *app) finishDeleteOriginal(wall, src string, outcome removeSrcOutcome, permErr error) error {
+// gen 是发起删除时的 a.wallsGen：期间若开始换一批或已换成新批次，只完成原图记账/排队，不动当前壁纸文件夹和撤销栈。
+func (a *app) finishDeleteOriginal(wall, src string, gen int, outcome removeSrcOutcome, permErr error) error {
+	stale := a.running || a.wallsGen != gen
 	switch outcome {
 	case removeSrcQueue:
+		if stale || !slices.Contains(a.walls.all, wall) {
+			a.queueDeleteOnly(wall, src)
+			return nil
+		}
 		return a.queueDelete(wall, src)
 	case removeSrcPerm:
 		return actionErr("删除原图失败", permErr)
@@ -299,8 +305,14 @@ func (a *app) finishDeleteOriginal(wall, src string, outcome removeSrcOutcome, p
 		core.LogDeletion(a.paths.DeleteLog, src, int(a.minW), int(a.minH), core.ReasonManual)
 		a.invalidateDeleteCache()
 		a.appendLog(fmt.Sprintf("🔥 手动删除原图: %s", src))
-		_ = os.Remove(wall)
-		a.dropWall(wall)
+		if !stale {
+			if slices.Contains(a.walls.all, wall) {
+				_ = os.Remove(wall)
+				a.dropWall(wall)
+			}
+			// 后台删原图期间桌面可能已按 J 移出同一张：移除其撤销项，避免 ⌘Z 把原图已删的壁纸放回
+			a.dropUndoForWall(wall)
+		}
 		a.toast = "已删除图库中的原图，并记进删除记录"
 		return nil
 	}
@@ -316,8 +328,9 @@ func (a *app) deleteOriginal(wall string) error {
 	if a.sourceUnmounted(src) {
 		return a.queueDelete(wall, src)
 	}
+	gen := a.wallsGen
 	outcome, permErr := removeSourceWithTimeout(src, deleteSrcTimeout)
-	return a.finishDeleteOriginal(wall, src, outcome, permErr)
+	return a.finishDeleteOriginal(wall, src, gen, outcome, permErr)
 }
 
 // deleteOriginalAsync 是桌面 UI 入口：网络卷已确认离线时直接排队，否则把 NAS 删除放到后台带超时执行，
@@ -325,6 +338,9 @@ func (a *app) deleteOriginal(wall string) error {
 func (a *app) deleteOriginalAsync(wall string) {
 	src := a.wallSource(wall)
 	if src == "" {
+		return
+	}
+	if a.deletingWalls[wall] {
 		return
 	}
 	if a.sourceUnmounted(src) {
@@ -338,15 +354,13 @@ func (a *app) deleteOriginalAsync(wall string) {
 	if a.deletingWalls == nil {
 		a.deletingWalls = map[string]bool{}
 	}
-	if a.deletingWalls[wall] {
-		return
-	}
 	a.deletingWalls[wall] = true
+	gen := a.wallsGen
 	go func() {
 		outcome, permErr := removeSourceWithTimeout(src, deleteSrcTimeout)
 		a.update(func() {
 			delete(a.deletingWalls, wall)
-			a.report(a.finishDeleteOriginal(wall, src, outcome, permErr))
+			a.report(a.finishDeleteOriginal(wall, src, gen, outcome, permErr))
 		})
 	}()
 }

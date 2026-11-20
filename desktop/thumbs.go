@@ -47,8 +47,9 @@ type wallpapers struct {
 	browse    map[string]*ui.Bitmap // 壁纸页用的更小的缩略图（browseThumbWidth），按需分批解码
 	sources   map[string]string     // 壁纸文件名 → 原图路径（core.WallpaperSources）；旧版本换上的为 nil
 	loading   bool
-	more      bool // 正在后台解码更多缩略图
-	browsing  bool // 正在后台解码壁纸页的缩略图
+	more      bool   // 正在后台解码更多缩略图
+	browsing  bool   // 正在后台解码壁纸页的缩略图
+	browseSeq uint64 // 壁纸页缩略图批次序号：快速切页来回时防止旧批次清掉新批次的 browsing 标志
 	// 派生缓存：避免每次重绘或发布快照都重新哈希整份壁纸列表、重算目录分组
 	revCache     string
 	revLen       int
@@ -372,13 +373,13 @@ func (a *app) loadBrowseThumbs(window []string, keepSet map[string]bool) {
 		return
 	}
 	w.browsing = true
-	dir, gen := w.dir, a.wallsGen
+	w.browseSeq++
+	dir, gen, seq := w.dir, a.wallsGen, w.browseSeq
 	go func() {
 		imgs := decodeThumbsAt(todo, browseThumbWidth)
 		a.update(func() {
 			w := &a.walls
-			if w.dir != dir || a.wallsGen != gen || a.page != pageWalls { // 期间换批或切离壁纸页，这批作废
-				w.browsing = false
+			if w.dir != dir || a.wallsGen != gen || a.page != pageWalls || w.browseSeq != seq { // 期间换批、切页或已被新批次取代
 				return
 			}
 			w.browsing = false

@@ -914,3 +914,26 @@ func TestCopySamplesCancelsDuringScan(t *testing.T) {
 		t.Fatalf("扫描阶段取消不应清空现有壁纸目录: %v", err)
 	}
 }
+
+// 平衡采样从非叶子目录补足时，叶子文件夹覆盖率日志不应超过 100%。
+func TestBalanceCoverageCountsOnlyLeafDirs(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "lib")
+	dest := filepath.Join(root, "dest")
+	// 根目录（非叶子，因为含 sub）有一张图，叶子目录 sub 有一张图
+	writePNG(t, filepath.Join(src, "top.png"), 80, 40)
+	writePNG(t, filepath.Join(src, "sub", "leaf.png"), 80, 40)
+
+	var logs []string
+	rep := Reporter{Log: func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }}
+	res, err := CopySamples(CopyOptions{
+		Sources: []string{src}, Dest: dest, Mode: "copy", Num: 2, BalanceFirst: true,
+	}, rep, rand.New(rand.NewPCG(3, 4)))
+	if err != nil || res.Copied != 2 {
+		t.Fatalf("应同时选中叶子与非叶子共 2 张: copied=%d err=%v", res.Copied, err)
+	}
+	joined := strings.Join(logs, "\n")
+	if !strings.Contains(joined, "叶子文件夹覆盖率: 1/1 (100.0%)") {
+		t.Fatalf("叶子覆盖率应只计叶子目录（1/1 100.0%%），实际日志:\n%s", joined)
+	}
+}

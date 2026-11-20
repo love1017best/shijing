@@ -857,3 +857,58 @@ func TestLogFilterCache(t *testing.T) {
 		t.Fatalf("最后一行应对上最新的那条: %q", e.text)
 	}
 }
+
+func TestFinishDeleteOriginalGuardsStaleAndUndo(t *testing.T) {
+	f, _ := newFakeApp(t)
+	dir := t.TempDir()
+	wall := filepath.Join(dir, "same.jpg")
+	src := filepath.Join(dir, "nas-src.jpg")
+	if err := os.WriteFile(wall, []byte("new-batch"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.walls.dir = dir
+	f.walls.all = []string{wall}
+	f.walls.sources = map[string]string{"same.jpg": src}
+	f.wallsGen = 2
+
+	// 场景 1：旧批次（gen=1）删原图完成，期间已换成新批次（wallsGen=2）——不得删除新批次里的同名本地壁纸
+	if err := f.finishDeleteOriginal(wall, src, 1, removeSrcDone, nil); err != nil {
+		t.Fatalf("旧批次删除落地不应报错: %v", err)
+	}
+	if _, err := os.Stat(wall); err != nil {
+		t.Fatalf("换批后不应误删新批次同名壁纸: %v", err)
+	}
+	if len(f.walls.all) != 1 {
+		t.Fatalf("新批次列表不应被移出: %v", f.walls.all)
+	}
+
+	// 场景 2：旧批次超时转队列——只排进 pending，不动新批次壁纸也不写入 undo
+	src2 := filepath.Join(dir, "nas-src2.jpg")
+	if err := f.finishDeleteOriginal(wall, src2, 1, removeSrcQueue, nil); err != nil {
+		t.Fatalf("旧批次转队列不应报错: %v", err)
+	}
+	if len(f.pending) != 1 || f.pending[0].Path != src2 {
+		t.Fatalf("应写入待删队列: %+v", f.pending)
+	}
+	if _, err := os.Stat(wall); err != nil || len(f.undo) != 0 {
+		t.Fatalf("换批后转队列不应移动新批次壁纸或污染撤销栈: err=%v undo=%d", err, len(f.undo))
+	}
+
+	// 场景 3：同批次异步删原图期间桌面先按 J 移出（压入 undo）——原图删除落地后应清理对应撤销项与暂存文件
+	if err := f.removeWallpaper(wall, false); err != nil {
+		t.Fatalf("removeWallpaper 失败: %v", err)
+	}
+	if len(f.undo) != 1 {
+		t.Fatalf("移出后应有 1 条撤销项，实际 %d", len(f.undo))
+	}
+	stash := f.undo[0].stash
+	if err := f.finishDeleteOriginal(wall, src, f.wallsGen, removeSrcDone, nil); err != nil {
+		t.Fatalf("同批次删除落地失败: %v", err)
+	}
+	if len(f.undo) != 0 {
+		t.Fatalf("原图已删除后应清掉对应撤销项，实际剩 %d", len(f.undo))
+	}
+	if _, err := os.Stat(stash); !os.IsNotExist(err) {
+		t.Fatalf("撤销暂存文件应一并清理: %v", err)
+	}
+}

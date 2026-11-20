@@ -83,6 +83,19 @@ func (a *app) pushUndo(r removedWall) {
 	}
 }
 
+// dropUndoForWall 移除某张壁纸对应的撤销项并清理暂存文件（原图已被删除后，不再允许 ⌘Z 放回壁纸文件夹）。
+func (a *app) dropUndoForWall(wall string) {
+	a.undo = slices.DeleteFunc(a.undo, func(r removedWall) bool {
+		if r.wall != wall {
+			return false
+		}
+		if r.stash != "" {
+			_ = os.Remove(r.stash)
+		}
+		return true
+	})
+}
+
 // undoRemove 撤销最近一次移出：文件放回壁纸文件夹、回到原来的位置，预览开着时跳到它。
 // 没有可撤销的或正在运行时什么都不做、返回 nil；放不回去时返回错误。
 func (a *app) undoRemove() error {

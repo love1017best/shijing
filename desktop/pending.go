@@ -41,10 +41,8 @@ func (a *app) sourceUnmounted(src string) bool {
 	return false
 }
 
-// queueDelete 把一张原图记进待办队列，并把壁纸文件夹里的那份移出（可以 ⌘Z 撤销）。
-// 移出失败时队列照样记着（连上后照样删原图），把移出的错误返回给调用方。
-// 排队只在图库未挂载/挂起/删除出错时触发，这里不再在主线程调 os.Stat(src)，避免挂起卷卡死界面。
-func (a *app) queueDelete(wall, src string) error {
+// enqueuePending 仅把原图记进待办队列并写日志，不动壁纸文件夹里的本地文件。
+func (a *app) enqueuePending(wall, src string) {
 	if !slices.ContainsFunc(a.pending, func(e core.PendingDelete) bool { return e.Path == src }) {
 		// 排队时拿不到安全的文件指纹，记零值：执行时只确认文件还在，不比对指纹
 		e := core.PendingDelete{Path: src, Wall: filepath.Base(wall), AddedAt: time.Now()}
@@ -57,11 +55,24 @@ func (a *app) queueDelete(wall, src string) error {
 		a.pendingMu.Unlock()
 	}
 	a.appendLog(fmt.Sprintf("🕓 图库未连接，原图删除已排队（连接后自动执行）: %s", src))
+}
+
+// queueDelete 把一张原图记进待办队列，并把壁纸文件夹里的那份移出（可以 ⌘Z 撤销）。
+// 移出失败时队列照样记着（连上后照样删原图），把移出的错误返回给调用方。
+// 排队只在图库未挂载/挂起/删除出错时触发，这里不再在主线程调 os.Stat(src)，避免挂起卷卡死界面。
+func (a *app) queueDelete(wall, src string) error {
+	a.enqueuePending(wall, src)
 	if err := a.removeWallpaper(wall, false); err != nil {
 		return err
 	}
 	a.toast = "图库未连接，删除已排队：连接后自动删除这张原图（⌘Z 撤销移出，队列在概览页查看）"
 	return nil
+}
+
+// queueDeleteOnly 仅记入待删队列，不动当前壁纸文件夹（用于异步删原图超时期间已换批、正在运行或本地已移出的场景）。
+func (a *app) queueDeleteOnly(wall, src string) {
+	a.enqueuePending(wall, src)
+	a.toast = "图库未连接，删除已排队：连接后自动删除这张原图（队列在概览页查看）"
 }
 
 // maybeProcessPending 尝试执行队列：只在图库目录全都挂上时动手（对着断掉/卡住的卷逐个 stat 会一直卡着），

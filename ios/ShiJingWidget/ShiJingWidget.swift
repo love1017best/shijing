@@ -150,6 +150,7 @@ enum TimelineMaker {
         }
         let key = mac.cacheKey
         let legacyKey = "\(mac.host):\(mac.port)"
+        let altKey: String? = legacyKey != key ? legacyKey : nil
         let accessory = context.family.isAccessory
 
         // 1. 状态和列表：在线就取新的并缓存，取不到用缓存
@@ -204,7 +205,7 @@ enum TimelineMaker {
         let poolTarget = max(Self.poolTarget, allNames.count)
         // 手机（小组件自己的缓存目录）里已经存下来的图优先：轮换主要在这些图里转，1 分钟一换也不用等网络。
         // 离线时只有这一份；在线时算「本地缓存池」，池子还小就在后面用剩下的时间慢慢补。
-        let cachedNames = allNames.filter { WidgetCache.hasImage(key, $0, px) }
+        let cachedNames = allNames.filter { WidgetCache.hasImage(key, legacyKey: altKey, $0, px) }
         let names = cachedNames.isEmpty ? (client == nil ? [] : allNames) : cachedNames
         var entries: [Entry] = []
         var newDownloads = 0
@@ -219,21 +220,21 @@ enum TimelineMaker {
                 e.wallName = name
                 // 已经缓存上的直接用；没缓存的最多再下几张，其余的下次刷新再补
                 var canDownload = false
-                if !WidgetCache.hasImage(key, name, px), newDownloads < maxNewDownloads, Date() < deadline {
+                if !WidgetCache.hasImage(key, legacyKey: altKey, name, px), newDownloads < maxNewDownloads, Date() < deadline {
                     canDownload = true
                     newDownloads += 1
                 }
-                e.imageFile = await image(key, name, px, client: canDownload ? client : nil, hasHero: snap.list?.hero != nil, deadline: deadline)
+                e.imageFile = await image(key, legacyKey: altKey, name, px, client: canDownload ? client : nil, hasHero: snap.list?.hero != nil, deadline: deadline)
             }
             entries.append(e)
         }
 
         // 2.1 缓存池子还小的时候，用剩下的时间再存几张进来：池子越大，短间隔轮换的选择越多
         if client != nil, cachedNames.count < poolTarget {
-            for name in allNames where !WidgetCache.hasImage(key, name, px) {
+            for name in allNames where !WidgetCache.hasImage(key, legacyKey: altKey, name, px) {
                 guard newDownloads < maxNewDownloads, Date() < deadline else { break }
                 newDownloads += 1
-                _ = await image(key, name, px, client: client, hasHero: snap.list?.hero != nil, deadline: deadline)
+                _ = await image(key, legacyKey: altKey, name, px, client: client, hasHero: snap.list?.hero != nil, deadline: deadline)
             }
         }
 
@@ -271,14 +272,14 @@ enum TimelineMaker {
         return min(WidgetCache.maxPx, max(WidgetCache.minPx, Int((need / 200).rounded(.up)) * 200))
     }
 
-    /// 缓存里有就直接用；没有且在线就下载（横幅尺寸，旧版桌面端退回缩略图）、缩好存起来。
+    /// 缓存里有就直接用（含旧版 host:port 缓存键回退与原地迁移）；没有且在线就下载（横幅尺寸，旧版桌面端退回缩略图）、缩好存起来。
     /// 超时按剩下的时间预算压短：慢慢传的时候宁可这张先空着，也不能让整个时间线拖过系统的上限。
-    private static func image(_ key: String, _ name: String, _ px: Int, client: APIClient?, hasHero: Bool, deadline: Date) async -> URL? {
-        let file = WidgetCache.imageFile(key, name, px)
-        if FileManager.default.fileExists(atPath: file.path) {
-            WidgetCache.touch(file)
-            return file
+    private static func image(_ key: String, legacyKey: String?, _ name: String, _ px: Int, client: APIClient?, hasHero: Bool, deadline: Date) async -> URL? {
+        if let existing = WidgetCache.cachedImageFile(key, legacyKey: legacyKey, name, px) {
+            WidgetCache.touch(existing)
+            return existing
         }
+        let file = WidgetCache.imageFile(key, name, px)
         guard let client else { return nil }
         let remaining = deadline.timeIntervalSinceNow
         guard remaining > 1 else { return nil }
@@ -343,8 +344,28 @@ enum WidgetCache {
         dir.appending(path: "img-\(hash(key + "|" + name))-\(px).jpg")
     }
 
-    static func hasImage(_ key: String, _ name: String, _ px: Int) -> Bool {
-        FileManager.default.fileExists(atPath: imageFile(key, name, px).path)
+    /// 查找已缓存图片：优先新键（UUID），未命中且提供旧键（host:port）时回退并顺手原地重命名到新键。
+    static func cachedImageFile(_ key: String, legacyKey: String?, _ name: String, _ px: Int) -> URL? {
+        let fm = FileManager.default
+        let file = imageFile(key, name, px)
+        if fm.fileExists(atPath: file.path) { return file }
+        if let legacyKey, legacyKey != key {
+            let old = imageFile(legacyKey, name, px)
+            if fm.fileExists(atPath: old.path) {
+                if (try? fm.moveItem(at: old, to: file)) != nil { return file }
+                return old
+            }
+        }
+        return nil
+    }
+
+    static func hasImage(_ key: String, legacyKey: String? = nil, _ name: String, _ px: Int) -> Bool {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: imageFile(key, name, px).path) { return true }
+        if let legacyKey, legacyKey != key {
+            return fm.fileExists(atPath: imageFile(legacyKey, name, px).path)
+        }
+        return false
     }
 
     /// 用到的图更新修改时间，清理时按它留最近用过的。

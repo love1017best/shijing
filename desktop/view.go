@@ -30,6 +30,7 @@ func (a *app) view(c *ui.Context) {
 			// 切离壁纸页后释放其内存缩略图（磁盘缓存仍在，切回时几毫秒重读）
 			a.walls.browse = nil
 			a.walls.browsing = false
+			a.walls.browseSeq++
 		}
 		if a.page == pageDeleted || a.page == pageLibrary {
 			// 切到删除记录或图库页时立刻刷新删除日志缓存，不受短 TTL 延迟影响

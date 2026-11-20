@@ -147,13 +147,7 @@ struct SettingsPage: View {
             if showsPager { groupPicker }
         }
         .onDisappear {
-            countTask?.cancel()
-            countTask = nil
-            resTask?.cancel()
-            resTask = nil
-            draftCount = nil
-            draftW = nil
-            draftH = nil
+            flushPendingEdits()
         }
         .toolbar {
             if session.savingSettings {
@@ -585,8 +579,9 @@ struct SettingsPage: View {
         countTask = Task {
             try? await Task.sleep(for: .milliseconds(800))
             guard !Task.isCancelled else { return }
+            countTask = nil
             await session.updateSettings(["sample_count": n])
-            draftCount = nil
+            if draftCount == n { draftCount = nil }
         }
     }
 
@@ -598,10 +593,37 @@ struct SettingsPage: View {
         resTask = Task {
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
+            resTask = nil
             await session.updateSettings(["min_width": w, "min_height": h])
-            draftW = nil
-            draftH = nil
+            if draftW == w, draftH == h {
+                draftW = nil
+                draftH = nil
+            }
         }
+    }
+
+    /// 离开设置页时把仍在防抖等待中的张数或分辨率草稿立即发出，避免切页静默丢弃修改。
+    private func flushPendingEdits() {
+        var patch: [String: Any] = [:]
+        if countTask != nil, let n = draftCount {
+            patch["sample_count"] = n
+        }
+        countTask?.cancel()
+        countTask = nil
+        draftCount = nil
+
+        if resTask != nil, let w = draftW, let h = draftH {
+            patch["min_width"] = w
+            patch["min_height"] = h
+        }
+        resTask?.cancel()
+        resTask = nil
+        draftW = nil
+        draftH = nil
+
+        guard !patch.isEmpty else { return }
+        let s = session
+        Task { await s.updateSettings(patch) }
     }
 }
 

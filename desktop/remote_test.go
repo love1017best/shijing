@@ -454,8 +454,9 @@ func TestRemotePairStartGuardsAndWallsRevHero(t *testing.T) {
 	}
 	h.remote.cancelPair()
 
-	// 手动配对输错 1 次后，不能通过再次 /api/pair/start 清零错误次数
-	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": "iPhone"}); code != 200 {
+	// 手动配对输错 1 次后：同一设备重新进入配对页可复用当前配对码继续输入（不换码、不清零错误次数），
+	// 其他设备调用仍返回 429 防止绕过错误上限。
+	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": "iPhone", "id": "dev-a"}); code != 200 {
 		t.Fatalf("首次 pair/start = %d", code)
 	}
 	_, pin, _ := h.remote.currentPair()
@@ -463,11 +464,33 @@ func TestRemotePairStartGuardsAndWallsRevHero(t *testing.T) {
 	if pin == wrong {
 		wrong = "111111"
 	}
-	if code, _ := h.do(t, "POST", "/api/pair/finish", "", map[string]string{"code": wrong}); code != 403 {
+	if code, _ := h.do(t, "POST", "/api/pair/finish", "", map[string]string{"code": wrong, "id": "dev-a"}); code != 403 {
 		t.Fatalf("输错应返回 403，实际 %d", code)
 	}
-	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": "iPhone"}); code != 429 {
-		t.Fatalf("有错误记录时重刷 pair/start 应返回 429，实际 %d", code)
+	// 其他设备重刷必须被拒
+	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": "其他手机", "id": "dev-b"}); code != 429 {
+		t.Fatalf("其他设备在有错误记录时重刷 pair/start 应返回 429，实际 %d", code)
+	}
+	// 同一设备重新进入配对页应返回 200 并复用原配对码与累计错误次数
+	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": "iPhone", "id": "dev-a"}); code != 200 {
+		t.Fatalf("同一设备重进配对页应返回 200，实际 %d", code)
+	}
+	_, pinAfter, _ := h.remote.currentPair()
+	if pinAfter != pin {
+		t.Fatalf("复用配对码不应换码: 原=%s 现=%s", pin, pinAfter)
+	}
+	// 再输错 4 次（累计 5 次）应取消配对并触发 IP 冷却，说明错误次数没有被清零
+	for i := range 4 {
+		code, _ := h.do(t, "POST", "/api/pair/finish", "", map[string]string{"code": wrong, "id": "dev-a"})
+		if code != 403 {
+			t.Fatalf("第 %d 次继续输错 = %d，预期 403", i+2, code)
+		}
+	}
+	if _, remPin, _ := h.remote.currentPair(); remPin != "" {
+		t.Fatalf("累计 5 次错误后应取消当前配对，仍残留 pin=%s", remPin)
+	}
+	if code, _ := h.do(t, "POST", "/api/pair/start", "", map[string]string{"device": "iPhone", "id": "dev-a"}); code != 429 {
+		t.Fatalf("触发冷却后再次 pair/start 应返回 429，实际 %d", code)
 	}
 
 	// wallsRev 应包含 heroPath，换横幅后指纹必须变化
@@ -504,6 +527,31 @@ func TestRemoteOnMainTimeoutSkipsSideEffects(t *testing.T) {
 	h.settle(t, h.tt, func() bool { return true })
 	if ran {
 		t.Fatal("onMain 超时后排队的回调不应产生副作用")
+	}
+}
+
+func TestRemoteWallDeleteRejectsInFlight(t *testing.T) {
+	h := newRemoteHarness(t)
+	tok := h.pair(t, "iPhone")
+	dir := t.TempDir()
+	wall := filepath.Join(dir, "a.jpg")
+	src := filepath.Join(dir, "src.jpg")
+	if err := os.WriteFile(wall, []byte("w"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("s"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.walls.dir = dir
+	h.walls.all = []string{wall}
+	h.walls.sources = map[string]string{"a.jpg": src}
+	h.deletingWalls = map[string]bool{wall: true}
+
+	if code, _ := h.do(t, "POST", "/api/wallpapers/a.jpg/delete", tok, nil); code != 409 {
+		t.Fatalf("桌面/另一请求正在删原图时应返回 409，实际 %d", code)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("并发冲突被拒后不应误删原图: %v", err)
 	}
 }
 
