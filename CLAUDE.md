@@ -23,7 +23,7 @@
 - NAS 同步来的文件常带 `SF_ARCHIVED` 等 superuser-only flags，还原元数据会 `PermissionError`，但**文件内容已经复制成功**——元数据失败不能当成复制失败。
 - 网络卷 / 被 Finder 打开的目录不能「删掉目录本身再重建」（`Resource busy`），清空只删内容（`clearDirectoryContents`）。
 - 换一批的顺序是扫描 → 采样 → 确认选出了图才清空壁纸目录；找不到图就报错、目标目录原样保留（NAS 没挂上时别把壁纸目录清空）。
-- 数据目录里的状态文件（配置、增量状态、选择记录、轮换历史、待删队列、`ui_state.json`、`remote_devices.json`）一律用 `core.WriteFileAtomic` 写（临时文件 + fsync + rename，v0.4.17 起），别再直接 `os.WriteFile`：写到一半崩溃会把文件截断，配置读不了就退回默认值、下一次自动保存把原配置覆盖掉。`config.json` 读失败时 `core.BackupBadConfig` 先把它改名成 `config.json.bad-<时间>` 留着。
+- 数据目录里的状态文件（配置、增量状态、选择记录、轮换历史、待删队列、`ui_state.json`、`remote_devices.json`、`remote_server_id`）一律用 `core.WriteFileAtomic` 写（临时文件 + fsync + rename，v0.4.17 起），别再直接 `os.WriteFile`：写到一半崩溃会把文件截断，配置读不了就退回默认值、下一次自动保存把原配置覆盖掉。`config.json` 读失败时 `core.BackupBadConfig` 先把它改名成 `config.json.bad-<时间>` 留着；`remote_devices.json` 在持有 `rs.mu` 时通过 `saveDevicesLocked()` 落盘，防止并发配对/改名/取消配对以旧快照覆盖新文件。
 - `RunPipeline` 开头对数据目录的 `run.lock` 加 `flock`（非阻塞，进程退出自动释放）：桌面和命令行共用数据目录，同时跑会一起写增量状态、轮换历史和壁纸文件夹；拿不到锁返回 `core.ErrBusy`。锁文件不删。
 
 ### 2. 增量筛选：目录 mtime 和判断规则
@@ -189,10 +189,12 @@
 - 首页 `WallGrid` 固定行网格每个格子必须挂 `.id(w.id)`，且 `WallImage` 记下 `loadedKey` 并在异步加载返回后校验 `!Task.isCancelled && targetKey == key`：首次布局宽度从 0 变真实宽度时列数会从 2 变 3，未绑定身份时 `(1, 0)` 会复用旧视图，旧解码任务返回后把第 4 张覆写成第 3 张（离线冷启动最容易触发）。
 - 大图预览的状态（`previewing`）和「全部壁纸」页（`navigationDestination(isPresented: $showAll)`）都挂在 `DashboardView` 上：概览按宽度在宽 / 窄两种排版之间切换，转屏时 `WallGrid` 和 header 里的 `NavigationLink` 会被重建，状态放在它们里面就会丢、预览关掉回到首页（v0.3.103 及以前的 bug）。
 - `release.sh --version X.Y.Z` 直接发成指定版本（v0.3.100 就是这样发的），只在用户要求某个版本号时用。
-- 两边 JSON 对接验证过的方法：写个临时的 Go 测试用 `newRemoteHarness` 起服务并把地址和令牌写到文件，再用 `swiftc Models.swift APIClient.swift main.swift` 编一个命令行客户端去连。时间字段一律用 Unix 秒（Go 的 RFC3339 纳秒精度 Swift 解析不稳）。
+- 两端接口契约测试已固化（v0.4.28）：`desktop/contract_test.go` 在 macOS 上跑 `go test ./...` 时会用 `xcrun swiftc` 编译 `ios/ShiJing/Shared/Models.swift`、`APIClient.swift` 和 `desktop/testdata/ios_contract.swift`，对着 `newRemoteHarness` 起的真实服务跑接口解码与交互校验。时间字段一律用 Unix 秒（Go 的 RFC3339 纳秒精度 Swift 解析不稳）。
+- **Mac 局域网地址变更自动重定位（v0.4.29）**：桌面端在数据目录持久化 `remote_server_id`（UUID v4）并通过 Bonjour TXT `sid` 广播；iOS App、小组件和快捷指令共用 `Shared/MacRelocator.swift`，连接遇到网络错误时按 `sid` 查找新地址、核对 `/api/info` 后自动回写 `MacStore` 与共享钥匙串。小组件重定位更新 `mac` 后要同步刷新 `key` / `altKey`。
+- **仅采样目录禁止删除原图（v0.4.30）**：来源位于 `sample_only_dirs`（且不在 `filter_and_sample_dirs`）中的图片，桌面预览、右键菜单和 iOS 端均禁用「删除原图」；`/api/wallpapers` 下发 `sample_only` 字段，桌面 `deleteOriginal` 与远端删除接口在服务端同样校验并拒绝。
 
 ### 8. 横竖屏要按 EXIF 方向判断（v0.3.18）
-不少照片是「像素横着存 + EXIF Orientation 标记转 90°」：像素 6240×4160，系统壁纸、Finder、预览里显示的却是 4160×6240 的竖图（例：`[织梦映像]NO.098 …/0163.jpg`，Orientation=8）。以前 `ImageVerdict` 只看 `image.DecodeConfig` 的像素宽高，这种竖图被当成横屏选进壁纸。现在先用 `core/orientation.go` 的 `exifOrientation`（纯 Go，只读 JPEG 的 APP1 / TIFF 的 IFD0）读方向，5–8 时宽高互换再判断。2026-11 只读统计：全库 27464 张里有 287 张因此从合格变成竖屏。
+不少照片是「像素横着存 + EXIF Orientation 标记转 90°」：像素 6240×4160，系统壁纸、Finder、预览里显示的却是 4160×6240 的竖图（例：`[织梦映像]NO.098 …/0163.jpg`，Orientation=8）。以前 `ImageVerdict` 只看 `image.DecodeConfig` 的像素宽高，这种竖图被当成横屏选进壁纸。现在先用 `core/orientation.go` 的 `exifOrientation`（纯 Go，读 JPEG 的 APP1 / TIFF 的 IFD0；支持在 `io.ReadSeeker` 上按偏移直接定位大 TIFF 末尾的 IFD0）读方向，5–8 时宽高互换再判断。2026-11 只读统计：全库 27464 张里有 287 张因此从合格变成竖屏。
 - `sips -g orientation` 对这张图报 `<nil>`，但 PIL 的 `getexif()[274]` 是 8——**查方向别信 sips**，用 PIL 或 `exifOrientation`。
 - 「仅采样目录」采样时走同一个 `ImageVerdict`（`scanImages` → `checkResolutions`）。「筛选并采样目录」只有真删时才干净：只模拟、定时自动换、手机「只模拟」都不删原图，以前不合格的图留在图库里、采样时又不查，竖图照样会被选进壁纸（增量模式还会把目录记成查过、以后一直跳过）。现在筛选把「不合格但没删」的图记进增量状态的 `rejected`（按目录），跳过的目录也带上，经 `SortResult.Remaining` → `CopyOptions.Rejected` 在采样时排除。`TestSimulatedFilterNeverSamplesRejected` 盖住了这条。
 - 判断逻辑改了要把 `sorter.go` 的 `verdictRules` 加 1：它记在增量状态的 `thresholds.rules` 里，不一样就整体重扫，否则以前判过、之后没动过的目录会一直被跳过，新规则永远不生效。
@@ -202,7 +204,7 @@
 
 - **`os.Remove` 在卷没挂上时返回的也是 ENOENT**，跟「文件本来就不在」分不出来。旧代码把这种情况当成删掉了、还照写删除日志——这是真 bug。现在先看挂载状态（`sourceUnmounted`），再看**文件所在目录**还在不在（`dirMissing`），都不行才排队；只有 `os.IsPermission` 才弹错误。以后动删除相关的代码要注意这一点。
 - 队列每条记**路径 + 大小 + mtime**（排队时一般拿不到，记零值就只校验「文件还在」）。执行在后台（`RunPending`），只在所有图库目录都挂上时动手，避免对着断掉的卷逐个 stat 卡住；执行前指纹对不上（排队期间文件被改过）就不删、只写一行日志并从队列去掉，不自动重试。
-- 触发点：`main.go` 每分钟的定时器（先执行队列、再看挂载）和 `checkMounts` 每个目录探完的 `update`（`maybeProcessPending` 里 `unmountedCount() > 0` 就直接返回）。
+- 触发点：`main.go` 每分钟的定时器（先执行队列、再看挂载）和 `checkMounts` 每个目录探完的 `update`（`maybeProcessPending` 在 `unmountedCount() > 0` 或仍有目录处于 `mountUnknown` 时直接返回，避免启动探测未完成就动手）。
 - 排队时壁纸文件夹里那份照样走 `removeWallpaper`（可以 ⌘Z 撤销）；概览横幅下面多一条 `pendingBar`，弹层 `pendingModal` 能逐条取消或全部取消。删除照旧记进删除记录（原因「手动删除」，日志里注明是排队执行）。`RemoteState.Pending` 把条数带给手机。
 - 测试：`desktop/core/pending_test.go`（校验、指纹、目录没了）、`desktop/pending_test.go`（离线排队、连上执行、等待、改过不删、概览弹层取消）。
 

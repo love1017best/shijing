@@ -6,7 +6,7 @@
 - 界面按实际宽度排版：窄屏显示一栏；宽屏（横屏、展开的大屏、分屏的宽半边、iPad）上方是状态卡，下面分左右两栏。切换、添加 Mac 在标题菜单里。
 - 两个 target：App（`ShiJing`）和主屏幕小组件（`ShiJingWidget`）。两边都编译 `ShiJing/Shared/` 里的代码（接口、模型、钥匙串、快捷指令操作、完成通知）。
 - 免费签名没有 App Groups，App 和小组件通过**钥匙串共享**交换数据（`keychain-access-groups`，组名 `<团队前缀>com.love1017best.shijing.shared`，写在两边 Info.plist 的 `ShiJingKeychainGroup` 里），配对令牌和当前选中的 Mac（`CurrentMac`）都存在这个组里。
-- 接口定义在 `desktop/remote.go`，两边的状态结构（`RemoteState`）字段一一对应，改一边要同步另一边。
+- 接口定义在 `desktop/remote*.go`，两边的状态结构（`RemoteState`）字段一一对应，改一边要同步另一边；`desktop/contract_test.go` 在运行 `go test` 时自动编译 `Shared/Models.swift` 和 `Shared/APIClient.swift` 做两端契约测试。
 
 ## 安装到自己的手机（免费 Apple ID 即可）
 
@@ -67,25 +67,27 @@ cd ios && xcodegen
 | `MacListView.swift` / `PairView.swift` | 首次配对页、添加 / 管理 Mac、附近的 Mac 和手动输入地址 / 输入配对码 |
 | `QRScan.swift` | 扫描电脑上的配对二维码 |
 | `DashboardView.swift` | 概览：横幅卡、状态、步骤、进度、换一批 / 停止、上一轮对比、签名到期提醒、待删除原图 |
-| `SettingsSection.swift` | 「设置」标签（电脑上的拾景 / 这台设备 / 关于三栏）、图库目录二级页、概览的「状态」分组 |
+| `SettingsSection.swift` / `SettingsComponents.swift` / `OfflineCacheSection.swift` | 「设置」标签（电脑上的拾景 / 这台设备 / 关于三栏）、图库目录二级页、通用设置组件与离线缓存分区 |
 | `RecordsPage.swift` | 「记录」标签：运行日志、删除记录、不再选三栏，以及离线时读取缓存的逻辑 |
 | `QueuedActionsView.swift` | 「待处理操作」页：离线时记下的移出、不再选、删除原图 |
-| `WallpapersView.swift` / `WallPreview.swift` | 缩略图网格、「全部壁纸」页、撤销移出、分享原图 / 大图预览 |
-| `RemoteSession.swift` | 和一台 Mac 的连接：事件流（SSE）、断线重连、Mac 换 IP 后按 Bonjour 名称重新查找、运行中切到后台时延长连接；视图通过 `request` 发请求；写离线快照和记录缓存 |
+| `WallpapersView.swift` / `WallActions.swift` | 缩略图网格、「全部壁纸」页、撤销移出、统一的壁纸整理操作定义与按钮 |
+| `WallPreview.swift` / `WallPreviewChrome.swift` / `WallPreviewComponents.swift` | 大图预览、自适应顶底侧栏壳层、缩放与底部缩略图条 |
+| `RemoteSession.swift` / `RemoteSession+Actions.swift` | 和一台 Mac 的连接、SSE 事件流、断线重连与网络监测 / 换批、设置、撤销、壁纸整理与存相册操作 |
 | `RemoteSession+Queue.swift` | 离线操作队列：保存、连接后逐条处理、确认删除原图 |
 | `OfflineMode.swift` / `Shared/OfflinePrefs.swift` | 离线模式：手动离线、使用蜂窝网络时离线；设置存在共享钥匙串，小组件也读 |
 | `ConnectionUI.swift` | 连接异常时的整页提示、断开 / 重连时的状态徽标 |
 | `OfflineStore.swift` | 离线快照（最后一次连接时的状态和壁纸列表）和记录页的三份缓存，带同步时间 |
-| `ImageStore.swift` | 图片的内存缓存和磁盘缓存：缩略图、横幅、整批大图、原图（可选）在连接时后台预取，受缓存上限限制（默认 10 GB）；离线时从磁盘读取；设置页「离线」分组显示占用、进度并提供清除 |
+| `ImageStore.swift` / `ImageStore+Disk.swift` / `ImageStore+Prefetch.swift` | 图片内存缓存与前台 6 路并发加载 / 按 Mac 分目录磁盘缓存、清理与占用统计 / 后台 3 路并发预取队列 |
 | `AppSupport.swift` | Application Support/拾景 下各子目录的位置 |
 | `Glass.swift` | 悬浮块的玻璃背景（iOS 26 使用系统液态玻璃，更早的系统使用 `.ultraThinMaterial`） |
 | `SigningExpiry.swift` | 免费签名到期时间 |
 | `AppShortcuts.swift` | Siri、聚焦和操作按钮里可直接使用的快捷指令 |
 | `RemoteSessionDemo.swift` | Debug 构建的演示数据（`-demo*` 启动参数，截图用） |
 | `Shared/APIClient.swift` / `Shared/Models.swift` | 接口客户端 / 数据结构（App 和小组件共用） |
+| `Shared/MacRelocator.swift` | Mac 局域网地址变化时按 Bonjour `sid` 自动发现新地址并更新连接（App、小组件、快捷指令共用） |
 | `Shared/SharedKeychain.swift` | 共享钥匙串：令牌、`CurrentMac` |
 | `Shared/Intents.swift` | 换一批 / 停止 / 状态三个 App Intent（快捷指令和小组件按钮使用） |
-| `Shared/RunNotifier.swift` | 完成通知（App 和小组件共用「已通知过哪一次」的记录，同一次只发一条） |
+| `Shared/RunNotifier.swift` / `Shared/WidgetReload.swift` | 完成通知（按 Mac 隔离去重水位）/ 触发小组件时间线刷新 |
 | `Discovery.swift` | Bonjour（`_shijing._tcp`）发现和解析 |
 | `MacStore.swift` | 配对过的 Mac（UserDefaults），选中的那台同步写入共享钥匙串 |
 | `../ShiJingWidget/ShiJingWidget.swift` | 两种小组件（「拾景」/「拾景壁纸」）、控制中心按钮、时间线和离线缓存 |
