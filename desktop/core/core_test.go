@@ -978,3 +978,27 @@ func TestCopySamplesRejectsInvalidArchiveSubdir(t *testing.T) {
 	}
 }
 
+// linkDir 含跨层级符号链接时，relSymlink 仍应生成可解析的有效相对软链接。
+func TestRelSymlinkAcrossSymlinkedDir(t *testing.T) {
+	root := t.TempDir()
+	realDest := filepath.Join(root, "a", "b", "dest")
+	if err := os.MkdirAll(realDest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasDest := filepath.Join(root, "dest-link")
+	if err := os.Symlink(realDest, aliasDest); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(root, "src.png")
+	writePNG(t, src, 40, 20)
+
+	linkPath := filepath.Join(aliasDest, "out.png")
+	if err := relSymlink(src, aliasDest, linkPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(linkPath); err != nil {
+		t.Fatalf("跨层级符号链接目录生成的软链接不应悬空: %v", err)
+	}
+}
+
+

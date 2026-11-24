@@ -130,7 +130,13 @@ func (a *app) checkingMounts() bool {
 func (a *app) browse(title string, apply func(path string)) {
 	go func() {
 		if p := a.pickDir(title); p != "" {
-			a.update(func() { apply(p) })
+			a.update(func() {
+				if a.running {
+					a.toast = "运行中不能修改设置"
+					return
+				}
+				apply(p)
+			})
 		}
 	}()
 }
@@ -190,6 +196,10 @@ func (a *app) importConfig() {
 			return
 		}
 		a.update(func() {
+			if a.running {
+				a.toast = "运行中不能导入配置"
+				return
+			}
 			a.setConfig(cfg)
 			a.syncMenuKeys()
 			a.checkMounts()

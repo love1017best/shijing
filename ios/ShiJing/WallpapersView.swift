@@ -365,8 +365,13 @@ struct AllWallpapersView: View {
         guard !items.isEmpty else { endSelection(); return }
         busy = true
         defer { busy = false }
+        let wasOffline = session.offline
         let done = await session.removeWallpapers(items, exclude: exclude)
-        if done == items.count {
+        if wasOffline {
+            if done > 0 {
+                session.showNotice("已记录 \(done) 张，连接电脑后处理")
+            }
+        } else if done == items.count {
             session.showNotice(exclude ? "已移出并不再选 \(done) 张" : "已移出 \(done) 张")
         } else if done > 0 {
             session.showNotice("移出了 \(done) 张，后面的没能做完")

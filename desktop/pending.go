@@ -120,11 +120,15 @@ func (a *app) applyPending(res core.PendingResult) {
 		finished[e.Path] = true
 		a.appendLog(fmt.Sprintf("⚠️ 排队的原图在排队期间被修改，未删除: %s", e.Path))
 	}
-	if len(res.Deleted)+len(res.Gone) > 0 {
+	switch {
+	case len(res.Deleted) > 0 && len(res.Stale) > 0:
+		a.toast = fmt.Sprintf("图库已连接：删除了 %d 张排队的原图，另有 %d 张已被修改未删除（见日志）", len(res.Deleted), len(res.Stale))
+	case len(res.Deleted) > 0:
 		a.toast = fmt.Sprintf("图库已连接：删除了 %d 张排队的原图", len(res.Deleted))
-	}
-	if len(res.Stale) > 0 && len(res.Deleted)+len(res.Gone) == 0 {
+	case len(res.Stale) > 0:
 		a.toast = fmt.Sprintf("%d 张排队的原图在排队期间被修改，未删除（见日志）", len(res.Stale))
+	case len(res.Gone) > 0:
+		a.toast = fmt.Sprintf("图库已连接：排队的 %d 张原图已不存在，已跳过", len(res.Gone))
 	}
 	if len(finished) > 0 {
 		kept := a.pending[:0]

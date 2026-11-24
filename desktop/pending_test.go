@@ -211,3 +211,27 @@ func TestPendingWaitsWhileCheckingMounts(t *testing.T) {
 	}
 }
 
+// applyPending 仅含 Gone 时不提示「删除了 0 张」，含 Gone+Stale 时保留 Stale 警告。
+func TestApplyPendingGoneAndStaleToast(t *testing.T) {
+	f, _ := newFakeApp(t)
+	gone := core.PendingDelete{Path: "/Volumes/Media0/gone.jpg", Wall: "gone.jpg"}
+	stale := core.PendingDelete{Path: "/Volumes/Media0/stale.jpg", Wall: "stale.jpg"}
+
+	f.pending = []core.PendingDelete{gone}
+	f.applyPending(core.PendingResult{Gone: []core.PendingDelete{gone}})
+	if strings.Contains(f.toast, "删除了 0 张") || !strings.Contains(f.toast, "已不存在") {
+		t.Fatalf("仅 Gone 时提示有误: %q", f.toast)
+	}
+
+	f.toast = ""
+	f.pending = []core.PendingDelete{gone, stale}
+	f.applyPending(core.PendingResult{
+		Gone:  []core.PendingDelete{gone},
+		Stale: []core.PendingDelete{stale},
+	})
+	if !strings.Contains(f.toast, "被修改") {
+		t.Fatalf("Gone 与 Stale 并存时不应吞掉 Stale 提示: %q", f.toast)
+	}
+}
+
+

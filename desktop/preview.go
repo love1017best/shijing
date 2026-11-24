@@ -20,23 +20,32 @@ func (a *app) previewKeys(c *ui.Context, wall string, hasSrc, canDelete bool, st
 		return
 	}
 	// 默认是空格 / ⇧空格翻页、J K L 整理（按轻重从左到右），手不用离开主键区。
-	// 移出、删除这类操作不吃按住不放的自动重复（once），免得一下子移出一串
+	// 移出、删除这类操作不吃按住不放的自动重复（once），免得一下子移出一串；
+	// 命中任意快捷键时放弃正在输入的跳转编号。
 	switch {
 	case a.pressed(c, "prev", false), c.Shortcut(ui.Shift, ui.KeySpace):
+		a.jumpBuf = ""
 		step(-1)
 	case a.pressed(c, "next", false), c.Shortcut(0, ui.KeySpace):
+		a.jumpBuf = ""
 		step(1)
 	case a.pressed(c, "remove", true):
+		a.jumpBuf = ""
 		a.report(a.removeWallpaper(wall, false))
 	case hasSrc && a.pressed(c, "exclude", true):
+		a.jumpBuf = ""
 		a.report(a.removeWallpaper(wall, true))
 	case canDelete && a.pressed(c, "delete", true):
+		a.jumpBuf = ""
 		a.askDeleteOriginal(wall)
 	case a.pressed(c, "open", true):
+		a.jumpBuf = ""
 		a.openPath(wall)
 	case a.pressed(c, "reveal_wall", true):
+		a.jumpBuf = ""
 		a.revealPath(wall)
 	case hasSrc && a.pressed(c, "reveal", true):
+		a.jumpBuf = ""
 		a.revealPath(a.wallSource(wall))
 	}
 }
@@ -374,7 +383,10 @@ func (a *app) previewModal(c *ui.Context) {
 	}).Label("壁纸预览")
 	// 正在输入编号时按 Esc：弹层自己的 Esc 先于里面的快捷键生效，会把预览关掉；这里改成只放弃编号
 	if wasOpen && !a.preview && a.jumpBuf != "" {
-		a.preview, a.jumpBuf = true, ""
+		a.jumpBuf = ""
+		if len(a.walls.all) > 0 {
+			a.preview = true
+		}
 	}
 
 	// 删除原图前确认

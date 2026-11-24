@@ -148,9 +148,9 @@ enum TimelineMaker {
         guard var mac = CurrentMac.load() else {
             return Timeline(entries: [Entry(problem: "打开拾景配对一台 Mac")], policy: .after(now.addingTimeInterval(3600)))
         }
-        let key = mac.cacheKey
+        var key = mac.cacheKey
         let legacyKey = "\(mac.host):\(mac.port)"
-        let altKey: String? = legacyKey != key ? legacyKey : nil
+        var altKey: String? = legacyKey != key ? legacyKey : nil
         let accessory = context.family.isAccessory
 
         // 1. 状态和列表：在线就取新的并缓存，连不上且未离线时尝试短时 Bonjour 重定位，仍取不到用缓存
@@ -171,6 +171,8 @@ enum TimelineMaker {
                 if MacRelocator.isNetworkFailure(error),
                    let recovered = await MacRelocator.recoverCurrentMac(mac, timeout: 3.0) {
                     mac = recovered
+                    key = mac.cacheKey
+                    altKey = legacyKey != key ? legacyKey : nil
                     c = try mac.client()
                     state = try await c.state(timeout: fastTimeout)
                 } else {

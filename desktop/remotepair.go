@@ -261,11 +261,10 @@ func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request)
 	}
 	name = uniqueDeviceName(rs.devices, name)
 	rs.devices = append(rs.devices, remoteDevice{Name: name, ID: id, TokenHash: hashToken(tok), PairedAt: now})
-	devs := slices.Clone(rs.devices)
+	rs.saveDevicesLocked()
 	rs.pairedCode = p.code
 	rs.pair = nil
 	rs.mu.Unlock()
-	rs.saveDevices(devs)
 	rs.a.update(func() { rs.a.toast = fmt.Sprintf("已和「%s」配对", name) })
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token":     tok,

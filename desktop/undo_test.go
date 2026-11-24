@@ -173,3 +173,24 @@ func TestShuffleStable(t *testing.T) {
 		t.Errorf("去掉一张后其余的先后不应变: %q", c)
 	}
 }
+
+// 预览中输入跳转编号时按其他快捷键应清空编号，移出最后一张时不得误重开空预览。
+func TestPreviewJumpClearedByShortcut(t *testing.T) {
+	f, tt, _, _ := previewFixture(t, "w-only.jpg")
+	tt.Frame()
+	tt.Key(0, ui.Key1)
+	tt.Frame()
+	if f.jumpBuf != "1" {
+		t.Fatalf("jumpBuf = %q, want 1", f.jumpBuf)
+	}
+	// 默认移出快捷键为 J
+	tt.Key(0, ui.KeyJ)
+	tt.Frame()
+	if f.jumpBuf != "" {
+		t.Errorf("按其他快捷键后应清空 jumpBuf，实际 %q", f.jumpBuf)
+	}
+	if f.preview {
+		t.Error("移出最后一张壁纸后应关闭预览，不得重新置为 true")
+	}
+}
+

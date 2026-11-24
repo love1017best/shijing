@@ -238,9 +238,8 @@ func (rs *remoteServer) renameDevice(old, name string) (string, bool) {
 	others := slices.Delete(slices.Clone(rs.devices), i, i+1)
 	name = uniqueDeviceName(others, name)
 	rs.devices[i].Name = name
-	devs := slices.Clone(rs.devices)
+	rs.saveDevicesLocked()
 	rs.mu.Unlock()
-	rs.saveDevices(devs)
 	rs.redraw()
 	return name, true
 }
@@ -249,7 +248,7 @@ func (rs *remoteServer) renameDevice(old, name string) (string, bool) {
 func (rs *remoteServer) unpair(name string) {
 	rs.mu.Lock()
 	rs.devices = slices.DeleteFunc(rs.devices, func(d remoteDevice) bool { return d.Name == name })
-	devs := slices.Clone(rs.devices)
+	rs.saveDevicesLocked()
 	for ch := range rs.subs {
 		select {
 		case ch <- struct{}{}:
@@ -257,11 +256,11 @@ func (rs *remoteServer) unpair(name string) {
 		}
 	}
 	rs.mu.Unlock()
-	rs.saveDevices(devs)
 }
 
-func (rs *remoteServer) saveDevices(devs []remoteDevice) {
-	data, err := json.MarshalIndent(devs, "", "  ")
+// saveDevicesLocked 在持有 rs.mu 时原子落盘，保证并发配对/改名/取消配对不会以旧快照覆盖新文件。
+func (rs *remoteServer) saveDevicesLocked() {
+	data, err := json.MarshalIndent(rs.devices, "", "  ")
 	if err != nil {
 		return
 	}

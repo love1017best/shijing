@@ -339,7 +339,15 @@ func copyFile(src, dst string) error {
 }
 
 func relSymlink(target, linkDir, linkPath string) error {
-	rel, err := filepath.Rel(linkDir, target)
+	base := linkDir
+	if realDir, err := filepath.EvalSymlinks(linkDir); err == nil {
+		base = realDir
+	}
+	tgt := target
+	if realParent, err := filepath.EvalSymlinks(filepath.Dir(target)); err == nil {
+		tgt = filepath.Join(realParent, filepath.Base(target))
+	}
+	rel, err := filepath.Rel(base, tgt)
 	if err != nil {
 		rel = target
 	}

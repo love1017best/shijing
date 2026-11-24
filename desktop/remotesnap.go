@@ -392,6 +392,16 @@ func (a *app) publishRemote() {
 	if a.remote == nil {
 		return
 	}
+	// 首次开启服务前先写入初始快照与壁纸列表，避免刚监听时的短窗口内 /api/state 与 /api/events 返回空数据。
+	prepublished := false
+	if a.cfg.RemoteEnabled && !a.remotePublished {
+		snap := a.remoteSnapshot()
+		a.remote.publishWalls(snap.WallsRev, &a.walls, a.isSampleOnlySource)
+		if data, err := json.Marshal(snap); err == nil {
+			a.remote.publish(data)
+			prepublished = true
+		}
+	}
 	a.remote.setEnabled(a.cfg.RemoteEnabled)
 	port, _ := a.remote.status()
 	if port == 0 {
@@ -399,6 +409,11 @@ func (a *app) publishRemote() {
 		return
 	}
 	stamp := a.currentRemoteStamp(port)
+	if prepublished {
+		a.lastRemoteStamp = stamp
+		a.remotePublished = true
+		return
+	}
 	if a.remotePublished && stamp == a.lastRemoteStamp {
 		return
 	}
