@@ -92,7 +92,13 @@ private func runSchemaMode(dir: URL) throws {
     try check(!minimal.running && minimal.last == nil && minimal.undoName == nil, "最小状态快照解析异常")
 
     let walls = try verifyRoundTrip(WallpaperList.self, file: dir.appending(path: "wallpapers.json"), name: "WallpaperList")
-    try check(walls.hero != nil && walls.items.count == 2 && walls.items[0].hasSource && !walls.items[1].hasSource, "WallpaperList 字段异常")
+    try check(
+        walls.hero != nil && walls.items.count == 3 &&
+        walls.items[0].hasSource && !walls.items[0].isSampleOnly && walls.items[0].canDeleteOriginal &&
+        walls.items[1].hasSource && walls.items[1].isSampleOnly && !walls.items[1].canDeleteOriginal &&
+        !walls.items[2].hasSource && !walls.items[2].canDeleteOriginal,
+        "WallpaperList 字段异常"
+    )
 
     let dels = try verifyRoundTrip(DeletionList.self, file: dir.appending(path: "deletions.json"), name: "DeletionList")
     try check(dels.total == 2 && dels.filter == 1 && dels.manual == 1 && dels.items.count == 2, "DeletionList 字段异常")

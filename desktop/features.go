@@ -218,6 +218,47 @@ func (a *app) wallSource(wall string) string {
 	return a.walls.sources[filepath.Base(wall)]
 }
 
+// pathInDir 判断规范化后的路径 p 是否位于目录 dir 内（含 dir 本身）。
+func pathInDir(p, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	if dir == "/" {
+		return strings.HasPrefix(p, "/")
+	}
+	return p == dir || strings.HasPrefix(p, dir+"/")
+}
+
+// isSampleOnlySource 判断原图是否处于「仅采样」目录。
+// 存在嵌套目录时按最深匹配目录归属；同一目录同时出现在两边时按「仅采样」处理以防误删。
+func (a *app) isSampleOnlySource(src string) bool {
+	if src == "" {
+		return false
+	}
+	p := mountKey(src)
+	longest := func(dirs []string) int {
+		best := 0
+		for _, raw := range dirs {
+			d := mountKey(raw)
+			if pathInDir(p, d) && len(d) > best {
+				best = len(d)
+			}
+		}
+		return best
+	}
+	sampleLen := longest(a.cfg.SampleOnlyDirs)
+	if sampleLen == 0 {
+		return false
+	}
+	return sampleLen >= longest(a.cfg.FilterAndSampleDirs)
+}
+
+// wallDeletable 判断这张壁纸是否允许删除原图：需要有原图记录，且原图不在「仅采样」目录中。
+func (a *app) wallDeletable(wall string) bool {
+	src := a.wallSource(wall)
+	return src != "" && !a.isSampleOnlySource(src)
+}
+
 // removeWallpaper 从壁纸文件夹里移除一张（不动原图），exclude 时还把原图加进排除名单。
 // 失败返回错误，由调用方决定怎么提示：桌面 a.report 弹框，手机遥控写进响应。
 func (a *app) removeWallpaper(wall string, exclude bool) error {
@@ -325,6 +366,9 @@ func (a *app) deleteOriginal(wall string) error {
 	if src == "" {
 		return nil
 	}
+	if a.isSampleOnlySource(src) {
+		return softErr("这张来自仅采样目录，不可删除原图")
+	}
 	if a.sourceUnmounted(src) {
 		return a.queueDelete(wall, src)
 	}
@@ -337,7 +381,7 @@ func (a *app) deleteOriginal(wall string) error {
 // 避免挂起的 SMB/NFS 卷阻塞主线程界面和遥控服务。
 func (a *app) deleteOriginalAsync(wall string) {
 	src := a.wallSource(wall)
-	if src == "" {
+	if src == "" || a.isSampleOnlySource(src) {
 		return
 	}
 	if a.deletingWalls[wall] {

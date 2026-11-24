@@ -153,6 +153,7 @@ func TestIOSContract(t *testing.T) {
 			"hero": "风景-a.jpg",
 			"items": []remoteWall{
 				{Name: "风景-a.jpg", Source: "/Volumes/Media0/A/a.jpg"},
+				{Name: "精选-s.jpg", Source: "/Volumes/Media0/S/s.jpg", SampleOnly: true},
 				{Name: "c.jpg"},
 			},
 		})

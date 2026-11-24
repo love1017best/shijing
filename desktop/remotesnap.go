@@ -219,7 +219,7 @@ func (a *app) remoteSnapshot() remoteState {
 		Unmounted:   a.unmountedCount(),
 		WillDelete:  a.willDelete(),
 		Wallpapers:  len(a.walls.all),
-		WallsRev:    a.walls.cachedRev(),
+		WallsRev:    a.remoteWallsRev(),
 		Dest:        tildify(a.cfg.DestDir),
 		Sample:      int(a.num),
 		Library:     len(a.allDirs()),
@@ -361,7 +361,7 @@ func (a *app) currentRemoteStamp(port int) remoteStamp {
 		last:        a.last,
 		lastGood:    a.lastGood,
 		wallsDir:    a.walls.dir,
-		wallsRev:    a.walls.cachedRev(),
+		wallsRev:    a.remoteWallsRev(),
 		wallsSrcLen: len(a.walls.sources),
 		undoName:    a.undoName(),
 		pendingLen:  len(a.pending),
@@ -403,7 +403,7 @@ func (a *app) publishRemote() {
 		return
 	}
 	snap := a.remoteSnapshot()
-	a.remote.publishWalls(snap.WallsRev, &a.walls)
+	a.remote.publishWalls(snap.WallsRev, &a.walls, a.isSampleOnlySource)
 	data, err := json.Marshal(snap)
 	if err != nil {
 		return

@@ -912,3 +912,122 @@ func TestFinishDeleteOriginalGuardsStaleAndUndo(t *testing.T) {
 		t.Fatalf("撤销暂存文件应一并清理: %v", err)
 	}
 }
+
+func TestSampleOnlySourceRules(t *testing.T) {
+	f, _ := newFakeApp(t)
+	f.cfg.SampleOnlyDirs = []string{"/Volumes/Media0/Sample/", "/Volumes/Media0/Mixed/Keep", "/Volumes/Media0/Same"}
+	f.cfg.FilterAndSampleDirs = []string{"/Volumes/Media0/Mixed", "/Volumes/Media0/Sample/SortSub", "/Volumes/Media0/Same"}
+
+	cases := []struct {
+		src  string
+		want bool
+	}{
+		{"", false},
+		{"/Volumes/Media0/Sample/a.jpg", true},
+		{"/Volumes/Media0/Sample/sub/a.jpg", true},
+		{"/Volumes/Media0/Sample2/a.jpg", false},        // 相似前缀不误匹配
+		{"/Volumes/Media0/Mixed/a.jpg", false},          // 筛选并采样目录
+		{"/Volumes/Media0/Mixed/Keep/a.jpg", true},      // 更深的仅采样目录优先
+		{"/Volumes/Media0/Sample/SortSub/a.jpg", false}, // 更深的筛选并采样目录优先
+		{"/Volumes/Media0/Same/a.jpg", true},            // 同路径重复配置时安全优先
+	}
+	for _, tc := range cases {
+		if got := f.isSampleOnlySource(tc.src); got != tc.want {
+			t.Errorf("isSampleOnlySource(%q) = %v, want %v", tc.src, got, tc.want)
+		}
+	}
+}
+
+func TestPreviewSampleOnlyCannotDelete(t *testing.T) {
+	f, tt := newFakeApp(t)
+	dest, sampleDir := t.TempDir(), t.TempDir()
+	f.cfg.DestDir = dest
+	f.cfg.SampleOnlyDirs = []string{sampleDir}
+
+	src1 := filepath.Join(sampleDir, "a.jpg")
+	src2 := filepath.Join(sampleDir, "b.jpg")
+	wall1 := filepath.Join(dest, "s-a.jpg")
+	wall2 := filepath.Join(dest, "s-b.jpg")
+	for _, p := range []string{src1, src2, wall1, wall2} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.walls.dir = dest
+	f.walls.all = []string{wall1, wall2}
+	f.walls.sources = map[string]string{
+		"s-a.jpg": src1,
+		"s-b.jpg": src2,
+	}
+	f.walls.thumbs = map[string]*ui.Bitmap{
+		wall1: ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 8, 8))),
+		wall2: ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 8, 8))),
+	}
+	f.wallsLoadedGen = f.wallsGen
+
+	// 概览页右键菜单不应包含「删除图库里的原图…」，但保留移出与不再选
+	tt.Frame()
+	if err := tt.RightClick("壁纸 1"); err != nil {
+		t.Fatalf("右键点击缩略图失败: %v", err)
+	}
+	menu := tt.Menu()
+	if slices.Contains(menu, actDelete) {
+		t.Fatalf("仅采样目录右键菜单不应包含删除原图: %q", menu)
+	}
+	if !slices.Contains(menu, actRemove+"（原图保留）") || !slices.Contains(menu, actExclude+"（原图保留）") {
+		t.Fatalf("仅采样目录右键菜单应保留移出与不再选: %q", menu)
+	}
+
+	// 打开大图预览：不应有删除原图按钮，按 L 不弹确认框
+	f.openPreviewOf(wall1)
+	tt.Frame()
+	if tt.HasText(actDelete) {
+		t.Fatalf("仅采样目录预览不应显示删除原图按钮: %q", tt.Texts())
+	}
+	if !tt.HasText(actRemove) || !tt.HasText(actExclude) {
+		t.Fatalf("仅采样目录预览应保留移出和不再选按钮: %q", tt.Texts())
+	}
+	if !tt.HasText("仅采样目录，不可删除原图") {
+		t.Fatalf("仅采样目录预览应显示不可删除说明: %q", tt.Texts())
+	}
+
+	tt.Key(0, ui.KeyL)
+	tt.Frame()
+	if f.confirmDelSrc {
+		t.Fatal("仅采样目录图片按 L 不应弹出删除确认")
+	}
+	f.askDeleteOriginal(wall1)
+	if f.confirmDelSrc {
+		t.Fatal("askDeleteOriginal 对仅采样目录图片不应打开确认框")
+	}
+	if err := f.deleteOriginal(wall1); err == nil {
+		t.Fatal("deleteOriginal 对仅采样目录图片应返回错误")
+	}
+	f.deleteOriginalAsync(wall1)
+	if _, err := os.Stat(src1); err != nil {
+		t.Fatalf("仅采样目录原图不应被删除: %v", err)
+	}
+
+	// 按 K 移出并不再选：原图保留、进入不再选名单
+	tt.Key(0, ui.KeyK)
+	tt.Frame()
+	if _, err := os.Stat(wall1); !os.IsNotExist(err) {
+		t.Fatalf("K 应移出壁纸文件夹中的副本: %v", err)
+	}
+	if _, err := os.Stat(src1); err != nil {
+		t.Fatalf("K 不应删除原图: %v", err)
+	}
+	if !slices.Contains(f.cfg.Excluded, src1) {
+		t.Fatalf("K 应将原图加入不再选: %q", f.cfg.Excluded)
+	}
+
+	// 按 J 移出第二张：原图保留
+	tt.Key(0, ui.KeyJ)
+	tt.Frame()
+	if _, err := os.Stat(wall2); !os.IsNotExist(err) {
+		t.Fatalf("J 应移出壁纸文件夹中的副本: %v", err)
+	}
+	if _, err := os.Stat(src2); err != nil {
+		t.Fatalf("J 不应删除原图: %v", err)
+	}
+}

@@ -51,18 +51,23 @@ type wallpapers struct {
 	browsing  bool   // 正在后台解码壁纸页的缩略图
 	browseSeq uint64 // 壁纸页缩略图批次序号：快速切页来回时防止旧批次清掉新批次的 browsing 标志
 	// 派生缓存：避免每次重绘或发布快照都重新哈希整份壁纸列表、重算目录分组
-	revCache     string
-	revLen       int
-	revHero      string
-	folderRev    string
-	folderSrcLen int
-	folders      []string
-	folderCounts map[string]int
+	revCache       string
+	revLen         int
+	revHero        string
+	remoteRevCache string
+	remoteRevBase  string
+	remoteRevCfg   uint64
+	remoteRevSrc   int
+	folderRev      string
+	folderSrcLen   int
+	folders        []string
+	folderCounts   map[string]int
 }
 
 // invalidateRev 在就地增删 all 或切换 heroPath 后清掉列表指纹和目录分组缓存。
 func (w *wallpapers) invalidateRev() {
 	w.revCache = ""
+	w.remoteRevCache = ""
 	w.folderRev = ""
 }
 

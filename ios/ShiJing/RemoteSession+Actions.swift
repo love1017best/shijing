@@ -324,6 +324,7 @@ extension RemoteSession {
     /// 不能像「移出」「不再选」那样自动处理。
     @discardableResult
     func deleteOriginal(_ w: Wallpaper) async -> Bool {
+        guard w.canDeleteOriginal else { return false }
         guard connection == .live else {
             enqueue(.delete, w)
             return true

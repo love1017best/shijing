@@ -111,8 +111,10 @@ extension WallPreview {
         HStack(spacing: 8) {
             ShareOriginalButton(session: session, wall: w, glass: true, size: topButtonSize)
             actionPill(w, size: topPillSize)
-            actionCircle(.delete, w, size: topButtonSize)
-                .deleteOriginalDialog(session: session, wall: $confirmDelete)
+            if w.canDeleteOriginal {
+                actionCircle(.delete, w, size: topButtonSize)
+                    .deleteOriginalDialog(session: session, wall: $confirmDelete)
+            }
         }
     }
 
@@ -160,8 +162,10 @@ extension WallPreview {
                 circleButton("xmark", label: "关闭", size: button) { dismiss() }
                 ShareOriginalButton(session: session, wall: w, glass: true, size: button)
                 actionPill(w, vertical: true, size: pill)
-                actionCircle(.delete, w, size: button)
-                    .deleteOriginalDialog(session: session, wall: $confirmDelete)
+                if w.canDeleteOriginal {
+                    actionCircle(.delete, w, size: button)
+                        .deleteOriginalDialog(session: session, wall: $confirmDelete)
+                }
             }
             .padding(.top, landscape ? topInset : 0)
             Spacer(minLength: 0)
@@ -239,7 +243,7 @@ extension WallPreview {
             if showsInfo {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(w.name).font(.subheadline.bold()).lineLimit(1).truncationMode(.middle)
-                    Text(w.hasSource ? "原图：\(w.source ?? "")" : "原图：无记录（由旧版本更换），无法删除，只能移出")
+                    Text(sourceCaption(w))
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10)
@@ -260,16 +264,30 @@ extension WallPreview {
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { bottomBarTop = $0 }
     }
 
+    private func sourceCaption(_ w: Wallpaper) -> String {
+        if !w.hasSource {
+            return "原图：无记录（由旧版本更换），无法删除，只能移出"
+        }
+        if w.isSampleOnly {
+            return "原图：\(w.source ?? "")（仅采样目录，不可删除原图）"
+        }
+        return "原图：\(w.source ?? "")"
+    }
+
     /// 窄屏底部这一排（照系统相册的 iPhone 版）：左边分享，中间一块玻璃里排三个整理操作，右边红色的删除。
-    /// 不写文字，只说给 VoiceOver 听。
+    /// 不可删除原图时右侧用同宽透明占位，让中间的玻璃胶囊继续居中。不写文字，只说给 VoiceOver 听。
     private func actionRow(_ w: Wallpaper) -> some View {
         HStack(spacing: 0) {
             ShareOriginalButton(session: session, wall: w, glass: true, size: 44)
             Spacer(minLength: 12)
             actionPill(w)
             Spacer(minLength: 12)
-            actionCircle(.delete, w)
-                .deleteOriginalDialog(session: session, wall: $confirmDelete)
+            if w.canDeleteOriginal {
+                actionCircle(.delete, w)
+                    .deleteOriginalDialog(session: session, wall: $confirmDelete)
+            } else {
+                Color.clear.frame(width: 44, height: 44)
+            }
         }
         .frame(height: 52)
     }

@@ -19,7 +19,7 @@ func TestDeleteOriginalQueuesWhenLibraryOffline(t *testing.T) {
 	if err := os.WriteFile(wall, []byte("wall"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	f.cfg.SampleOnlyDirs = []string{"/Volumes/Offline/Fav"}
+	f.cfg.FilterAndSampleDirs = []string{"/Volumes/Offline/Fav"}
 	f.checkMounts()
 	f.settle(t, tt, func() bool { return f.unmountedCount() == 1 })
 

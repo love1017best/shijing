@@ -31,8 +31,9 @@ const (
 
 // remoteWall 是发给手机的一张壁纸。
 type remoteWall struct {
-	Name   string `json:"name"`             // 壁纸文件夹里的文件名，也是接口路径里的 id
-	Source string `json:"source,omitempty"` // 原图路径（~ 缩写）；旧版本换上的没有记录，只能移出
+	Name       string `json:"name"`                  // 壁纸文件夹里的文件名，也是接口路径里的 id
+	Source     string `json:"source,omitempty"`      // 原图路径（~ 缩写）；旧版本换上的没有记录，只能移出
+	SampleOnly bool   `json:"sample_only,omitempty"` // 原图位于「仅采样」目录：不可删除原图，只能移出或不再选
 }
 
 // wallsSnapshot 是主线程发布的壁纸列表。
@@ -59,8 +60,41 @@ func wallsRev(all []string, heroPath string) string {
 	return strconv.FormatUint(h.Sum64(), 36)
 }
 
+// remoteWallsRev 返回发给手机的壁纸列表指纹：在列表与横幅基础上纳入各图是否属于「仅采样」目录，
+// 这样目录配置变动后手机端能及时刷新 sample_only 标记。
+func (a *app) remoteWallsRev() string {
+	w := &a.walls
+	base := w.cachedRev()
+	if w.remoteRevCache != "" && w.remoteRevBase == base && w.remoteRevCfg == a.cfgRev && w.remoteRevSrc == len(w.sources) {
+		return w.remoteRevCache
+	}
+	var sampleOnly []string
+	for _, p := range w.all {
+		name := filepath.Base(p)
+		if src := w.sources[name]; src != "" && a.isSampleOnlySource(src) {
+			sampleOnly = append(sampleOnly, name)
+		}
+	}
+	rev := base
+	if len(sampleOnly) > 0 {
+		h := fnv.New64a()
+		h.Write([]byte(base))
+		h.Write([]byte("|so:"))
+		for _, name := range sampleOnly {
+			h.Write([]byte(name))
+			h.Write([]byte{0})
+		}
+		rev = strconv.FormatUint(h.Sum64(), 36)
+	}
+	w.remoteRevCache = rev
+	w.remoteRevBase = base
+	w.remoteRevCfg = a.cfgRev
+	w.remoteRevSrc = len(w.sources)
+	return rev
+}
+
 // publishWalls 由主线程调用：列表变了才重建。
-func (rs *remoteServer) publishWalls(rev string, w *wallpapers) {
+func (rs *remoteServer) publishWalls(rev string, w *wallpapers, isSampleOnly func(string) bool) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	hero := ""
@@ -78,7 +112,8 @@ func (rs *remoteServer) publishWalls(rev string, w *wallpapers) {
 		if src != "" {
 			s.sources[name] = src
 		}
-		s.list = append(s.list, remoteWall{Name: name, Source: tildify(src)})
+		sampleOnly := src != "" && isSampleOnly != nil && isSampleOnly(src)
+		s.list = append(s.list, remoteWall{Name: name, Source: tildify(src), SampleOnly: sampleOnly})
 	}
 	rs.walls = s
 }
@@ -245,6 +280,10 @@ func (rs *remoteServer) handleWallDelete(w http.ResponseWriter, r *http.Request,
 		src = a.wallSource(path)
 		if src == "" {
 			msg = "这张由旧版本更换，找不到原图"
+			return
+		}
+		if a.isSampleOnlySource(src) {
+			msg = "这张来自仅采样目录，不可删除原图"
 			return
 		}
 		if a.sourceUnmounted(src) {

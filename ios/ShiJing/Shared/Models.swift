@@ -186,8 +186,12 @@ struct Wallpaper: Codable, Identifiable, Hashable {
     var name: String
     /// 原图路径；旧版本换上的没有记录，只能移出
     var source: String?
+    /// 原图位于「仅采样」目录：不可删除原图，只能移出或不再选（旧版桌面端没有，默认 false）
+    var sampleOnly: Bool?
     var id: String { name }
     var hasSource: Bool { !(source ?? "").isEmpty }
+    var isSampleOnly: Bool { sampleOnly == true }
+    var canDeleteOriginal: Bool { hasSource && !isSampleOnly }
 }
 
 struct WallpaperList: Codable {

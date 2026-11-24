@@ -174,3 +174,61 @@ func TestRemoteWallpaperActions(t *testing.T) {
 		t.Fatalf("删除日志里没有: %s", logData)
 	}
 }
+
+func TestRemoteWallpaperSampleOnlyCannotDelete(t *testing.T) {
+	h := newRemoteHarness(t)
+	dest, lib := withWalls(t, h)
+	h.cfg.SampleOnlyDirs = []string{lib}
+	h.tt.Frame()
+	tok := h.pair(t, "iPhone")
+
+	_, st1 := h.do(t, "GET", "/api/state", tok, nil)
+	rev1 := st1["walls_rev"].(string)
+	code, data := h.do(t, "GET", "/api/wallpapers", tok, nil)
+	if code != 200 || data["rev"] != rev1 {
+		t.Fatalf("wallpapers = %d %v", code, data)
+	}
+	items := data["items"].([]any)
+	first := items[0].(map[string]any)
+	if first["sample_only"] != true {
+		t.Fatalf("仅采样目录图片应带 sample_only=true: %v", first)
+	}
+	if third := items[2].(map[string]any); third["sample_only"] != nil {
+		t.Fatalf("无原图记录不应带 sample_only: %v", third)
+	}
+
+	// 尝试删除原图：服务端必须拦截，原图和壁纸文件夹中的副本均保留
+	code, errBody := h.do(t, "POST", "/api/wallpapers/风景-a.jpg/delete", tok, nil)
+	if code != 409 || !strings.Contains(errBody["error"].(string), "仅采样目录") {
+		t.Fatalf("删除仅采样目录原图应返回 409: %d %v", code, errBody)
+	}
+	if _, err := os.Stat(filepath.Join(lib, "a.jpg")); err != nil {
+		t.Fatalf("原图不应被删: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "风景-a.jpg")); err != nil {
+		t.Fatalf("壁纸副本不应被删: %v", err)
+	}
+
+	// 移出并不再选照常可用，原图保留
+	if code, _ := h.do(t, "POST", "/api/wallpapers/风景-a.jpg/remove", tok, map[string]bool{"exclude": true}); code != 200 {
+		t.Fatalf("仅采样目录图片应允许移出并不再选: %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(lib, "a.jpg")); err != nil {
+		t.Fatalf("移出并不再选不应删原图: %v", err)
+	}
+
+	// 把目录从「仅采样」切回「筛选并采样」：walls_rev 应变化、sample_only 应清除
+	_, stBefore := h.do(t, "GET", "/api/state", tok, nil)
+	h.cfg.SampleOnlyDirs = nil
+	h.cfg.FilterAndSampleDirs = []string{lib}
+	h.tt.Frame()
+	_, stAfter := h.do(t, "GET", "/api/state", tok, nil)
+	if stAfter["walls_rev"] == stBefore["walls_rev"] {
+		t.Fatalf("目录类型变更后 walls_rev 应变化: %v", stAfter["walls_rev"])
+	}
+	_, data2 := h.do(t, "GET", "/api/wallpapers", tok, nil)
+	second := data2["items"].([]any)[0].(map[string]any)
+	if second["sample_only"] != nil {
+		t.Fatalf("切回筛选并采样后不应再有 sample_only: %v", second)
+	}
+}

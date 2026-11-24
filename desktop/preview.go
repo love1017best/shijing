@@ -14,7 +14,7 @@ import (
 // previewKeys 处理预览里的键盘操作（快捷键在「快捷键」页可以改，见 shortcuts.go）。要在 Modal 里面调用：
 // Modal 外面的 Shortcut 被弹层挡住收不到；删除确认框弹出时预览在它后面，这里同样收不到，回车 / Esc 归确认框。
 // 回车不能当快捷键：弹层会把焦点放在按钮上，回车归那个按钮。
-func (a *app) previewKeys(c *ui.Context, wall string, hasSrc bool, step func(int)) {
+func (a *app) previewKeys(c *ui.Context, wall string, hasSrc, canDelete bool, step func(int)) {
 	a.undoKey(c)
 	if a.jumpKeys(c) {
 		return
@@ -30,7 +30,7 @@ func (a *app) previewKeys(c *ui.Context, wall string, hasSrc bool, step func(int
 		a.report(a.removeWallpaper(wall, false))
 	case hasSrc && a.pressed(c, "exclude", true):
 		a.report(a.removeWallpaper(wall, true))
-	case hasSrc && a.pressed(c, "delete", true):
+	case canDelete && a.pressed(c, "delete", true):
 		a.askDeleteOriginal(wall)
 	case a.pressed(c, "open", true):
 		a.openPath(wall)
@@ -105,6 +105,7 @@ const (
 // wallMenu 是缩略图的右键菜单（和大图预览里的按钮是同一组操作）。
 func (a *app) wallMenu(m *ui.Menu, wall string) {
 	src := a.wallSource(wall)
+	canDelete := src != "" && !a.isSampleOnlySource(src)
 	if m.Item("查看大图").Chosen() {
 		a.openPreviewOf(wall)
 	}
@@ -125,14 +126,19 @@ func (a *app) wallMenu(m *ui.Menu, wall string) {
 		if m.Item(actExclude + "（原图保留）").Chosen() {
 			a.report(a.removeWallpaper(wall, true))
 		}
-		m.Separator()
-		if m.Item(actDelete).Danger().Chosen() {
-			a.askDeleteOriginal(wall)
+		if canDelete {
+			m.Separator()
+			if m.Item(actDelete).Danger().Chosen() {
+				a.askDeleteOriginal(wall)
+			}
 		}
 	}
 }
 
 func (a *app) askDeleteOriginal(wall string) {
+	if !a.wallDeletable(wall) {
+		return
+	}
 	a.pendingDelWall, a.confirmDelSrc = wall, true
 }
 
@@ -286,12 +292,15 @@ func (a *app) previewModal(c *ui.Context) {
 		}
 		wall := w.all[a.previewIdx]
 		src := a.wallSource(wall)
+		hasSrc := src != ""
+		sampleOnly := hasSrc && a.isSampleOnlySource(src)
+		canDelete := hasSrc && !sampleOnly
 		bmp := a.previewBitmap(wall)
 		var iw, ih int
 		if bmp != nil {
 			iw, ih = bmp.Size()
 		}
-		a.previewKeys(c, wall, src != "", step)
+		a.previewKeys(c, wall, hasSrc, canDelete, step)
 		// 图片框和图片同比例；弹层四周留 previewMargin（别压到红绿灯），窗口越大图越大，全屏时也铺得开。
 		// 下面的文字和按钮约占 190，左右内边距 40
 		boxW, boxH := fitBox(iw, ih, vw-2*previewMargin-40, vh-2*previewMargin-190)
@@ -342,15 +351,19 @@ func (a *app) previewModal(c *ui.Context) {
 				}
 				ui.Spacer(c)
 				keyButton(c, nil, actRemove, a.keyLabel("remove")).Tooltip(actRemoveTip).OnClick(func() { a.report(a.removeWallpaper(wall, false)) })
-				if src != "" {
+				if hasSrc {
 					keyButton(c, nil, actExclude, a.keyLabel("exclude")).Tooltip(actExcludeTip).OnClick(func() { a.report(a.removeWallpaper(wall, true)) })
+				}
+				if canDelete {
 					keyButton(c, nil, actDelete, a.keyLabel("delete")).TextColor(t.Danger).Tooltip(actDeleteTip).OnClick(func() { a.askDeleteOriginal(wall) })
 				}
 			})
 			// 只留一句最要紧的；完整说明和键盘用法放在 ⓘ 的提示里（按钮上已经标了快捷键）
 			note := "「移出」不会删除原图，可按 ⌘Z 撤销；只有「删除图库里的原图」会删除原图，且不可撤销。"
-			if src == "" {
+			if !hasSrc {
 				note = "这张由旧版本更换，找不到对应的原图，无法删除，只能移出（⌘Z 可以撤销）。"
+			} else if sampleOnly {
+				note = "这张来自仅采样目录，不可删除原图，只能移出或不再选（⌘Z 可撤销移出）。"
 			}
 			ui.Row(c).AlignSelf(ui.Stretch).Gap(6).AlignItems(ui.Center).Children(func() {
 				muted(c, note).Grow(1).Shrink(1).MinWidth(0)

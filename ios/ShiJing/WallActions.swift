@@ -60,6 +60,15 @@ enum WallActionKind: CaseIterable {
 
     /// 动的是图库里的原图：旧版本换上的没有原图路径，这两种就不显示
     var needsSource: Bool { self == .exclude || self == .delete }
+
+    /// 这张壁纸是否支持此操作：仅采样目录的图片不可删除原图，只能移出或不再选。
+    func isAvailable(for wall: Wallpaper) -> Bool {
+        switch self {
+        case .save, .remove: true
+        case .exclude: wall.hasSource
+        case .delete: wall.canDeleteOriginal
+        }
+    }
 }
 
 extension WallActionKind {
@@ -68,6 +77,7 @@ extension WallActionKind {
     /// 离线时「正在换壁纸」不拦整理（那份状态是断线前同步的，见下面）。
     @MainActor
     func isEnabled(_ session: RemoteSession, _ w: Wallpaper) -> Bool {
+        if !isAvailable(for: w) { return false }
         if self == .save {
             if session.saving != nil { return false }
             return !session.offline || ImageStore.cachedOriginal(macID: session.macID.uuidString, name: w.name) != nil
@@ -83,8 +93,12 @@ extension WallActionKind {
         switch self {
         case .save: Task { await session.saveOriginal(w) }
         case .remove: Task { await session.removeWallpaper(w, exclude: false) }
-        case .exclude: Task { await session.removeWallpaper(w, exclude: true) }
-        case .delete: confirmDelete.wrappedValue = w
+        case .exclude:
+            guard w.hasSource else { return }
+            Task { await session.removeWallpaper(w, exclude: true) }
+        case .delete:
+            guard w.canDeleteOriginal else { return }
+            confirmDelete.wrappedValue = w
         }
     }
 }
@@ -97,7 +111,7 @@ struct WallActionButtons: View {
 
     var body: some View {
         ForEach(WallActionKind.allCases, id: \.self) { kind in
-            if !kind.needsSource || wall.hasSource {
+            if kind.isAvailable(for: wall) {
                 Button(role: kind.isDestructive ? .destructive : nil) {
                     kind.perform(session, wall, confirmDelete: $confirmDelete)
                 } label: {
