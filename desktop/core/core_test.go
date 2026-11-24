@@ -938,3 +938,43 @@ func TestBalanceCoverageCountsOnlyLeafDirs(t *testing.T) {
 		t.Fatalf("叶子覆盖率应只计叶子目录（1/1 100.0%%），实际日志:\n%s", joined)
 	}
 }
+
+// 大小写仅不同的同名目标在大小写不敏感文件系统上不得分配同一路径。
+func TestGenerateFilenameCaseInsensitiveDedup(t *testing.T) {
+	dest := t.TempDir()
+	taken := map[string]bool{}
+	a := generateFilename("/lib/A/Photos/01.jpg", dest, taken)
+	b := generateFilename("/lib/B/Photos/01.JPG", dest, taken)
+	if strings.EqualFold(a, b) {
+		t.Fatalf("仅大小写不同的目标路径应当去重避让: a=%q b=%q", a, b)
+	}
+}
+
+// 非法归档子目录名（. / .. / 含路径分隔符）必须拒绝，不得清空归档父目录。
+func TestCopySamplesRejectsInvalidArchiveSubdir(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "lib")
+	dest := filepath.Join(root, "dest")
+	writePNG(t, filepath.Join(src, "a.png"), 80, 40)
+	keep := filepath.Join(src, "keep.txt")
+	if err := os.WriteFile(keep, []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{".", "..", "a/b", `a\b`} {
+		_, err := CopySamples(CopyOptions{
+			Sources:           []string{src},
+			Dest:              dest,
+			Mode:              "copy",
+			Num:               1,
+			ArchiveEnabled:    true,
+			ArchiveSubdirName: bad,
+		}, Reporter{}, nil)
+		if err == nil {
+			t.Fatalf("非法归档子目录名 %q 应当返回错误", bad)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("归档父目录内容不应被删除: %v", err)
+	}
+}
+

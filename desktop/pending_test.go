@@ -196,3 +196,18 @@ func TestMountKeyNormalizationAndProbeDedup(t *testing.T) {
 		t.Fatal("带末尾斜杠的目录应正确命中 sourceUnmounted")
 	}
 }
+
+// 图库目录仍处于探测中（mountUnknown）时，maybeProcessPending 不得提前启动后台待删。
+func TestPendingWaitsWhileCheckingMounts(t *testing.T) {
+	f, _ := newFakeApp(t)
+	f.cfg.FilterAndSampleDirs = []string{"/Volumes/Local/A", "/Volumes/NAS/B"}
+	f.mounts[mountKey("/Volumes/Local/A")] = mountOK
+	f.mounts[mountKey("/Volumes/NAS/B")] = mountUnknown
+	f.pending = []core.PendingDelete{{Path: "/Volumes/NAS/B/a.jpg", Wall: "a.jpg"}}
+
+	f.maybeProcessPending()
+	if f.pendingBusy {
+		t.Fatal("仍有目录处于 mountUnknown 时不应启动待删执行")
+	}
+}
+

@@ -157,8 +157,9 @@ type app struct {
 	delFilter   bool
 	delManual   bool
 	delClosed   map[string]bool
-	running     bool
-	runStats    // 这次运行的进度和删除情况，开始运行时整体清零
+	running       bool
+	confirmingRun bool // 运行前删除原图确认框正在显示：防止重复触发叠弹
+	runStats           // 这次运行的进度和删除情况，开始运行时整体清零
 	last        *runResult
 	skipConfirm bool        // 删除原图前不再弹确认框（重新打开删除开关后恢复）
 	prevDelete  bool        // 上一帧「删除不合格原图」的值，用来发现它被重新打开

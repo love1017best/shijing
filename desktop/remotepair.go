@@ -215,6 +215,7 @@ func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request)
 	if !readBodyOrFail(w, r, &body) {
 		return
 	}
+	ip := clientIP(r)
 	now := rs.clock()
 	rs.mu.Lock()
 	p := rs.pair
@@ -223,6 +224,10 @@ func (rs *remoteServer) handlePairFinish(w http.ResponseWriter, r *http.Request)
 		rs.pair = nil
 		rs.mu.Unlock()
 		writeErr(w, http.StatusGone, "配对码已过期或被拒绝，请重新开始配对")
+		return
+	case now.Before(rs.pairLockUntil[ip]):
+		rs.mu.Unlock()
+		writeErr(w, http.StatusTooManyRequests, "尝试次数过多，请稍后再试")
 		return
 	case subtle.ConstantTimeCompare([]byte(strings.TrimSpace(body.Code)), []byte(p.code)) != 1:
 		p.fails++

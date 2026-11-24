@@ -631,6 +631,21 @@ func TestLogFilterProblems(t *testing.T) {
 	}
 }
 
+// 日志非空且展开时点击「清空」不得发生越界 panic，并应清空日志列表。
+func TestLogClearNoPanic(t *testing.T) {
+	f, tt := newFakeApp(t)
+	f.appendLog("▶ 2026-11-24 12:00:00 开始运行\n⚠️ 出了点问题")
+	f.logShown = true
+	tt.Frame()
+	tt.Advance(time.Second)
+	tt.Frame()
+	click(t, tt, "清空")
+	tt.Frame()
+	if len(f.log) != 0 || len(f.logParsed) != 0 || len(f.logRows) != 0 {
+		t.Fatalf("点击清空后日志应为空: log=%d parsed=%d rows=%d", len(f.log), len(f.logParsed), len(f.logRows))
+	}
+}
+
 func TestRunShowsDeletionsAndOverlap(t *testing.T) {
 	f, tt := newFakeApp(t)
 	f.cfg.FilterAndSampleDirs = []string{"/Volumes/Media0/Lib"}

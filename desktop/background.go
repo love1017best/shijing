@@ -19,8 +19,9 @@ import (
 //
 // 所有监听器都在主线程执行，和 view 读写 a.running 不会冲突。
 func setupBackground(a *app, win *mygo.Window) {
-	quitting := false      // 已确认退出：放行窗口关闭
-	confirmedQuit := false // 任务进行中，用户已在对话框里确认退出
+	quitting := false       // 已确认退出：放行窗口关闭
+	confirmedQuit := false  // 任务进行中，用户已在对话框里确认退出
+	confirmingQuit := false // 退出确认对话框正在显示：防止重复 ⌘Q 叠弹
 
 	win.OnClose(func(e *mygo.CloseEvent) {
 		if quitting {
@@ -45,6 +46,10 @@ func setupBackground(a *app, win *mygo.Window) {
 		if a.running && !confirmedQuit {
 			e.PreventDefault()
 			a.showMain(win)
+			if confirmingQuit {
+				return
+			}
+			confirmingQuit = true
 			go func() {
 				res, err := mygo.Dialog.Message(mygo.MessageOptions{
 					Parent:             win,
@@ -56,12 +61,13 @@ func setupBackground(a *app, win *mygo.Window) {
 					CancelButton:       0,
 					DestructiveButtons: []int{1},
 				})
-				if err == nil && res.Button == 1 {
-					win.Update(func() {
+				win.Update(func() {
+					confirmingQuit = false
+					if err == nil && res.Button == 1 {
 						confirmedQuit = true
 						mygo.App.Quit()
-					})
-				}
+					}
+				})
 			}()
 			return
 		}

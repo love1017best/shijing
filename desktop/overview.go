@@ -382,7 +382,8 @@ func (a *app) logPanel(c *ui.Context) {
 						c.Toast("日志已复制")
 					}
 					if ui.Button(c, "清空").Disabled(len(a.log) == 0 || a.running).Clicked() {
-						a.log, a.logParsed = nil, nil
+						a.log, a.logParsed, a.logParsedFirst, a.logRows, a.logProblems = nil, nil, "", nil, 0
+						rows = nil
 					}
 				})
 				ui.Box(c).Height(1).Background(hairline(t))

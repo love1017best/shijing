@@ -130,20 +130,25 @@ func (a *app) wallCell(c *ui.Context, p string, number int) {
 		cell.Border(1, hairline(t))
 	}
 	if bmp != nil {
-		cell.Cursor(ui.CursorPointer).Children(func() {
-			ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
-		})
+		cell.Cursor(ui.CursorPointer)
 	} else if tried {
 		// 解码过了但读不了：说明白，别留一块空白
-		cell.Center().Children(func() {
-			ui.Text(c, "无法读取").FontSize(11).TextColor(t.TextMuted)
-		})
+		cell.Center()
 	}
-	if a.wallSelecting {
-		ui.Box(c).Absolute().Top(6).Right(6).Size(20, 20).Radius(10).Border(1, ui.RGBA(255, 255, 255, 0.85)).
-			Background(selectedBg(selected, t)).Center().Children(func() {
-			if selected {
-				ui.Icon(c, iconCheckSmall).FontSize(12).TextColor(ui.RGB(255, 255, 255))
+	if bmp != nil || tried || a.wallSelecting {
+		cell.Children(func() {
+			if bmp != nil {
+				ui.Image(c, bmp).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover)
+			} else if tried {
+				ui.Text(c, "无法读取").FontSize(11).TextColor(t.TextMuted)
+			}
+			if a.wallSelecting {
+				ui.Box(c).Absolute().Top(6).Right(6).Size(20, 20).Radius(10).Border(1, ui.RGBA(255, 255, 255, 0.85)).
+					Background(selectedBg(selected, t)).Center().Children(func() {
+					if selected {
+						ui.Icon(c, iconCheckSmall).FontSize(12).TextColor(ui.RGB(255, 255, 255))
+					}
+				})
 			}
 		})
 	}

@@ -404,6 +404,13 @@ final class RemoteSession {
                 throw URLError(.networkConnectionLost)
             } catch APIError.unauthorized(let msg) {
                 fastProbe?.cancel()
+                // 旧 IP 被另一台 Mac 占用时也会返回 401：先尝试按 Bonjour 重定位，确认地址没变再取消配对
+                if await tryRelocate() {
+                    delay = 1
+                    failures = 0
+                    connection = .connecting
+                    continue
+                }
                 markUnpaired(msg)
                 return
             } catch {

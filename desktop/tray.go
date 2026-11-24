@@ -63,7 +63,7 @@ func (a *app) trayItems() []*mygo.MenuItem {
 		}})
 	} else {
 		items = append(items, &mygo.MenuItem{Label: "换一批壁纸", Disabled: !a.canRun(),
-			Click: func(*mygo.MenuItem, *mygo.Window) { a.trayRun() }})
+			Click: func(*mygo.MenuItem, *mygo.Window) { a.update(a.trayRun) }})
 	}
 	items = append(items,
 		&mygo.MenuItem{Label: "打开壁纸文件夹", Disabled: strings.TrimSpace(a.cfg.DestDir) == "",

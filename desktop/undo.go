@@ -43,9 +43,24 @@ func (a *app) stashWall(wall string) (string, error) {
 	return stash, moveFile(wall, stash)
 }
 
-// moveFile 先试 rename，跨卷（壁纸文件夹不在系统盘上）时退回复制 + 删除。
+// moveFile 先试 rename，跨卷（壁纸文件夹不在系统盘上）时退回复制 + 删除；
+// 符号链接跨卷时保留链接本身（os.Readlink + os.Symlink），不解引用拷贝原图。
 func moveFile(from, to string) error {
 	if err := os.Rename(from, to); err == nil {
+		return nil
+	}
+	if lst, err := os.Lstat(from); err == nil && lst.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(from)
+		if err != nil {
+			return err
+		}
+		if err := os.Symlink(target, to); err != nil {
+			return err
+		}
+		if err := os.Remove(from); err != nil {
+			_ = os.Remove(to)
+			return err
+		}
 		return nil
 	}
 	in, err := os.Open(from)
@@ -103,13 +118,13 @@ func (a *app) undoRemove() error {
 		return nil
 	}
 	r := a.undo[len(a.undo)-1]
-	a.undo = a.undo[:len(a.undo)-1]
-	if _, err := os.Stat(r.wall); err == nil {
+	if _, err := os.Lstat(r.wall); err == nil {
 		return softErr("壁纸文件夹里已经有同名文件，没法放回 " + filepath.Base(r.wall))
 	}
 	if err := moveFile(r.stash, r.wall); err != nil {
 		return actionErr("撤销失败", err)
 	}
+	a.undo = a.undo[:len(a.undo)-1]
 	if r.excluded != "" {
 		a.cfg.Excluded = slices.DeleteFunc(a.cfg.Excluded, func(p string) bool { return p == r.excluded })
 	}

@@ -229,6 +229,7 @@ func (rs *remoteServer) handleExcludedAdd(w http.ResponseWriter, r *http.Request
 		a := rs.a
 		added := 0
 		for _, p := range body.Paths {
+			p = core.ExpandUser(strings.TrimSpace(p))
 			if p == "" || slices.Contains(a.cfg.Excluded, p) {
 				continue
 			}

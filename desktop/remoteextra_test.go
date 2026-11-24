@@ -376,3 +376,19 @@ func TestRemotePersistsConfigWithoutViewFrame(t *testing.T) {
 		t.Fatalf("未渲染 view 时配置应已落盘，实际 = %+v", cfg)
 	}
 }
+
+// 手机离线回退提交的 ~/... 路径应展开为绝对路径写入 Excluded，且不与绝对路径重复。
+func TestRemoteExcludedAddExpandsTilde(t *testing.T) {
+	h := newRemoteHarness(t)
+	tok := h.pair(t, "iPhone")
+	abs := core.ExpandUser("~/Pictures/Sample/a.jpg")
+	if code, _ := h.do(t, "POST", "/api/excluded/add", tok, map[string]any{
+		"paths": []string{"~/Pictures/Sample/a.jpg", abs},
+	}); code != 200 {
+		t.Fatalf("POST /api/excluded/add = %d", code)
+	}
+	if len(h.cfg.Excluded) != 1 || h.cfg.Excluded[0] != abs {
+		t.Fatalf("应当展开 ~ 并去重为 %q，实际 = %q", abs, h.cfg.Excluded)
+	}
+}
+

@@ -251,11 +251,13 @@ func generateFilename(src, destDir string, taken map[string]bool) string {
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
 	dest := filepath.Join(destDir, destName(src))
-	for i := 1; taken[dest] || lexists(dest); i++ {
+	// macOS 默认 APFS 及大多数 SMB 卷大小写不敏感，taken 按小写归一化去重，
+	// 避免仅大小写不同的两张图被并发写入同一文件。
+	for i := 1; taken[strings.ToLower(dest)] || lexists(dest); i++ {
 		dest = filepath.Join(destDir, fmt.Sprintf("%s-%s_%d%s", parent, stem, i, ext))
 	}
 	if taken != nil {
-		taken[dest] = true
+		taken[strings.ToLower(dest)] = true
 	}
 	return dest
 }
@@ -454,9 +456,19 @@ func processImages(images []sourceImage, destDir string, o CopyOptions, archiveO
 	return int(nCopied.Load()), int(nFailed.Load()), int(nArchived.Load()), dests, nBytes.Load()
 }
 
+// validArchiveSubdir 检查归档子目录名必须是单个普通子目录名，禁止 "."、".." 或路径分隔符，
+// 防止后续 clearDirectoryContents 清空归档父目录。
+func validArchiveSubdir(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	return !strings.ContainsAny(name, "/\\")
+}
+
 // normalizeCopyOptions 补齐默认值并展开路径，返回目标目录和归档覆盖父路径。
 func normalizeCopyOptions(o CopyOptions) (CopyOptions, string, string) {
 	destDir := ExpandUser(o.Dest)
+	o.ArchiveSubdirName = strings.TrimSpace(o.ArchiveSubdirName)
 	if o.ArchiveSubdirName == "" {
 		o.ArchiveSubdirName = DefaultArchiveSubdir
 	}
@@ -619,6 +631,9 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 	var destDir, archiveOverride string
 	o, destDir, archiveOverride = normalizeCopyOptions(o)
 	res.Dest = destDir
+	if o.ArchiveEnabled && !validArchiveSubdir(o.ArchiveSubdirName) {
+		return res, fmt.Errorf("归档子文件夹名不合法: %q（只能是单个普通目录名）", o.ArchiveSubdirName)
+	}
 
 	filter := buildFilterSet(o.Sources, o.FilterSources, logf)
 

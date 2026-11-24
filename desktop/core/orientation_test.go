@@ -130,3 +130,41 @@ func TestSimulatedFilterNeverSamplesRejected(t *testing.T) {
 		}
 	}
 }
+
+// JPEG 标记前的连续 0xFF 填充字节与大 TIFF（IFD 偏移超过 64KB）都能正确解析 EXIF 方向。
+func TestOrientationJPEGFillAndLargeTIFF(t *testing.T) {
+	root := t.TempDir()
+
+	// 1. JPEG 标记前插入多个 0xFF 填充字节，且 EXIF 方向为 6（右旋 90°）
+	jpgPath := filepath.Join(root, "fill.jpg")
+	writeJPEGOrient(t, jpgPath, 200, 100, 6, binary.BigEndian)
+	raw, err := os.ReadFile(jpgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 在 SOI (FF D8) 之后插入 3 个额外的 0xFF 填充字节
+	padded := make([]byte, 0, len(raw)+3)
+	padded = append(padded, raw[:2]...)
+	padded = append(padded, 0xFF, 0xFF, 0xFF)
+	padded = append(padded, raw[2:]...)
+	if got := exifOrientation(bytes.NewReader(padded)); got != 6 {
+		t.Fatalf("带 0xFF 填充字节的 JPEG 方向 = %d, want 6", got)
+	}
+
+	// 2. 大 TIFF：IFD0 位于文件 70KB 处（超过原先 64KB 读取上限）
+	ifdOff := uint32(70 * 1024)
+	buf := make([]byte, ifdOff+2+12+4)
+	copy(buf[:4], []byte{'I', 'I', 42, 0})
+	binary.LittleEndian.PutUint32(buf[4:], ifdOff)
+	// IFD0: 1 条记录，tag 0x0112 (Orientation), type 3 (SHORT), count 1, value 8
+	binary.LittleEndian.PutUint16(buf[ifdOff:], 1)
+	ent := buf[ifdOff+2:]
+	binary.LittleEndian.PutUint16(ent[0:], 0x0112)
+	binary.LittleEndian.PutUint16(ent[2:], 3)
+	binary.LittleEndian.PutUint32(ent[4:], 1)
+	binary.LittleEndian.PutUint16(ent[8:], 8)
+	if got := exifOrientation(bytes.NewReader(buf)); got != 8 {
+		t.Fatalf("大 TIFF（IFD 偏移 >64KB）方向 = %d, want 8", got)
+	}
+}
+

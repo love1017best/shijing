@@ -67,6 +67,8 @@ func (a *app) checkMounts() {
 					if a.mountSeq[key] != seq {
 						return
 					}
+					// 推进 seq，确保 3 秒边界同时就绪的超时分支不会把已就绪状态覆写为 mountSlow
+					a.mountSeq[key]++
 					if ok {
 						a.mounts[key] = mountOK
 					} else {

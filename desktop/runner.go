@@ -20,20 +20,22 @@ func (a *app) canRun() bool {
 
 // requestRun 是「换一批壁纸」按钮和 ⌘R：会删除原图时先确认，再开始运行。
 func (a *app) requestRun() {
-	if !a.canRun() {
+	if !a.canRun() || a.confirmingRun {
 		return
 	}
 	if !a.cfg.DeleteDuringFilter || len(a.cfg.FilterAndSampleDirs) == 0 || a.skipConfirm || a.confirmDelete == nil {
 		a.startRun()
 		return
 	}
+	a.confirmingRun = true
 	detail := a.deleteNotice()
 	go func() {
 		ok, dontAsk := a.confirmDelete(detail)
-		if !ok {
-			return
-		}
 		a.update(func() {
+			a.confirmingRun = false
+			if !ok {
+				return
+			}
 			if dontAsk {
 				a.skipConfirm = true
 				a.saveUIState()

@@ -164,7 +164,8 @@ gh release create "v$VERSION" "$UNI" "$ARM" --verify-tag --title "拾景 v$VERSI
 printf '上传发布包：%.1f 秒\n' $((EPOCHREALTIME - t0))
 
 # 装到本机（和连着的手机）：用的就是刚发布的包 / 同一个 tag
+# 复用主工作区的 iOS 编译缓存，日志写到临时目录，避免随 worktree 清理丢失
 t0=$EPOCHREALTIME
-scripts/install-local.sh --no-build
+SHIJING_DERIVED_DIR="$ROOT/ios/build" SHIJING_LOG_DIR="${TMPDIR:-/tmp}" scripts/install-local.sh --no-build
 printf '装到本机和手机：%.1f 秒\n' $((EPOCHREALTIME - t0))
 printf '发布总耗时：%.1f 秒\n' $((EPOCHREALTIME - TOTAL))

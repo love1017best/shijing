@@ -154,7 +154,7 @@ extension RemoteSession {
             }
             showNotice("已存到相册")
         } catch APIError.unauthorized(let msg) {
-            connection = .unpaired(msg)
+            markUnpaired(msg)
         } catch let e as APIError {
             actionError = e.localizedDescription
         } catch let e as URLError {
@@ -213,7 +213,7 @@ extension RemoteSession {
                 let names = list.items.map(\.name)
                 let macID = self.macID.uuidString
                 await Task.detached(priority: .utility) { ImageStore.keepOnly(macID: macID, names: names) }.value
-                if changed, !self.paused {
+                if changed, !self.paused, self.connection == .live {
                     ImageStore.shared.prefetch(self) // 这一批存到磁盘，离线也能看
                 }
                 return true

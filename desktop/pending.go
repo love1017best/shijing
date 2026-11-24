@@ -78,7 +78,7 @@ func (a *app) queueDeleteOnly(wall, src string) {
 // maybeProcessPending 尝试执行队列：只在图库目录全都挂上时动手（对着断掉/卡住的卷逐个 stat 会一直卡着），
 // 每次执行前重新校验文件还在、大小和修改时间没变。由每分钟的定时器和挂载状态变化触发。
 func (a *app) maybeProcessPending() {
-	if a.pendingBusy || a.running || len(a.pending) == 0 || a.unmountedCount() > 0 {
+	if a.pendingBusy || a.running || len(a.pending) == 0 || a.unmountedCount() > 0 || a.checkingMounts() {
 		return
 	}
 	a.pendingBusy = true
