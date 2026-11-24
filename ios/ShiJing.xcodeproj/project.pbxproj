@@ -13,6 +13,7 @@
 		099E53CA17FB750EED57745A /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CD57E5BA5441C8D0006947 /* DashboardView.swift */; };
 		0F54659699EBBC3BCED13F87 /* RecordsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF6C987C6A493F6426A7BFFC /* RecordsPage.swift */; };
 		11969FEE6BA2E4457ADE6793 /* SettingsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27206D3CADBD5E7A822D7E7C /* SettingsComponents.swift */; };
+		136227FD6B20306E01027147 /* CoreLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC780C0BAF0365A4A7BCE65 /* CoreLogic.swift */; };
 		1D97AA903EBEF8A9BE12A696 /* WallPreviewComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38AF1D43919240891880241F /* WallPreviewComponents.swift */; };
 		21220E16DFE4ED934EEDE0FB /* Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */; };
 		297D4087083FCA357AF3B09A /* SharedKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EDDF3D91E21A5E5D546ED41 /* SharedKeychain.swift */; };
@@ -31,6 +32,7 @@
 		69B1EC2E2F6D67EBB58E6001 /* WidgetReload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 442B2E2EDAFCEC723F7A4D25 /* WidgetReload.swift */; };
 		6E3D7151A168E47303C15F31 /* RemoteSessionDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B88EDB095551E9EE240288D1 /* RemoteSessionDemo.swift */; };
 		7012C29BB4CC01CBD3B368FA /* WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22FA460C376FBA22B55E217F /* WidgetViews.swift */; };
+		82A8E7782588453DF10F5E5F /* RemoteConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F77506E915A3844231E84A /* RemoteConnection.swift */; };
 		833A421C3683C30CFFAE31B1 /* RunNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB4078E79FF8E4B33C9CA38 /* RunNotifier.swift */; };
 		8FEDEEDC08E431FE0539502D /* MacRelocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C083A13F84FAF5ED42216ED9 /* MacRelocator.swift */; };
 		94215927670239EE363E48CE /* ShiJingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04551D48684EF104173433F5 /* ShiJingApp.swift */; };
@@ -51,6 +53,7 @@
 		D7E126223CA530FF96744B6D /* ImageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */; };
 		DA6264799C3CF66C5F9F9994 /* MacStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35DC7F350FCE1CDCB2B87F36 /* MacStore.swift */; };
 		DB08FA2ACDF09111D1EFCAA2 /* RemoteSession+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40708D902AF150149085937 /* RemoteSession+Actions.swift */; };
+		DB0BA3D2BFD8ECE76A53EA36 /* CoreLogic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DC780C0BAF0365A4A7BCE65 /* CoreLogic.swift */; };
 		DCBBD1C38B5665384A54DF8F /* SigningExpiry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08A32667B20E7EAE1496A917 /* SigningExpiry.swift */; };
 		E3961E29F87DF6C22878B7BB /* OfflineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37DE3185BEF88948B31C589F /* OfflineStore.swift */; };
 		E48D8E1F726C81B1CF91C390 /* OfflineMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2096EFEA0EAB82559959DE56 /* OfflineMode.swift */; };
@@ -91,6 +94,7 @@
 		08A32667B20E7EAE1496A917 /* SigningExpiry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningExpiry.swift; sourceTree = "<group>"; };
 		0DBEDCD43C90E27D6891E91E /* ShiJingWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShiJingWidget.entitlements; sourceTree = "<group>"; };
 		15FB9144ACC689795E105A27 /* MacListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacListView.swift; sourceTree = "<group>"; };
+		16F77506E915A3844231E84A /* RemoteConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnection.swift; sourceTree = "<group>"; };
 		1A75E638475F79200CF9DB6D /* QRScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScan.swift; sourceTree = "<group>"; };
 		1D3985EA530FD9B5DAE6CBAB /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
 		1F4072400DAF280B70CD407C /* ImageStore+Disk.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ImageStore+Disk.swift"; sourceTree = "<group>"; };
@@ -118,6 +122,7 @@
 		83240B9AEFA6986C25B369E4 /* ImageStore+Prefetch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ImageStore+Prefetch.swift"; sourceTree = "<group>"; };
 		86B975A8ED3B736EB52565B8 /* WallPreviewChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallPreviewChrome.swift; sourceTree = "<group>"; };
 		910C0E6B6E878D4E095EBB5F /* RemoteSession+Queue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RemoteSession+Queue.swift"; sourceTree = "<group>"; };
+		9DC780C0BAF0365A4A7BCE65 /* CoreLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreLogic.swift; sourceTree = "<group>"; };
 		A40708D902AF150149085937 /* RemoteSession+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RemoteSession+Actions.swift"; sourceTree = "<group>"; };
 		A4D8F0F2DC80B91BB7DE1D80 /* ImageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageStore.swift; sourceTree = "<group>"; };
 		A5CD57E5BA5441C8D0006947 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
@@ -153,6 +158,7 @@
 			isa = PBXGroup;
 			children = (
 				6B88ED75230843E7FF61E79A /* APIClient.swift */,
+				9DC780C0BAF0365A4A7BCE65 /* CoreLogic.swift */,
 				B5FA3660DB88F64E7D64A4B9 /* Intents.swift */,
 				C083A13F84FAF5ED42216ED9 /* MacRelocator.swift */,
 				BCA83EAF792D5624EEA3CE11 /* Models.swift */,
@@ -205,6 +211,7 @@
 				1A75E638475F79200CF9DB6D /* QRScan.swift */,
 				EF4AF9CF2058B681076FAE56 /* QueuedActionsView.swift */,
 				AF6C987C6A493F6426A7BFFC /* RecordsPage.swift */,
+				16F77506E915A3844231E84A /* RemoteConnection.swift */,
 				57D7F2A21A98AC8FD6910260 /* RemoteSession.swift */,
 				A40708D902AF150149085937 /* RemoteSession+Actions.swift */,
 				910C0E6B6E878D4E095EBB5F /* RemoteSession+Queue.swift */,
@@ -322,6 +329,7 @@
 				3E45D53F7AFBDF56529446CF /* AppShortcuts.swift in Sources */,
 				D256E21EA10486F549DE3869 /* AppSupport.swift in Sources */,
 				CB1F3EE7F92F5301A9C24BD6 /* ConnectionUI.swift in Sources */,
+				DB0BA3D2BFD8ECE76A53EA36 /* CoreLogic.swift in Sources */,
 				099E53CA17FB750EED57745A /* DashboardView.swift in Sources */,
 				21220E16DFE4ED934EEDE0FB /* Discovery.swift in Sources */,
 				F3413348AA26794612633F8A /* Glass.swift in Sources */,
@@ -341,6 +349,7 @@
 				B3974E68230A70F75046BBA6 /* QRScan.swift in Sources */,
 				99B8B378D455A9AF7560A572 /* QueuedActionsView.swift in Sources */,
 				0F54659699EBBC3BCED13F87 /* RecordsPage.swift in Sources */,
+				82A8E7782588453DF10F5E5F /* RemoteConnection.swift in Sources */,
 				DB08FA2ACDF09111D1EFCAA2 /* RemoteSession+Actions.swift in Sources */,
 				48728754CEFE662B227D566E /* RemoteSession+Queue.swift in Sources */,
 				D6C6708F80AFC875451C3BDD /* RemoteSession.swift in Sources */,
@@ -366,6 +375,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				36635EB138FF8A4B6698EC3A /* APIClient.swift in Sources */,
+				136227FD6B20306E01027147 /* CoreLogic.swift in Sources */,
 				6360079382418D5385977F25 /* Intents.swift in Sources */,
 				8FEDEEDC08E431FE0539502D /* MacRelocator.swift in Sources */,
 				ED3B0A4451922C1D686A69E1 /* Models.swift in Sources */,

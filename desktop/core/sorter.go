@@ -53,12 +53,20 @@ type thresholds struct {
 
 const verdictRules = 3
 
+type sampleDirCache struct {
+	Sig      string   `json:"sig"`
+	Rejected []string `json:"rejected,omitempty"`
+}
+
 type sorterState struct {
 	Thresholds *thresholds        `json:"thresholds,omitempty"`
 	Dirs       map[string]float64 `json:"dirs,omitempty"`
 	// Rejected 是各目录里不合格、但还留在图库里的图（模拟运行、删除失败）：目录没变化被跳过时，
 	// 靠它仍然知道里面哪些图不能选（SortResult.Remaining → 采样时排除）。
 	Rejected map[string][]string `json:"rejected,omitempty"`
+	// SampleCache 是「仅采样目录」里每个具体目录的图片签名与不合格文件名列表，
+	// 目录内图片未增删改时跳过重复打开文件头检查分辨率。
+	SampleCache map[string]sampleDirCache `json:"sample_cache,omitempty"`
 }
 
 func loadState(path string) sorterState {
@@ -180,7 +188,7 @@ func SortImages(o SortOptions, rep Reporter) SortResult {
 	th := thresholds{o.MinWidth, o.MinHeight, verdictRules}
 	stateDirty := false
 	if o.Incremental && (state.Thresholds == nil || *state.Thresholds != th) {
-		if len(state.Dirs) > 0 || len(state.Rejected) > 0 {
+		if len(state.Dirs) > 0 || len(state.Rejected) > 0 || len(state.SampleCache) > 0 {
 			logf("🔄 筛选阈值或判断规则与上次不同，增量缓存已失效，本次将全量重新检查")
 			stateDirty = true
 		}

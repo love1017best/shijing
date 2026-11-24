@@ -58,6 +58,15 @@ func ValidateConfig(cfg Config, logf Logf) {
 	}
 }
 
+// TryLockRun 对运行锁文件加非阻塞排他锁；lockPath 为空时直接返回空操作解锁函数。
+// 另一个拾景进程（桌面版或命令行）持有锁时返回 ErrBusy。
+func TryLockRun(lockPath string) (func(), error) {
+	if lockPath == "" {
+		return func() {}, nil
+	}
+	return lockRun(lockPath)
+}
+
 // RunPipeline 对应 run.run_pipeline：筛选 → 采样复制 → 刷新系统壁纸。
 // r 为 nil 时使用随机种子；测试可以传入固定种子。出错时返回已完成部分的结果。
 func RunPipeline(cfg Config, paths Paths, rep Reporter, r *rand.Rand) (Summary, error) {
@@ -65,13 +74,11 @@ func RunPipeline(cfg Config, paths Paths, rep Reporter, r *rand.Rand) (Summary, 
 	logf := rep.logf
 	var sum Summary
 
-	if paths.Lock != "" {
-		unlock, err := lockRun(paths.Lock)
-		if err != nil {
-			return sum, err
-		}
-		defer unlock()
+	unlock, err := TryLockRun(paths.Lock)
+	if err != nil {
+		return sum, err
 	}
+	defer unlock()
 
 	cfg = cfg.expanded()
 	filterDirs := cfg.FilterAndSampleDirs
@@ -96,7 +103,6 @@ func RunPipeline(cfg Config, paths Paths, rep Reporter, r *rand.Rand) (Summary, 
 	}
 
 	logf("📸 开始采样复制：%d 个目录", len(all))
-	var err error
 	sum.Copy, err = CopySamples(CopyOptions{
 		Sources:            all,
 		Dest:               cfg.DestDir,
@@ -113,6 +119,8 @@ func RunPipeline(cfg Config, paths Paths, rep Reporter, r *rand.Rand) (Summary, 
 		ArchiveNFSRoot:     cfg.ArchiveNFSRoot,
 		SelectionFile:      paths.Selection,
 		HistoryFile:        paths.History,
+		StateFile:          paths.StateFile,
+		Incremental:        cfg.Incremental,
 		PreferUnseen:       cfg.PreferUnseen,
 		Excluded:           cfg.Excluded,
 		Rejected:           sum.Sort.Remaining,

@@ -23,10 +23,12 @@ extension ImageStore {
             let prefixes = ImageKind.allCases.map { $0.cachePrefix + "-" }
             let wanted = Set(names.map { safeName($0) })
             let items = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-            for u in items {
-                let f = u.lastPathComponent
-                if let prefix = prefixes.first(where: { f.hasPrefix($0) }),
-                   wanted.contains(String(f.dropFirst(prefix.count))) { continue }
+            let stale = Set(ImageCachePruner.staleFileNames(
+                in: items.map(\.lastPathComponent),
+                prefixes: prefixes,
+                keepSafeNames: wanted
+            ))
+            for u in items where stale.contains(u.lastPathComponent) {
                 try? fm.removeItem(at: u)
             }
         }

@@ -401,32 +401,25 @@ enum WidgetCache {
         guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
         let now = Date()
         let activeStateName = activeKey.map { stateFile($0).lastPathComponent }
-        // 按像素档位分别记配额：不同尺寸的小组件同时刷新时互不驱逐
-        var byPx: [Int: [(URL, Date)]] = [:]
+        var byName: [String: URL] = [:]
+        var entries: [WidgetCachePruner.Entry] = []
         for f in files {
             let name = f.lastPathComponent
             let mtime = (try? f.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            if name.hasPrefix("state-"), name.hasSuffix(".json") {
-                if online, name != activeStateName, now.timeIntervalSince(mtime) > 7 * 86400 {
-                    try? fm.removeItem(at: f)
-                }
-                continue
-            }
-            guard name.hasPrefix("img-") else { continue }
-            // 文件名末尾是像素档：早先版本留下的档位（比如 1600）现在的 `pixels()` 不会再算出来，留着只会白占地方
-            let px = Int(f.deletingPathExtension().lastPathComponent.split(separator: "-").last ?? "") ?? 0
-            if px < minPx || px > maxPx {
-                try? fm.removeItem(at: f)
-                continue
-            }
-            if online, now.timeIntervalSince(mtime) > 7 * 86400 {
-                try? fm.removeItem(at: f)
-                continue
-            }
-            byPx[px, default: []].append((f, mtime))
+            byName[name] = f
+            entries.append(WidgetCachePruner.Entry(name: name, mtime: mtime))
         }
-        for group in byPx.values {
-            for (f, _) in group.sorted(by: { $0.1 > $1.1 }).dropFirst(max(0, keep)) {
+        let toRemove = WidgetCachePruner.namesToRemove(
+            entries: entries,
+            keep: keep,
+            activeStateName: activeStateName,
+            online: online,
+            now: now,
+            minPx: minPx,
+            maxPx: maxPx
+        )
+        for name in toRemove {
+            if let f = byName[name] {
                 try? fm.removeItem(at: f)
             }
         }

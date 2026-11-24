@@ -1001,4 +1001,162 @@ func TestRelSymlinkAcrossSymlinkedDir(t *testing.T) {
 	}
 }
 
+// 「仅采样目录」启用增量缓存后，目录未变动时复用分辨率结果；文件变动或阈值变化时自动失效。
+func TestCopySamplesFilterCache(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "sample-only")
+	dest := filepath.Join(root, "dest")
+	stateFile := filepath.Join(root, "state.json")
+	good := filepath.Join(src, "album", "good.png")
+	bad := filepath.Join(src, "album", "bad.png")
+	writePNG(t, good, 80, 40)
+	writePNG(t, bad, 20, 40) // 竖屏不合格
+
+	var logs []string
+	rep := Reporter{Log: func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }}
+	opts := CopyOptions{
+		Sources:       []string{src},
+		FilterSources: []string{src},
+		Dest:          dest,
+		Mode:          "copy",
+		Num:           5,
+		MinWidth:      tw,
+		MinHeight:     th,
+		StateFile:     stateFile,
+		Incremental:   true,
+	}
+
+	// 第一次：冷缓存，检查并写入 SampleCache
+	res, err := CopySamples(opts, rep, rand.New(rand.NewPCG(1, 2)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Candidates != 1 || res.Copied != 1 {
+		t.Fatalf("首次应仅选出 1 张合格图，实际 candidates=%d copied=%d", res.Candidates, res.Copied)
+	}
+	st := loadState(stateFile)
+	if len(st.SampleCache) != 1 {
+		t.Fatalf("期望写入 1 条 SampleCache，实际 %d", len(st.SampleCache))
+	}
+
+	// 第二次：目录未变，命中缓存
+	logs = nil
+	res, err = CopySamples(opts, rep, rand.New(rand.NewPCG(1, 2)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Candidates != 1 {
+		t.Fatalf("缓存命中时仍应过滤掉不合格图，实际 candidates=%d", res.Candidates)
+	}
+	if !slices.ContainsFunc(logs, func(s string) bool { return strings.Contains(s, "仅采样目录缓存命中 1/1") }) {
+		t.Fatalf("期望日志包含缓存命中提示，实际日志: %v", logs)
+	}
+
+	// 修改 bad.png 为合格横屏图，签名变化后应失效并重新检查
+	writePNG(t, bad, 100, 40)
+	future := time.Now().Add(2 * time.Second)
+	_ = os.Chtimes(bad, future, future)
+	logs = nil
+	res, err = CopySamples(opts, rep, rand.New(rand.NewPCG(1, 2)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Candidates != 2 {
+		t.Fatalf("文件更新后缓存应失效并识别出 2 张合格图，实际 candidates=%d", res.Candidates)
+	}
+	if slices.ContainsFunc(logs, func(s string) bool { return strings.Contains(s, "仅采样目录缓存命中") }) {
+		t.Fatalf("文件更新后不应命中旧缓存，实际日志: %v", logs)
+	}
+
+	// 提高阈值，缓存整体失效
+	opts.MinWidth = 90
+	logs = nil
+	res, err = CopySamples(opts, rep, rand.New(rand.NewPCG(1, 2)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Candidates != 1 {
+		t.Fatalf("阈值提高到 90 后应只剩 1 张合格图，实际 candidates=%d", res.Candidates)
+	}
+}
+
+// 换一批时，新旧两批重合且内容未变的壁纸应原地保留，原图更新后则重新复制。
+func TestCopySamplesReuseExisting(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "lib")
+	dest := filepath.Join(root, "dest")
+	selFile := filepath.Join(root, "selection.json")
+	a := filepath.Join(src, "set", "a.png")
+	b := filepath.Join(src, "set", "b.png")
+	writePNG(t, a, 80, 40)
+	writePNG(t, b, 80, 40)
+
+	var logs []string
+	rep := Reporter{Log: func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }}
+	opts := CopyOptions{
+		Sources:       []string{src},
+		Dest:          dest,
+		Mode:          "copy",
+		Num:           2,
+		SelectionFile: selFile,
+	}
+
+	// 第一批：全部复制
+	res, err := CopySamples(opts, rep, rand.New(rand.NewPCG(1, 2)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Copied != 2 {
+		t.Fatalf("首次应复制 2 张，实际 %d", res.Copied)
+	}
+	dstA := filepath.Join(dest, "set-a.png")
+	dstB := filepath.Join(dest, "set-b.png")
+	infoA1, err := os.Stat(dstA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	infoB1, err := os.Stat(dstB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 第二批：同样选中 a、b，内容未变 -> 全部原地复用，inode 不变
+	logs = nil
+	res, err = CopySamples(opts, rep, rand.New(rand.NewPCG(3, 4)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Copied != 2 {
+		t.Fatalf("复用后成功数仍应为 2，实际 %d", res.Copied)
+	}
+	infoA2, _ := os.Stat(dstA)
+	infoB2, _ := os.Stat(dstB)
+	if !os.SameFile(infoA1, infoA2) || !os.SameFile(infoB1, infoB2) {
+		t.Fatalf("未变动的重合壁纸应原地保留，不应删了重拷")
+	}
+	if !slices.ContainsFunc(logs, func(s string) bool { return strings.Contains(s, "原地保留 2 张重合壁纸") }) {
+		t.Fatalf("期望日志提示原地保留，实际日志: %v", logs)
+	}
+
+	// 修改原图 b 的内容与 mtime -> a 复用，b 重新复制
+	writePNG(t, b, 120, 60)
+	future := time.Now().Add(3 * time.Second)
+	_ = os.Chtimes(b, future, future)
+	res, err = CopySamples(opts, rep, rand.New(rand.NewPCG(5, 6)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Copied != 2 {
+		t.Fatalf("部分复用后成功数应为 2，实际 %d", res.Copied)
+	}
+	infoA3, _ := os.Stat(dstA)
+	infoB3, _ := os.Stat(dstB)
+	if !os.SameFile(infoA1, infoA3) {
+		t.Fatalf("未变动的 a 应继续原地保留")
+	}
+	if os.SameFile(infoB1, infoB3) || infoB3.Size() == infoB1.Size() {
+		t.Fatalf("已修改的 b 应重新复制而不是继续复用旧文件")
+	}
+}
+
 

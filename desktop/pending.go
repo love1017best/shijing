@@ -91,7 +91,15 @@ func (a *app) maybeProcessPending() {
 		defer a.pendingMu.Unlock()
 		return a.pendingCanceled[path]
 	}
+	lockPath := a.paths.Lock
 	go func() {
+		unlock, err := core.TryLockRun(lockPath)
+		if err != nil {
+			// 另一个拾景进程或任务持有运行锁时跳过本轮，等下次定时器再试
+			a.update(func() { a.applyPending(core.PendingResult{}) })
+			return
+		}
+		defer unlock()
 		res := core.RunPendingWithCancel(list, nil, isCanceled) // 已经确认都挂上了，不用再按目录判断
 		a.update(func() { a.applyPending(res) })
 	}()

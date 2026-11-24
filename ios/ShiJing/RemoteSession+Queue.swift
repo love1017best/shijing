@@ -8,18 +8,7 @@ extension RemoteSession {
     /// 离线时点的一张整理操作：「移出」「不再选」连上后自动处理；
     /// 「删除原图」不可撤销，连上后还要用户再确认一次才真的删。
     /// `wall` / `index` 用来在取消时把那张放回列表原来的位置（旧版本记下的没有，只能取消、放不回去）。
-    struct OfflineAction: Codable, Identifiable, Equatable {
-        enum Kind: String, Codable { case remove, exclude, delete }
-        var id = UUID()
-        var kind: Kind
-        var name: String
-        var source: String?
-        var at = Date()
-        var wall: Wallpaper?
-        var index: Int?
-        /// 记下时属于哪一批（缩略图 / 大图预览按这个 rev 找缓存；旧队列没有，退回当前批次）
-        var rev: String?
-    }
+    typealias OfflineAction = OfflineQueueAction
 
     var offline: Bool { connection != .live }
 
@@ -71,13 +60,8 @@ extension RemoteSession {
     }
 
     func enqueue(_ kind: OfflineAction.Kind, _ w: Wallpaper) {
-        guard !queued.contains(where: { $0.name == w.name && $0.kind == kind }) else { return }
-        let index = walls.firstIndex { $0.name == w.name }
-        queued.append(OfflineAction(kind: kind, name: w.name, source: w.source, wall: w,
-                                    index: index, rev: wallsRev))
+        guard OfflineQueueLogic.enqueue(kind, wall: w, walls: &walls, queued: &queued, rev: wallsRev) else { return }
         saveQueue()
-        // 本地先去掉，界面跟着变；连上电脑后再真的移出 / 删除
-        walls.removeAll { $0.name == w.name }
         remember(wallsChanged: true)
         switch kind {
         case .exclude: showNotice("已记录，连接电脑后移出并不再选它。")
@@ -90,20 +74,8 @@ extension RemoteSession {
     @discardableResult
     func enqueueBatch(_ kind: OfflineAction.Kind, _ items: [Wallpaper]) -> Int {
         guard !items.isEmpty else { return 0 }
-        var existing = Set(queued.filter { $0.kind == kind }.map(\.name))
-        let indexByName = Dictionary(walls.enumerated().map { ($0.element.name, $0.offset) },
-                                     uniquingKeysWith: { first, _ in first })
-        var removed = Set<String>()
-        var added = false
-        for w in items {
-            removed.insert(w.name)
-            guard existing.insert(w.name).inserted else { continue }
-            queued.append(OfflineAction(kind: kind, name: w.name, source: w.source, wall: w,
-                                        index: indexByName[w.name], rev: wallsRev))
-            added = true
-        }
+        let added = OfflineQueueLogic.enqueueBatch(kind, items: items, walls: &walls, queued: &queued, rev: wallsRev)
         if added { saveQueue() }
-        walls.removeAll { removed.contains($0.name) }
         remember(wallsChanged: true)
         return items.count
     }
@@ -111,35 +83,22 @@ extension RemoteSession {
     /// 取消一条还没补上的离线操作，那张放回列表原来的位置。
     /// 「不再选」「删除原图」在电脑上也会把那张从壁纸文件夹移出，所以离线时三种都先从列表里去掉了，取消后都要放回去。
     func cancelQueued(_ a: OfflineAction, announce: Bool = true) {
-        guard queued.contains(where: { $0.id == a.id }) else { return }
-        queued.removeAll { $0.id == a.id }
+        let res = OfflineQueueLogic.cancel(id: a.id, walls: &walls, queued: &queued)
+        guard res.removed != nil else { return }
         saveQueue()
-        let back = restore(a)
         remember(wallsChanged: true)
         if announce {
-            showNotice(back ? "已取消，放回列表：\(a.name)" : "已取消：\(a.name)")
+            showNotice(res.restored ? "已取消，放回列表：\(a.name)" : "已取消：\(a.name)")
         }
     }
 
     /// 全部取消：记下的操作都撤回，「移出 / 不再选」的那张放回列表。
     func cancelAllQueued() {
-        guard !queued.isEmpty else { return }
-        let list = queued
-        queued = []
+        let count = OfflineQueueLogic.cancelAll(walls: &walls, queued: &queued)
+        guard count > 0 else { return }
         saveQueue()
-        // 按原来的位置从小到大放回去，后面的下标才对得上
-        for a in list.sorted(by: { ($0.index ?? 0) < ($1.index ?? 0) }) {
-            restore(a)
-        }
         remember(wallsChanged: true)
-        showNotice("已取消 \(list.count) 项离线操作")
-    }
-
-    @discardableResult
-    private func restore(_ a: OfflineAction) -> Bool {
-        guard let w = a.wall, !walls.contains(where: { $0.name == w.name }) else { return false }
-        walls.insert(w, at: min(max(a.index ?? walls.count, 0), walls.count))
-        return true
+        showNotice("已取消 \(count) 项离线操作")
     }
 
     /// 连上以后把离线时记下的「移出」「不再选」补上。

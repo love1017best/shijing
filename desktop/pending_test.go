@@ -234,4 +234,39 @@ func TestApplyPendingGoneAndStaleToast(t *testing.T) {
 	}
 }
 
+// 另一个进程（如命令行）持有 run.lock 时，待删队列跳过本轮、保留文件与队列，释放锁后正常执行。
+func TestPendingSkipsWhenRunLocked(t *testing.T) {
+	f, tt := newFakeApp(t)
+	srcDir := t.TempDir()
+	src := filepath.Join(srcDir, "a.jpg")
+	if err := os.WriteFile(src, []byte("img"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.cfg.FilterAndSampleDirs = []string{srcDir}
+	f.mounts[mountKey(srcDir)] = mountOK
+	f.pending = []core.PendingDelete{{Path: src, Wall: "a.jpg", AddedAt: time.Now()}}
+	f.paths.Lock = filepath.Join(t.TempDir(), "run.lock")
+
+	unlock, err := core.TryLockRun(f.paths.Lock)
+	if err != nil {
+		t.Fatalf("预占锁失败: %v", err)
+	}
+
+	f.maybeProcessPending()
+	f.settle(t, tt, func() bool { return !f.pendingBusy })
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("持有运行锁期间不应删除原图: %v", err)
+	}
+	if len(f.pending) != 1 {
+		t.Fatalf("跳过本轮后待删队列应保留，实际 %d 条", len(f.pending))
+	}
+
+	unlock()
+	f.maybeProcessPending()
+	f.settle(t, tt, func() bool { return !f.pendingBusy && len(f.pending) == 0 })
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("释放锁后应完成删除，stat=%v", err)
+	}
+}
+
 

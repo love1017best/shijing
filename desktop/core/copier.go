@@ -1,16 +1,17 @@
 package core
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"hash/fnv"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
-	"sync/atomic"
 )
 
 // ErrNoImages 在扫描不到任何符合条件的图片时返回，此时不会改动目标目录。
@@ -33,10 +34,12 @@ type CopyOptions struct {
 	ArchiveSMBRoot     string
 	ArchiveNFSRoot     string
 
-	// SelectionFile 记录这一轮选中的原图路径；下一轮据此算有多少张和上一轮重复。为空则不记录。
+	// SelectionFile 记录这一轮选中的原图路径；下一轮据此算有多少张和上一轮重复，并复用未变化的重合文件。为空则不记录。
 	SelectionFile string
 	// HistoryFile 记录这一轮轮换里换上过的原图；PreferUnseen 时优先选不在里面的。
 	HistoryFile  string
+	StateFile    string // 增量状态文件，用于缓存「仅采样目录」的分辨率检查结果；为空则不缓存
+	Incremental  bool   // 为 true 且 StateFile 非空时，对未变动的「仅采样目录」复用缓存的分辨率检查结果
 	PreferUnseen bool
 	Excluded     []string // 不参与采样的原图（「不再选」）
 	Rejected     []string // 筛选查出不合格、但这次没删的原图（SortResult.Remaining），同样不参与采样
@@ -146,9 +149,32 @@ func (p imagePool) sample(n int, balanceFirst bool, r *rand.Rand) []sourceImage 
 	return sel
 }
 
+// directImagesSig 计算单个目录内图片列表的轻量签名（文件名、大小、修改时间）。
+// 任何图片增删、改名或内容变化都会改变签名；任一文件 stat 失败则返回空字符串。
+func directImagesSig(imgs []sourceImage) string {
+	h := fnv.New64a()
+	var buf [16]byte
+	for _, img := range imgs {
+		info, err := os.Lstat(img.path)
+		if err != nil {
+			return ""
+		}
+		h.Write([]byte(filepath.Base(img.path)))
+		h.Write([]byte{0})
+		binary.LittleEndian.PutUint64(buf[:8], uint64(info.Size()))
+		binary.LittleEndian.PutUint64(buf[8:], uint64(info.ModTime().UnixNano()))
+		h.Write(buf[:])
+	}
+	return strconv.FormatUint(h.Sum64(), 16)
+}
+
 // scanImages 一次遍历同时得到扁平列表和按叶子文件夹（没有子目录的文件夹）分组的结果。
 // filter 里的源目录才做分辨率检查：先遍历拿到全部候选图片，再并发检查分辨率，最后按遍历顺序组装。
 func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir func(n int), stop func() bool) imagePool {
+	return scanImagesCached(sources, filter, minW, minH, "", false, onDir, stop, nil)
+}
+
+func scanImagesCached(sources []string, filter map[string]bool, minW, minH int, stateFile string, incremental bool, onDir func(n int), stop func() bool, logf Logf) imagePool {
 	stopped := func() bool { return stop != nil && stop() }
 	type dirScan struct {
 		root   string
@@ -157,7 +183,7 @@ func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir 
 		check  bool
 	}
 	var scanned []dirScan
-	var toCheck []string
+	var checkIdxs []int
 	seen := 0
 	for _, src := range sources {
 		if stopped() {
@@ -176,12 +202,12 @@ func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir 
 			for _, f := range files {
 				if p := filepath.Join(root, f); IsValidImage(p) {
 					d.imgs = append(d.imgs, sourceImage{src, p})
-					if needCheck {
-						toCheck = append(toCheck, p)
-					}
 				}
 			}
 			if len(d.imgs) > 0 {
+				if needCheck {
+					checkIdxs = append(checkIdxs, len(scanned))
+				}
 				scanned = append(scanned, d)
 			}
 		})
@@ -189,6 +215,64 @@ func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir 
 	if stopped() {
 		return imagePool{}
 	}
+
+	useCache := incremental && stateFile != "" && len(checkIdxs) > 0
+	var state sorterState
+	stateDirty := false
+	sigs := make([]string, len(scanned))
+	cachedHit := make([]bool, len(scanned))
+	cachedRejected := make([]map[string]bool, len(scanned))
+
+	if useCache {
+		state = loadState(stateFile)
+		th := thresholds{MinWidth: minW, MinHeight: minH, Rules: verdictRules}
+		if state.Thresholds == nil || *state.Thresholds != th {
+			if len(state.Dirs) > 0 || len(state.Rejected) > 0 || len(state.SampleCache) > 0 {
+				stateDirty = true
+			}
+			state = sorterState{Thresholds: &th}
+		}
+		parallelForStop(len(checkIdxs), metaWorkers, stop, func(n int) {
+			idx := checkIdxs[n]
+			sigs[idx] = directImagesSig(scanned[idx].imgs)
+		})
+		if stopped() {
+			return imagePool{}
+		}
+		hits := 0
+		for _, idx := range checkIdxs {
+			d := scanned[idx]
+			sig := sigs[idx]
+			if sig == "" {
+				continue
+			}
+			if entry, ok := state.SampleCache[d.root]; ok && entry.Sig == sig {
+				cachedHit[idx] = true
+				hits++
+				if len(entry.Rejected) > 0 {
+					m := make(map[string]bool, len(entry.Rejected))
+					for _, name := range entry.Rejected {
+						m[name] = true
+					}
+					cachedRejected[idx] = m
+				}
+			}
+		}
+		if hits > 0 && logf != nil {
+			logf("   ⏭️ 仅采样目录缓存命中 %d/%d 个文件夹", hits, len(checkIdxs))
+		}
+	}
+
+	var toCheck []string
+	for _, idx := range checkIdxs {
+		if cachedHit[idx] {
+			continue
+		}
+		for _, img := range scanned[idx].imgs {
+			toCheck = append(toCheck, img.path)
+		}
+	}
+
 	ok := checkResolutions(toCheck, minW, minH, stop)
 	if stopped() {
 		return imagePool{}
@@ -198,17 +282,32 @@ func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir 
 	grouped := map[string][]sourceImage{}
 	var leafOrder []string
 	k := 0 // toCheck / ok 的下标，与遍历顺序一致
-	for _, d := range scanned {
+	for idx, d := range scanned {
 		var here []sourceImage
+		var rejectedNames []string
 		for _, img := range d.imgs {
 			if d.check {
-				pass := ok[k]
-				k++
-				if !pass {
-					continue
+				if cachedHit[idx] {
+					if cachedRejected[idx][filepath.Base(img.path)] {
+						continue
+					}
+				} else {
+					pass := ok[k]
+					k++
+					if !pass {
+						rejectedNames = append(rejectedNames, filepath.Base(img.path))
+						continue
+					}
 				}
 			}
 			here = append(here, img)
+		}
+		if useCache && d.check && !cachedHit[idx] && sigs[idx] != "" {
+			if state.SampleCache == nil {
+				state.SampleCache = map[string]sampleDirCache{}
+			}
+			state.SampleCache[d.root] = sampleDirCache{Sig: sigs[idx], Rejected: rejectedNames}
+			stateDirty = true
 		}
 		all = append(all, here...)
 		if d.isLeaf && len(here) > 0 {
@@ -216,6 +315,12 @@ func scanImages(sources []string, filter map[string]bool, minW, minH int, onDir 
 				leafOrder = append(leafOrder, d.root)
 			}
 			grouped[d.root] = append(grouped[d.root], here...)
+		}
+	}
+
+	if useCache && stateDirty {
+		if err := saveState(stateFile, state); err != nil && logf != nil {
+			logf("⚠️ 保存仅采样目录缓存失败: %v", err)
 		}
 	}
 	return imagePool{all: all, grouped: grouped, leafOrder: leafOrder}
@@ -235,242 +340,6 @@ func sampleN(items []sourceImage, n int, r *rand.Rand) []sourceImage {
 		pool[i], pool[j] = pool[j], pool[i]
 	}
 	return pool[:n]
-}
-
-// generateFilename 生成「上层目录名-原文件名」，冲突时加 _1、_2… 后缀。
-// taken 记录本轮已经分配出去、但可能还没真正写到磁盘上的名字（复制是并发的，
-// 只看磁盘会给两张同名图片分到同一个目标路径）；生成的名字会加进 taken。taken 可以为 nil。
-// destName 是原图复制到壁纸文件夹后的名字（不重名时）：「上级文件夹-原名」。
-func destName(src string) string {
-	return filepath.Base(filepath.Dir(src)) + "-" + filepath.Base(src)
-}
-
-func generateFilename(src, destDir string, taken map[string]bool) string {
-	name := filepath.Base(src)
-	parent := filepath.Base(filepath.Dir(src))
-	ext := filepath.Ext(name)
-	stem := strings.TrimSuffix(name, ext)
-	dest := filepath.Join(destDir, destName(src))
-	// macOS 默认 APFS 及大多数 SMB 卷大小写不敏感，taken 按小写归一化去重，
-	// 避免仅大小写不同的两张图被并发写入同一文件。
-	for i := 1; taken[strings.ToLower(dest)] || lexists(dest); i++ {
-		dest = filepath.Join(destDir, fmt.Sprintf("%s-%s_%d%s", parent, stem, i, ext))
-	}
-	if taken != nil {
-		taken[strings.ToLower(dest)] = true
-	}
-	return dest
-}
-
-// clearDirectoryContents 清空目录内的条目而不删目录本身：
-// 网络卷上或正被 Finder 打开的目录，删除目录自身容易触发 Resource busy。
-func clearDirectoryContents(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// resolveArchiveDir：有覆盖路径就用它，否则用源目录自身的上级路径，再接归档子文件夹名。
-func resolveArchiveDir(sourceDir, override, subdir string) string {
-	parent := override
-	if parent == "" {
-		parent = filepath.Dir(resolvePath(sourceDir))
-	}
-	return filepath.Join(parent, subdir)
-}
-
-// translateSourceForArchive 把 SMB 挂载点下的源路径换算成 NFS 挂载点下的等价路径，
-// 用于建归档硬链接（硬链接要求两端在同一个挂载点）。
-func translateSourceForArchive(src, smbRoot, nfsRoot string) string {
-	if smbRoot == "" || nfsRoot == "" {
-		return src
-	}
-	rel, err := filepath.Rel(resolvePath(smbRoot), resolvePath(src))
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return src
-	}
-	return filepath.Join(nfsRoot, rel)
-}
-
-// cleanupNFSAppleDoubleSidecar 删除 macOS NFS 客户端在 link() 后自动生成的 ._<文件名>。
-func cleanupNFSAppleDoubleSidecar(path string) {
-	sidecar := filepath.Join(filepath.Dir(path), "._"+filepath.Base(path))
-	if lexists(sidecar) {
-		_ = os.Remove(sidecar)
-	}
-}
-
-// copyFile 先复制内容，再尽力还原权限和时间戳。还原失败不算复制失败
-// （NAS 文件带 SF_ARCHIVED 等 flags 时修改元数据可能报错；Go 不复制 st_flags，只还原 mode 与时间戳）。
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		_ = os.Remove(dst)
-		return err
-	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(dst)
-		return err
-	}
-	if st, err := in.Stat(); err == nil {
-		_ = os.Chmod(dst, st.Mode().Perm())
-		_ = os.Chtimes(dst, st.ModTime(), st.ModTime())
-	}
-	return nil
-}
-
-func relSymlink(target, linkDir, linkPath string) error {
-	base := linkDir
-	if realDir, err := filepath.EvalSymlinks(linkDir); err == nil {
-		base = realDir
-	}
-	tgt := target
-	if realParent, err := filepath.EvalSymlinks(filepath.Dir(target)); err == nil {
-		tgt = filepath.Join(realParent, filepath.Base(target))
-	}
-	rel, err := filepath.Rel(base, tgt)
-	if err != nil {
-		rel = target
-	}
-	return os.Symlink(rel, linkPath)
-}
-
-// copyJob 是一张图片要做的全部事情，在串行的准备阶段算好，执行阶段并发跑。
-type copyJob struct {
-	img         sourceImage
-	dest        string
-	archiveDir  string // 为空表示不归档
-	archivePath string
-	archiveErr  string // 准备阶段就确定无法归档的原因（日志用）
-}
-
-// planCopies 串行地为每张图分配目标文件名和归档路径。名字冲突检测依赖"之前分配过哪些名字"，
-// 必须在并发复制之前一次算完；归档目录的存在检查和 MkdirAll 也每个目录只做一次。
-func planCopies(images []sourceImage, destDir string, o CopyOptions, archiveOverride string) []copyJob {
-	jobs := make([]copyJob, len(images))
-	takenDest := map[string]bool{}
-	takenArchive := map[string]bool{}
-	dirReady := map[string]string{} // archiveDir → "" 可用，否则为不可用原因
-	for i, img := range images {
-		j := copyJob{img: img, dest: generateFilename(img.path, destDir, takenDest)}
-		if o.ArchiveEnabled {
-			ad := resolveArchiveDir(img.sourceDir, archiveOverride, o.ArchiveSubdirName)
-			reason, seen := dirReady[ad]
-			if !seen {
-				switch parent := filepath.Dir(ad); {
-				case !exists(parent):
-					reason = "⚠️ 归档父路径不存在，跳过: " + parent
-				default:
-					if err := os.MkdirAll(ad, 0o755); err != nil {
-						reason = "归档失败: " + err.Error()
-					}
-				}
-				dirReady[ad] = reason
-			}
-			if reason != "" {
-				j.archiveErr = reason
-			} else {
-				j.archiveDir = ad
-				j.archivePath = generateFilename(img.path, ad, takenArchive)
-			}
-		}
-		jobs[i] = j
-	}
-	return jobs
-}
-
-// processImages 并发复制/链接选中的图片，返回成功数、失败数和归档成功数。
-// 6 路并发可以把 SMB 的往返等待重叠起来，显著提升吞吐。
-// dests 与 images 一一对应，是复制成功后在壁纸文件夹里的文件名（失败为空）；bytes 是复制的总字节数。
-func processImages(images []sourceImage, destDir string, o CopyOptions, archiveOverride string, rep Reporter) (copied, failed, archived int, dests []string, bytes int64) {
-	jobs := planCopies(images, destDir, o, archiveOverride)
-	rep = rep.synced()
-	logf := rep.logf
-	action := "  复制"
-	if o.Mode != "copy" {
-		action = "软链接"
-	}
-	var nCopied, nFailed, nArchived, nDone, nBytes atomic.Int64
-	dests = make([]string, len(jobs))
-	rep.progress(StageCopy, 0, len(jobs))
-	parallelForStop(len(jobs), copyWorkers, rep.stopped, func(i int) {
-		j := jobs[i]
-		defer func() { rep.progress(StageCopy, int(nDone.Add(1)), len(jobs)) }()
-		srcName, destName := filepath.Base(j.img.path), filepath.Base(j.dest)
-		msg := fmt.Sprintf("%s: %s", action, srcName)
-		if destName != srcName {
-			msg += "  ➡️ " + destName
-		}
-		logf("%s", msg)
-
-		var err error
-		if o.Mode == "copy" {
-			err = copyFile(j.img.path, j.dest)
-		} else {
-			err = relSymlink(j.img.path, destDir, j.dest)
-		}
-		if err != nil {
-			logf("失败: %s - %v", destName, err)
-			nFailed.Add(1)
-			return
-		}
-		nCopied.Add(1)
-		dests[i] = destName
-		if o.Mode == "copy" {
-			if st, err := os.Stat(j.dest); err == nil {
-				nBytes.Add(st.Size())
-			}
-		}
-
-		switch {
-		case !o.ArchiveEnabled:
-			return
-		case j.archiveErr != "":
-			logf("%s", j.archiveErr)
-			return
-		}
-		archiveSrc := translateSourceForArchive(j.img.path, o.ArchiveSMBRoot, o.ArchiveNFSRoot)
-		// 优先硬链接；SMB 上不支持硬链接，失败时降级为相对路径软链接
-		if err := os.Link(archiveSrc, j.archivePath); err == nil {
-			cleanupNFSAppleDoubleSidecar(archiveSrc)
-			nArchived.Add(1)
-			logf("  🔗 归档硬链接: %s  (%s)", filepath.Base(j.archivePath), j.archiveDir)
-		} else if err := relSymlink(archiveSrc, j.archiveDir, j.archivePath); err == nil {
-			nArchived.Add(1)
-			logf("  🔀 归档软链接(硬链接不支持，已降级): %s  (%s)", filepath.Base(j.archivePath), j.archiveDir)
-		} else {
-			logf("归档失败: %s - %v", srcName, err)
-		}
-	})
-	return int(nCopied.Load()), int(nFailed.Load()), int(nArchived.Load()), dests, nBytes.Load()
-}
-
-// validArchiveSubdir 检查归档子目录名必须是单个普通子目录名，禁止 "."、".." 或路径分隔符，
-// 防止后续 clearDirectoryContents 清空归档父目录。
-func validArchiveSubdir(name string) bool {
-	if name == "" || name == "." || name == ".." {
-		return false
-	}
-	return !strings.ContainsAny(name, "/\\")
 }
 
 // normalizeCopyOptions 补齐默认值并展开路径，返回目标目录和归档覆盖父路径。
@@ -555,56 +424,6 @@ func reportBalanceCoverage(pool imagePool, selected []sourceImage, sampleSize in
 	return len(covered)
 }
 
-// prepareOutputDirs 清空壁纸目标目录内容与各归档目录内容。
-func prepareOutputDirs(destDir string, o CopyOptions, archiveOverride string, logf Logf) error {
-	if exists(destDir) {
-		logf("🔄 清空目标目录...")
-		if err := clearDirectoryContents(destDir); err != nil {
-			return fmt.Errorf("清空目标目录失败: %w", err)
-		}
-	} else if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return fmt.Errorf("创建目标目录失败: %w", err)
-	}
-	if !o.ArchiveEnabled {
-		return nil
-	}
-	seen := map[string]bool{}
-	var valid []string
-	for _, s := range o.Sources {
-		ad := resolveArchiveDir(s, archiveOverride, o.ArchiveSubdirName)
-		if seen[ad] {
-			continue
-		}
-		seen[ad] = true
-		if !exists(filepath.Dir(ad)) {
-			logf("⚠️ 归档父路径不存在，跳过: %s", filepath.Dir(ad))
-			continue
-		}
-		valid = append(valid, ad)
-	}
-	logf("🔄 清空归档目录 (%d 个)...", len(valid))
-	for _, ad := range valid {
-		if err := clearDirectoryContents(ad); err != nil {
-			logf("⚠️ 清空归档目录失败，跳过（可能被 Finder 或其他程序占用）: %s - %v", ad, err)
-		}
-	}
-	return nil
-}
-
-// savePartialSelection 在复制中途停止时，按实际已写入的文件重写选图映射，
-// 避免保留上一批映射导致后续「删除原图」删错文件。
-func savePartialSelection(file, destDir string, selected []sourceImage, dests []string, copied int, logf Logf) {
-	doneSrc := make([]string, 0, copied)
-	doneDst := make([]string, 0, copied)
-	for i, d := range dests {
-		if d != "" {
-			doneSrc = append(doneSrc, selected[i].path)
-			doneDst = append(doneDst, d)
-		}
-	}
-	saveSelection(file, destDir, doneSrc, doneDst, logf)
-}
-
 // updateRotationHistory 更新图库轮换历史并返回本轮累计已更换张数。
 func updateRotationHistory(o CopyOptions, history map[string]bool, newCycle bool, selected, all []sourceImage, logf Logf) int {
 	if !o.PreferUnseen || o.HistoryFile == "" {
@@ -629,7 +448,7 @@ func updateRotationHistory(o CopyOptions, history map[string]bool, newCycle bool
 	return rotated
 }
 
-// CopySamples 扫描 → 采样 → 确认选出图片后才清空目标/归档目录并复制。
+// CopySamples 扫描 → 采样 → 确认选出图片后才同步目标目录/清空归档目录并复制。
 func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) {
 	logf := rep.logf
 	var res CopyResult
@@ -650,7 +469,7 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 	if len(filter) > 0 {
 		logf("   分辨率筛选目录: %d 个 (最小 %dx%d, 横屏)", len(filter), o.MinWidth, o.MinHeight)
 	}
-	pool := scanImages(o.Sources, filter, o.MinWidth, o.MinHeight, func(n int) { rep.progress(StageScan, n, 0) }, rep.stopped)
+	pool := scanImagesCached(o.Sources, filter, o.MinWidth, o.MinHeight, o.StateFile, o.Incremental, func(n int) { rep.progress(StageScan, n, 0) }, rep.stopped, logf)
 	if rep.stopped() {
 		logf("\n⏹️ 已停止扫描")
 		return res, ErrCanceled
@@ -691,21 +510,28 @@ func CopySamples(o CopyOptions, rep Reporter, r *rand.Rand) (CopyResult, error) 
 		res.CoveredFolders = reportBalanceCoverage(pool, selected, sampleSize, logf)
 	}
 
-	// 清空壁纸目录之前是最后一个未改动任何文件的检查点
+	// 清空/同步壁纸目录之前是最后一个未改动任何文件的检查点
 	if rep.stopped() {
 		return res, ErrCanceled
 	}
 	prev := loadPrevSelection(o.SelectionFile, destDir)
-	if err := prepareOutputDirs(destDir, o, archiveOverride, logf); err != nil {
+	jobs := planDestJobs(selected, destDir)
+	var prevDestBySrc map[string]string
+	if prev != nil {
+		prevDestBySrc = prev.destBySrc
+	}
+	keepNames, _ := markReusableJobs(jobs, prevDestBySrc, o.Mode)
+	if err := prepareOutputDirs(destDir, keepNames, o, archiveOverride, logf); err != nil {
 		return res, err
 	}
+	attachArchivePlans(jobs, o, archiveOverride)
 
 	logf("🚀 开始处理图片...")
 	var dests []string
-	res.Copied, res.Failed, res.Archived, dests, res.Bytes = processImages(selected, destDir, o, archiveOverride, rep)
+	res.Copied, res.Failed, res.Archived, dests, res.Bytes = processImages(jobs, destDir, o, rep)
 	if rep.stopped() && res.Copied+res.Failed < len(selected) {
-		savePartialSelection(o.SelectionFile, destDir, selected, dests, res.Copied, logf)
-		logf("⏹️ 已停止：壁纸目录里保留已复制的 %d 张", res.Copied)
+		savePartialSelection(o.SelectionFile, destDir, selected, dests, logf)
+		logf("⏹️ 已停止：壁纸目录里保留已处理的 %d 张", res.Copied)
 		return res, ErrCanceled
 	}
 	compareSelection(o.SelectionFile, destDir, prev, selected, dests, &res, logf)
@@ -742,11 +568,12 @@ func WallpaperSources(selectionFile, destDir string) map[string]string {
 	return out
 }
 
-// prevSelection 是上一轮选了哪些图，用来算这一轮新换上几张。
+// prevSelection 是上一轮选了哪些图，用来算这一轮新换上几张，并定位可原地复用的目标文件。
 type prevSelection struct {
-	keys   map[string]bool
-	n      int
-	byName bool // 没有记录，按壁纸文件夹里原有的文件名比（近似）
+	keys      map[string]bool
+	destBySrc map[string]string // 原图路径 → 上一轮壁纸文件夹里的文件名
+	n         int
+	byName    bool // 没有记录，按壁纸文件夹里原有的文件名比（近似）
 }
 
 // loadPrevSelection 必须在清空壁纸文件夹之前调用。有上一轮的记录（且是同一个壁纸文件夹）就按原图路径比；
@@ -759,9 +586,20 @@ func loadPrevSelection(file, destDir string) *prevSelection {
 	}
 	var saved savedSelection
 	if data, err := os.ReadFile(file); err == nil && json.Unmarshal(data, &saved) == nil && saved.Dest == destDir && len(saved.Sources) > 0 {
-		p := &prevSelection{keys: make(map[string]bool, len(saved.Sources)), n: len(saved.Sources)}
+		p := &prevSelection{
+			keys: make(map[string]bool, len(saved.Sources)),
+			n:    len(saved.Sources),
+		}
 		for _, s := range saved.Sources {
 			p.keys[s] = true
+		}
+		if len(saved.Dests) == len(saved.Sources) {
+			p.destBySrc = make(map[string]string, len(saved.Sources))
+			for i, d := range saved.Dests {
+				if d != "" {
+					p.destBySrc[saved.Sources[i]] = d
+				}
+			}
 		}
 		return p
 	}
