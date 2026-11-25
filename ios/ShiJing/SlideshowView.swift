@@ -29,10 +29,23 @@ struct SlideshowView: View {
     @State private var showHUD = true
     @State private var hudToken = 0
     @State private var playToken = 0
-    /// 安全区内的可用尺寸（用于排版信息卡和控制条）
-    @State private var size = CGSize.zero
-    /// 忽略安全区后的物理全屏尺寸（用于判断横竖屏和图片全屏铺满）
+    /// 物理全屏画布尺寸（用于铺满图片与在窗口尺寸尚未回传前兜底）
     @State private var canvasSize = CGSize.zero
+    /// 窗口安全区与窗口尺寸：整页 ignoresSafeArea 后，安全区靠 WindowMetrics 从窗口精确读取，
+    /// 避免 Duo 外屏 fullScreenCover 受首页浮动标签栏影响把内容区挤偏，也避免转屏读到旧安全区。
+    @State private var windowSafe = UIEdgeInsets.zero
+    @State private var windowSize = CGSize.zero
+    /// 系统报告的四向遮挡区（iOS 27.1+）：覆盖 Duo 外屏竖屏/内屏横屏竖排状态栏、
+    /// 内屏竖屏灵动岛实时活动、以及横屏落在角上的前置摄像头挖孔。
+    private struct OcclusionInsets: Equatable {
+        var topRightWidth: CGFloat = 0
+        var topRightBottom: CGFloat = 0
+        var topLeftWidth: CGFloat = 0
+        var topCenterBottom: CGFloat = 0
+        var bottomLeftWidth: CGFloat = 0
+        var bottomRightWidth: CGFloat = 0
+    }
+    @State private var occlusion = OcclusionInsets()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
@@ -55,9 +68,11 @@ struct SlideshowView: View {
     private var currentWall: Wallpaper? {
         walls.first { $0.name == current } ?? walls.first
     }
+    private var layoutSize: CGSize {
+        windowSize != .zero ? windowSize : canvasSize
+    }
     private var isLandscape: Bool {
-        let s = canvasSize == .zero ? size : canvasSize
-        return s.width > s.height
+        layoutSize.width > layoutSize.height
     }
     private var shouldFill: Bool {
         switch fitMode {
@@ -66,11 +81,45 @@ struct SlideshowView: View {
         default: return isLandscape
         }
     }
-    private var isWide: Bool { size.width >= 680 }
+    private var bottomLeading: CGFloat {
+        max(20, windowSafe.left + 20, occlusion.bottomLeftWidth + 12)
+    }
+    private var bottomTrailing: CGFloat {
+        max(20, windowSafe.right + 20, occlusion.bottomRightWidth + 12)
+    }
+    private var bottomPadding: CGFloat {
+        max(16, windowSafe.bottom + 12)
+    }
+    /// 底部内容区实际可用宽度（已扣掉左右安全区、角落摄像头遮挡和外边距）
+    private var bottomAvailableWidth: CGFloat {
+        max(0, layoutSize.width - bottomLeading - bottomTrailing)
+    }
+    private var isWide: Bool { bottomAvailableWidth >= 640 }
+    /// 小屏横放（Duo 外屏横屏、普通 iPhone 横屏）时系统本身不显示状态栏，保持隐藏避免闪动或压到顶部胶囊。
+    /// Duo 内屏横屏（高 669 ≥ 640）除外，显示控制条时保留右上角竖排状态栏。
+    private var hideStatusBarInLandscape: Bool {
+        isLandscape && layoutSize.height > 0 && layoutSize.height < 640
+    }
+
+    /// 右上角状态胶囊的上、右外边距：避开窗口顶/右安全区，并在与 Duo 竖排状态栏或灵动岛实时活动
+    /// 纵向重叠时优先向左让开；若右侧遮挡过宽放不下胶囊，则落到其下方。
+    private var topPillInsets: (top: CGFloat, trailing: CGFloat) {
+        let baseTop = max(windowSafe.top + 8, occlusion.topCenterBottom + 8, 20)
+        let baseTrailing = max(20, windowSafe.right + 20)
+        if occlusion.topRightWidth > 0, baseTop < occlusion.topRightBottom + 4 {
+            let besideTrailing = max(baseTrailing, occlusion.topRightWidth + 12)
+            let leftClear = max(20, windowSafe.left + 20, occlusion.topLeftWidth + 12)
+            if layoutSize.width - leftClear - besideTrailing >= 180 {
+                return (baseTop, besideTrailing)
+            }
+            return (max(baseTop, occlusion.topRightBottom + 8), baseTrailing)
+        }
+        return (baseTop, baseTrailing)
+    }
 
     var body: some View {
         ZStack {
-            // 1. 物理全屏纯黑底 + 交叉淡入淡出图片画布（独立忽略安全区，避免 Duo 外屏右侧状态栏把图片挤偏）
+            // 1. 物理全屏纯黑底 + 交叉淡入淡出图片画布 + 遮挡区探测
             GeometryReader { geo in
                 ZStack {
                     Color.black
@@ -107,11 +156,44 @@ struct SlideshowView: View {
                 .onGeometryChange(for: CGSize.self) { $0.size } action: {
                     if $0 != canvasSize { canvasSize = $0 }
                 }
+                .onGeometryChange(for: OcclusionInsets.self) { proxy in
+                    guard #available(iOS 27.1, *) else { return OcclusionInsets() }
+                    let w = proxy.size.width, h = proxy.size.height
+                    guard w > 0, h > 0 else { return OcclusionInsets() }
+                    var out = OcclusionInsets()
+                    for rect in proxy.reservedRegions(kind: .occlusion).map(\.frame) {
+                        guard !rect.isEmpty, rect.width < w * 0.85, rect.height < h * 0.85 else { continue }
+                        let rightBiased = rect.maxX > w * 0.75 && rect.minX > (w - rect.maxX) + 20
+                        let leftBiased = rect.minX < w * 0.25 && (w - rect.maxX) > rect.minX + 20
+                        // 顶部遮挡：区分靠右（Duo 竖排状态栏/灵动岛/右上角摄像头）、靠左和居中（普通 iPhone 灵动岛）
+                        if rect.minY < 120 {
+                            if rightBiased {
+                                out.topRightWidth = max(out.topRightWidth, max(0, w - rect.minX))
+                                out.topRightBottom = max(out.topRightBottom, rect.maxY)
+                            } else if leftBiased {
+                                out.topLeftWidth = max(out.topLeftWidth, max(0, rect.maxX))
+                            } else {
+                                out.topCenterBottom = max(out.topCenterBottom, rect.maxY)
+                            }
+                        }
+                        // 底部角落遮挡：如 Duo 外屏横屏落在左下角或右下角的前置摄像头
+                        if rect.maxY > h - 160 {
+                            if leftBiased {
+                                out.bottomLeftWidth = max(out.bottomLeftWidth, max(0, rect.maxX))
+                            } else if rightBiased {
+                                out.bottomRightWidth = max(out.bottomRightWidth, max(0, w - rect.minX))
+                            }
+                        }
+                    }
+                    return out
+                } action: { o in
+                    if o != occlusion { occlusion = o }
+                }
             }
-            .ignoresSafeArea()
 
-            // 2. 右上角状态与页码胶囊（留在安全区内，随 HUD 显示/隐藏）
+            // 2. 右上角状态与页码胶囊（按窗口安全区与遮挡区动态避让，随 HUD 显示/隐藏）
             if showHUD {
+                let topInsets = topPillInsets
                 VStack {
                     HStack {
                         Spacer()
@@ -128,8 +210,9 @@ struct SlideshowView: View {
                         .padding(.vertical, 6)
                         .glassBackground(in: Capsule(), tint: .black.opacity(0.28))
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
+                    .padding(.leading, max(20, windowSafe.left + 20, occlusion.topLeftWidth + 12))
+                    .padding(.trailing, topInsets.trailing)
+                    .padding(.top, topInsets.top)
                     Spacer()
                 }
                 .transition(.opacity)
@@ -138,7 +221,7 @@ struct SlideshowView: View {
             // 3. 底部液态玻璃信息卡（时钟 + 文件名）与自动隐藏控制胶囊
             VStack(spacing: 12) {
                 Spacer()
-                if size.width >= 840 {
+                if bottomAvailableWidth >= 800 {
                     // 足够宽（Duo 内屏横屏、iPad）：信息卡靠左、控制条同排不重叠
                     // 分层 layoutPriority 避免 HStack 与 Spacer 平分提议宽度把按钮或文件名压扁
                     HStack(alignment: .bottom, spacing: 12) {
@@ -168,7 +251,7 @@ struct SlideshowView: View {
                         }
                         if showHUD {
                             Group {
-                                if size.width >= 520 {
+                                if bottomAvailableWidth >= 480 {
                                     wideControlBar
                                 } else {
                                     compactControlBar
@@ -180,11 +263,17 @@ struct SlideshowView: View {
                     }
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 16)
+            .padding(.leading, bottomLeading)
+            .padding(.trailing, bottomTrailing)
+            .padding(.bottom, bottomPadding)
         }
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
-        .statusBarHiddenCompat(!showHUD)
+        .ignoresSafeArea()
+        .background(WindowMetrics { insets, size in
+            if insets != windowSafe { windowSafe = insets }
+            if size != windowSize { windowSize = size }
+        }.allowsHitTesting(false))
+        .preferredColorScheme(.dark)
+        .statusBarHiddenCompat(!showHUD || hideStatusBarInLandscape)
         #if os(iOS)
         .persistentSystemOverlays(showHUD ? .automatic : .hidden)
         #endif
