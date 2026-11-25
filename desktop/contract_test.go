@@ -129,6 +129,12 @@ func TestIOSContract(t *testing.T) {
 				{Path: "/Volumes/Media0/A", Filter: true, Mount: "ok", Images: 120, Folders: 6, Deleted: 2},
 				{Path: "/Volumes/Media0/B", Filter: false, Mount: "missing", Images: 40, Folders: 2, Deleted: 0},
 			},
+			ActiveProfile:         "日常风景",
+			ActiveProfileModified: true,
+			Profiles: []remoteProfile{
+				{Name: "日常风景", SampleCount: 20, MinWidth: 3840, MinHeight: 2160, LibraryDirs: 2, Mode: "copy", WillDelete: true},
+				{Name: "暗色极简", SampleCount: 10, MinWidth: 2560, MinHeight: 1440, LibraryDirs: 1, Mode: "symlink", WillDelete: false},
+			},
 		}
 		writeContractJSON(t, dir, "state_full.json", fullState)
 
@@ -192,6 +198,24 @@ func TestIOSContract(t *testing.T) {
 		sampleDir := t.TempDir()
 		h.cfg.FilterAndSampleDirs = []string{lib}
 		h.cfg.SampleOnlyDirs = []string{sampleDir}
+		h.syncShadowFromConfig()
+		if err := h.saveProfile("日常风景"); err != nil {
+			t.Fatal(err)
+		}
+		h.cfg.FilterAndSampleDirs = []string{}
+		h.cfg.SampleOnlyDirs = []string{sampleDir}
+		h.cfg.SampleCount = 15
+		h.cfg.MinWidth = 2560
+		h.cfg.MinHeight = 1440
+		h.cfg.DeleteDuringFilter = false
+		h.syncShadowFromConfig()
+		if err := h.saveProfile("暗色极简"); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.applyProfile("日常风景"); err != nil {
+			t.Fatal(err)
+		}
+		h.settle(t, h.tt, func() bool { return !h.checkingMounts() })
 		h.walls.heroPath = filepath.Join(dest, "风景-a.jpg")
 		h.appendLog("契约测试日志行")
 

@@ -292,11 +292,31 @@ struct DeletionsView: View {
     /// 桌面端 core.ReasonManual 写的就是这个词，其余（包括没有原因的旧日志）都算筛选删的
     private static let manualReason = "手动删除"
 
+    private var pendingCount: Int { session.state?.pending ?? 0 }
+
+    @ViewBuilder
+    private var pendingEntrySection: some View {
+        if pendingCount > 0 {
+            Section {
+                NavigationLink {
+                    PendingQueueView(session: session)
+                } label: {
+                    NoticeRow(icon: "clock", title: "电脑上排队删除 \(pendingCount) 张",
+                              detail: session.offline
+                                  ? "图库连接后电脑会自动删除。离线时可查看清单，连接电脑后再取消。"
+                                  : "图库未连接时记录的待删原图，图库连接后自动删除；点开可逐条或全部取消。")
+                }
+            } header: {
+                Text("待删除原图")
+            }
+        }
+    }
+
     var body: some View {
         Group {
             if let list {
                 let items = shown(list.items)
-                if list.items.isEmpty {
+                if list.items.isEmpty && pendingCount == 0 {
                     VStack(spacing: 0) {
                         RecordsCacheHeader(session: session, at: syncedAt)
                         ContentUnavailableView("没有删除过原图", systemImage: "trash.slash")
@@ -304,47 +324,54 @@ struct DeletionsView: View {
                 } else {
                     List {
                         recordsCacheSection(session, syncedAt)
-                        Section {
-                            HStack(spacing: 8) {
-                                chip(.filter, "筛选删除", count: list.filter ?? counted(list.items, .filter))
-                                chip(.manual, "手动删除", count: list.manual ?? counted(list.items, .manual))
-                                Spacer()
-                            }
-                        } footer: {
-                            Text(note(list))
-                        }
-                        if items.isEmpty {
-                            Text("没有符合筛选的记录。").foregroundStyle(.secondary)
-                        }
-                        ForEach(groups(items), id: \.day) { g in
-                            let open = !collapsedDays.contains(g.day)
+                        pendingEntrySection
+                        if list.items.isEmpty {
                             Section {
-                                if open {
-                                    ForEach(g.items) { d in
-                                        row(d)
-                                    }
-                                }
-                            } header: {
-                                // 标题自己画箭头、自己收合：Section(isExpanded:) 在这个样式下不显示箭头，看不出来能折
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.18)) {
-                                        if open { collapsedDays.insert(g.day) } else { collapsedDays.remove(g.day) }
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Text("\(g.day.formatted(.dateTime.year().month().day().weekday())) · \(g.items.count) 张")
-                                        Spacer()
-                                        Image(systemName: open ? "chevron.down" : "chevron.right")
-                                            .font(.caption.weight(.semibold))
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
+                                Text("还没有已完成的删除记录。").foregroundStyle(.secondary)
                             }
-                        }
-                        if list.total > list.items.count {
-                            Text("只显示最近 \(list.items.count) 条，共 \(list.total) 条；完整记录在电脑上的「删除记录」页。")
-                                .font(.footnote).foregroundStyle(.secondary)
+                        } else {
+                            Section {
+                                HStack(spacing: 8) {
+                                    chip(.filter, "筛选删除", count: list.filter ?? counted(list.items, .filter))
+                                    chip(.manual, "手动删除", count: list.manual ?? counted(list.items, .manual))
+                                    Spacer()
+                                }
+                            } footer: {
+                                Text(note(list))
+                            }
+                            if items.isEmpty {
+                                Text("没有符合筛选的记录。").foregroundStyle(.secondary)
+                            }
+                            ForEach(groups(items), id: \.day) { g in
+                                let open = !collapsedDays.contains(g.day)
+                                Section {
+                                    if open {
+                                        ForEach(g.items) { d in
+                                            row(d)
+                                        }
+                                    }
+                                } header: {
+                                    // 标题自己画箭头、自己收合：Section(isExpanded:) 在这个样式下不显示箭头，看不出来能折
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.18)) {
+                                            if open { collapsedDays.insert(g.day) } else { collapsedDays.remove(g.day) }
+                                        }
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Text("\(g.day.formatted(.dateTime.year().month().day().weekday())) · \(g.items.count) 张")
+                                            Spacer()
+                                            Image(systemName: open ? "chevron.down" : "chevron.right")
+                                                .font(.caption.weight(.semibold))
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            if list.total > list.items.count {
+                                Text("只显示最近 \(list.items.count) 条，共 \(list.total) 条；完整记录在电脑上的「删除记录」页。")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -448,6 +475,7 @@ struct ExcludedView: View {
     @State private var items: [ExcludedItem]?
     @State private var error: String?
     @State private var confirmAll = false
+    @State private var restoring: Set<String> = []
     /// 显示的是存下来的副本时，那份是什么时候同步的
     @State private var syncedAt: Date?
 
@@ -465,25 +493,40 @@ struct ExcludedView: View {
                         recordsCacheSection(session, syncedAt)
                         Section {
                             ForEach(items) { it in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(it.name).font(.subheadline).lineLimit(1).truncationMode(.middle)
-                                    Text(it.folder).font(.caption2).foregroundStyle(.secondary)
-                                        .lineLimit(1).truncationMode(.head)
+                                let busy = restoring.contains(it.path)
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(it.name).font(.subheadline).lineLimit(1).truncationMode(.middle)
+                                        Text(it.folder).font(.caption2).foregroundStyle(.secondary)
+                                            .lineLimit(1).truncationMode(.head)
+                                    }
+                                    Spacer()
+                                    if busy {
+                                        ProgressView()
+                                    } else {
+                                        Button("恢复") { Task { await restore([it.path]) } }
+                                            .buttonStyle(.borderless)
+                                            .disabled(session.offline)
+                                    }
                                 }
                                 .swipeActions {
-                                    Button("恢复") { Task { await restore([it.path]) } }.tint(.accentColor)
+                                    Button("恢复") { Task { await restore([it.path]) } }
+                                        .tint(.accentColor)
+                                        .disabled(session.offline || busy)
                                 }
                                 .contextMenu {
                                     Button("恢复，以后可以再选到", systemImage: "arrow.uturn.backward") {
                                         Task { await restore([it.path]) }
                                     }
+                                    .disabled(session.offline || busy)
                                 }
-                                .disabled(session.offline) // 恢复要改电脑上的名单，离线时只能看
                             }
+                        } header: {
+                            Text("共 \(items.count) 张")
                         } footer: {
                             Text(session.offline
                                  ? "离线时只能查看，连接电脑后再恢复。"
-                                 : "恢复以后，换一批时这些原图又可能被选上。左滑一张可以单独恢复。")
+                                 : "恢复以后，换一批时这些原图又可能被选上。可以点右侧「恢复」或左滑单独恢复。")
                         }
                         // 「全部恢复」放在列表末尾：原来在导航栏右下角，三栏并排后 tab 页的 toolbar
                         // 会叠到别的栏上，放在这里也更容易看见
@@ -491,9 +534,9 @@ struct ExcludedView: View {
                             Button {
                                 confirmAll = true
                             } label: {
-                                Label("全部恢复", systemImage: "arrow.uturn.backward")
+                                Label("全部恢复（\(items.count) 张）", systemImage: "arrow.uturn.backward")
                             }
-                            .disabled(session.offline)
+                            .disabled(session.offline || !restoring.isEmpty)
                         }
                     }
                 }
@@ -507,8 +550,8 @@ struct ExcludedView: View {
             Button("全部恢复") { Task { await restore(nil) } }
             Button("取消", role: .cancel) {}
         }
-        // 连上 / 断开、以及电脑换完一批（last.at 变了）都重新取一次
-        .task(id: "\(session.offline)|\(session.state?.last?.at ?? 0)") { await load() }
+        // 连上 / 断开、电脑换完一批、或不再选名单数量变化时都重新取一次
+        .task(id: "\(session.offline)|\(session.state?.last?.at ?? 0)|\(session.state?.excluded ?? -1)") { await load() }
         .refreshable { await load() }
     }
 
@@ -527,6 +570,9 @@ struct ExcludedView: View {
             session.actionError = "未连接电脑时无法恢复，连接后再试。"
             return
         }
+        let keys = paths ?? (items?.map(\.path) ?? [])
+        for k in keys { restoring.insert(k) }
+        defer { for k in keys { restoring.remove(k) } }
         do {
             withAnimation { items = nil == paths ? [] : items?.filter { !paths!.contains($0.path) } }
             items = try await session.request { try await $0.restoreExcluded(paths) }

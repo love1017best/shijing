@@ -45,16 +45,68 @@ extension RemoteSession {
         }
     }
 
+    /// 切换配置方案（场景预设）；run 为 true 时同时触发换一批壁纸。
+    func switchProfile(_ profile: ConfigProfile, run: Bool, deleteOriginals: Bool = false) async {
+        #if DEBUG
+        if Self.demoMode != nil {
+            state?.activeProfile = profile.name
+            state?.activeProfileModified = false
+            state?.sampleCount = profile.sampleCount
+            state?.libraryDirs = profile.libraryDirs
+            state?.willDelete = profile.willDelete
+            state?.settings?.sampleCount = profile.sampleCount
+            state?.settings?.minWidth = profile.minWidth
+            state?.settings?.minHeight = profile.minHeight
+            state?.settings?.mode = profile.mode
+            showNotice(run ? "已切换到「\(profile.name)」并开始换壁纸" : "已切换到方案「\(profile.name)」")
+            return
+        }
+        #endif
+        if run {
+            Notifications.requestOnce()
+            busy = true
+        } else {
+            savingSettings = true
+        }
+        defer {
+            if run { busy = false } else { savingSettings = false }
+        }
+        do {
+            state = try await client().switchProfile(profile.name, run: run, deleteOriginals: deleteOriginals)
+            remember(wallsChanged: run)
+            if run { WidgetReload.all() }
+            showNotice(run ? "已切换到「\(profile.name)」并开始换壁纸" : "已切换到方案「\(profile.name)」")
+        } catch {
+            handleRequestError(error)
+        }
+    }
+
     // MARK: 待删除队列、挂载检查
 
     /// 取消电脑上排队的一项删除原图（图库没连上时排的队，电脑连上后会自己执行）。
     func cancelPending(_ item: PendingItem) async {
+        #if DEBUG
+        if Self.demoMode != nil {
+            state?.pendingItems?.removeAll { $0.path == item.path }
+            state?.pending = state?.pendingItems?.count ?? 0
+            showNotice("已取消排队删除：\(item.name)")
+            return
+        }
+        #endif
         guard await pendingAct({ try await $0.cancelPending(item.path) }) else { return }
         showNotice("已取消排队删除：\(item.name)")
     }
 
     /// 一次取消所有排队的删除原图。
     func cancelAllPending() async {
+        #if DEBUG
+        if Self.demoMode != nil {
+            state?.pendingItems = []
+            state?.pending = 0
+            showNotice("已取消所有排队删除")
+            return
+        }
+        #endif
         guard await pendingAct({ try await $0.cancelPending(nil) }) else { return }
         showNotice("已取消所有排队删除")
     }

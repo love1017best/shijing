@@ -47,8 +47,34 @@ struct RemoteState: Codable, Equatable {
     var pendingItems: [PendingItem]?
     /// 图库目录（只读：路径、类型、挂载状态、统计；旧版桌面端没有）
     var dirs: [LibraryDir]?
+    /// 当前套用的配置方案名（场景预设；旧版桌面端没有）
+    var activeProfile: String?
+    /// 当前配置相对已激活方案是否有未保存的改动
+    var activeProfileModified: Bool?
+    /// 电脑上保存的配置方案列表（旧版桌面端没有）
+    var profiles: [ConfigProfile]?
 
     var nextAutoDate: Date? { nextAuto.map { Date(timeIntervalSince1970: $0) } }
+}
+
+/// 一套配置方案（场景预设；desktop/remotesnap.go 的 remoteProfile）。
+struct ConfigProfile: Codable, Identifiable, Equatable, Hashable {
+    var name: String
+    var sampleCount: Int
+    var minWidth: Int
+    var minHeight: Int
+    var libraryDirs: Int
+    var mode: String
+    /// 套用这套方案并换一批时是否会删除不合格原图
+    var willDelete: Bool
+    var id: String { name }
+
+    /// 简短的参数摘要，例如「2 个图库 · 300 张 · 4K」。
+    func summary(presets: [ResolutionPreset]?) -> String {
+        let res = presets?.first(where: { $0.w == minWidth && $0.h == minHeight })?.label
+            ?? "\(minWidth)×\(minHeight)"
+        return "\(libraryDirs) 个图库 · \(sampleCount) 张 · \(res)"
+    }
 }
 
 /// 待删除队列里的一条（desktop/remote.go 的 remotePendingItem）。

@@ -217,9 +217,11 @@ type app struct {
 	qrCode     string        // 二维码里那个配对码（配对成功后收起弹层）
 	qrBitmap   *ui.Bitmap    // 二维码图
 	qrURL      string        // 二维码里的地址（shijing://pair?…）
-	renameOpen bool          // 「重命名手机」弹层是否显示
-	renameFrom string        // 改的是列表里哪一台（改之前的名字）
-	renameText string        // 输入框里的新名字
+	renameOpen   bool   // 「重命名手机」弹层是否显示
+	renameFrom   string // 改的是列表里哪一台（改之前的名字）
+	renameText   string // 输入框里的新名字
+	profileDraft string // 设置页「新建配置方案」的名称草稿
+	profileErr   string // 新建/保存方案失败时的行内提示
 
 	pendMu    sync.Mutex
 	pendLog   []string
@@ -385,6 +387,7 @@ func (a *app) buildConfig() core.Config {
 	cfg.SampleOnlyDirs = slices.Clone(a.cfg.SampleOnlyDirs)
 	cfg.Excluded = slices.Clone(a.cfg.Excluded)
 	cfg.Shortcuts = maps.Clone(a.cfg.Shortcuts)
+	cfg.Profiles = core.CloneProfiles(a.cfg.Profiles)
 	return cfg
 }
 
@@ -409,10 +412,12 @@ func (a *app) configMatchesSaved() bool {
 		c.PreferUnseen == s.PreferUnseen &&
 		c.AutoRunHours == s.AutoRunHours &&
 		c.RemoteEnabled == s.RemoteEnabled &&
+		c.ActiveProfile == s.ActiveProfile &&
 		slices.Equal(c.FilterAndSampleDirs, s.FilterAndSampleDirs) &&
 		slices.Equal(c.SampleOnlyDirs, s.SampleOnlyDirs) &&
 		slices.Equal(c.Excluded, s.Excluded) &&
-		maps.Equal(c.Shortcuts, s.Shortcuts)
+		maps.Equal(c.Shortcuts, s.Shortcuts) &&
+		core.ProfilesEqual(c.Profiles, s.Profiles)
 }
 
 // autosave 在配置变化时写盘。失败只在侧边栏提示，不弹窗打断。

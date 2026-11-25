@@ -47,6 +47,14 @@ extension RemoteSession {
         ]
         s.state?.undoName = running ? nil : "风景-京都-0012.jpg"
         s.state?.excluded = 12
+        // 截图用：-demoProfiles 摆出多套配置方案
+        if ProcessInfo.processInfo.arguments.contains("-demoProfiles") {
+            s.state?.activeProfile = "日常风景"
+            s.state?.profiles = [
+                ConfigProfile(name: "日常风景", sampleCount: 300, minWidth: 3840, minHeight: 2160, libraryDirs: 2, mode: "copy", willDelete: true),
+                ConfigProfile(name: "暗色极简", sampleCount: 80, minWidth: 5120, minHeight: 2880, libraryDirs: 1, mode: "copy", willDelete: false),
+            ]
+        }
         // 截图用：-demoPending 摆出「图库没连上，删除原图在电脑上排队」的样子
         if ProcessInfo.processInfo.arguments.contains("-demoPending") {
             s.state?.pending = 2

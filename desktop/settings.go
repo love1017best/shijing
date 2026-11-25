@@ -23,6 +23,8 @@ func (a *app) settingsPage(c *ui.Context) {
 	t := c.Theme()
 	pageHeader(c, "设置", "改动会自动保存，下次运行生效。", nil)
 	a.columns(c, 24, func() {
+		a.profilesGroup(c)
+
 		group(c, "输出", "",
 			func() {
 				wideRow(c, "壁纸文件夹", "每次运行会先清空这个文件夹，再放入新选出的图片。系统壁纸幻灯片指向这里。", func() {

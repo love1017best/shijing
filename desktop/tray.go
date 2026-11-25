@@ -65,6 +65,9 @@ func (a *app) trayItems() []*mygo.MenuItem {
 		items = append(items, &mygo.MenuItem{Label: "换一批壁纸", Disabled: !a.canRun(),
 			Click: func(*mygo.MenuItem, *mygo.Window) { a.update(a.trayRun) }})
 	}
+	if len(a.cfg.Profiles) > 0 {
+		items = append(items, a.trayProfilesMenu())
+	}
 	items = append(items,
 		&mygo.MenuItem{Label: "打开壁纸文件夹", Disabled: strings.TrimSpace(a.cfg.DestDir) == "",
 			Click: func(*mygo.MenuItem, *mygo.Window) { a.openWallpapers() }},
@@ -72,6 +75,51 @@ func (a *app) trayItems() []*mygo.MenuItem {
 		&mygo.MenuItem{Label: "退出拾景", Role: mygo.RoleQuit},
 	)
 	return items
+}
+
+// trayProfilesMenu 构建菜单栏里的「配置方案」子菜单：点方案直接切换并换一批，底部二级菜单可仅切换。
+func (a *app) trayProfilesMenu() *mygo.MenuItem {
+	sub := make([]*mygo.MenuItem, 0, len(a.cfg.Profiles)+3)
+	sub = append(sub, &mygo.MenuItem{Label: "切换并换一批", Disabled: true})
+	only := make([]*mygo.MenuItem, 0, len(a.cfg.Profiles))
+	for _, p := range a.cfg.Profiles {
+		name := p.Name
+		active := name == a.cfg.ActiveProfile
+		summary := profileSummary(p)
+		sub = append(sub, &mygo.MenuItem{
+			Type:     mygo.MenuItemCheckbox,
+			Label:    name,
+			Subtitle: summary,
+			Checked:  active,
+			Disabled: a.running,
+			Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.update(func() { a.switchProfileAndRun(name, true) })
+			},
+		})
+		only = append(only, &mygo.MenuItem{
+			Type:     mygo.MenuItemCheckbox,
+			Label:    name,
+			Subtitle: summary,
+			Checked:  active,
+			Disabled: a.running,
+			Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.update(func() { _ = a.applyProfile(name) })
+			},
+		})
+	}
+	sub = append(sub, mygo.Separator(), &mygo.MenuItem{
+		Label:    "仅切换方案",
+		Disabled: a.running,
+		Submenu:  only,
+	})
+	label := "配置方案"
+	if a.cfg.ActiveProfile != "" {
+		label = "配置方案：" + a.cfg.ActiveProfile
+	}
+	return &mygo.MenuItem{
+		Label:   label,
+		Submenu: sub,
+	}
 }
 
 // trayRun 是菜单栏里的「换一批壁纸」：这次要删原图时先把主界面叫出来（确认框在窗口上），
@@ -83,9 +131,16 @@ func (a *app) trayRun() {
 	a.requestRun()
 }
 
-// trayStatus 是菜单里那几行状态：图库、上次运行 / 正在运行、下次自动换。
+// trayStatus 是菜单里那几行状态：方案（如有）、图库、上次运行 / 正在运行、下次自动换。
 func (a *app) trayStatus() []string {
 	var out []string
+	if a.cfg.ActiveProfile != "" {
+		line := "当前方案：" + a.cfg.ActiveProfile
+		if a.cfg.ActiveProfileModified() {
+			line += "（已修改）"
+		}
+		out = append(out, line)
+	}
 	dirs := a.allDirs()
 	switch n := a.unmountedCount(); {
 	case len(dirs) == 0:

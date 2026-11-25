@@ -66,9 +66,11 @@ cd ios && xcodegen
 | `ShiJingApp.swift` | 入口：没有配对时显示 `SetupView`，否则显示三个标签页；前后台切换时断开 / 重连；本地通知 |
 | `MacListView.swift` / `PairView.swift` | 首次配对页、添加 / 管理 Mac、附近的 Mac 和手动输入地址 / 输入配对码 |
 | `QRScan.swift` | 扫描电脑上的配对二维码 |
-| `DashboardView.swift` | 概览：横幅卡、状态、步骤、进度、换一批 / 停止、上一轮对比、签名到期提醒、待删除原图 |
-| `SettingsSection.swift` / `SettingsComponents.swift` / `OfflineCacheSection.swift` | 「设置」标签（电脑上的拾景 / 这台设备 / 关于三栏）、图库目录二级页、通用设置组件与离线缓存分区 |
-| `RecordsPage.swift` | 「记录」标签：运行日志、删除记录、不再选三栏，以及离线时读取缓存的逻辑 |
+| `DashboardView.swift` | 概览：横幅卡、状态、步骤、进度、换一批 / 停止、配置方案、上一轮对比、签名到期提醒、待删除原图入口 |
+| `ProfilesSection.swift` | 配置方案分组：概览页和设置页共用的方案切换与切换并换一批界面 |
+| `PendingQueueView.swift` | 「待删除原图」队列页：查看电脑上排队的待删除原图，逐条或全部取消 |
+| `SettingsSection.swift` / `SettingsComponents.swift` / `OfflineCacheSection.swift` | 「设置」标签（电脑上的拾景 / 这台设备 / 关于三栏）、配置方案、图库目录二级页、通用设置组件与离线缓存分区 |
+| `RecordsPage.swift` | 「记录」标签：运行日志、删除记录（含待删除原图入口）、不再选（按钮 / 左滑 / 长按恢复）三栏，以及离线时读取缓存的逻辑 |
 | `QueuedActionsView.swift` | 「待处理操作」页：离线时记下的移出、不再选、删除原图 |
 | `WallpapersView.swift` / `WallActions.swift` | 缩略图网格、「全部壁纸」页、撤销移出、统一的壁纸整理操作定义与按钮 |
 | `WallPreview.swift` / `WallPreviewChrome.swift` / `WallPreviewComponents.swift` | 大图预览、自适应顶底侧栏壳层、缩放与底部缩略图条 |

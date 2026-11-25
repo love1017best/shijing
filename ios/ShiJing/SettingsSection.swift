@@ -16,6 +16,7 @@ struct SettingsPage: View {
     @AppStorage("settingsGroup") private var groupRaw = "mac"
     /// 显示过的栏：没显示过的不构建内容（电脑状态每秒推一次，三页 List 不必一起重建）
     @State private var seenGroups: Set<String> = []
+    @State private var confirmCancelAllPending = false
     var body: some View {
         Group {
             if let state = session.state {
@@ -216,6 +217,7 @@ struct SettingsPage: View {
     private func macContent(_ state: RemoteState) -> some View {
         let disabled = state.running || session.offline
         macNoticeSection
+        ProfilesSection(session: session, state: state, showHelpHeader: true)
         if let set = state.settings {
             outputSection(set, state, disabled)
             samplingSection(set, disabled)
@@ -432,11 +434,17 @@ struct SettingsPage: View {
                     }
                 }
                 if items.count > 1 {
-                    Button("全部取消", role: .destructive) { Task { await session.cancelAllPending() } }
+                    Button("全部取消", role: .destructive) { confirmCancelAllPending = true }
                         .disabled(session.offline)
                 }
             } header: {
                 HelpHeader("待删除（\(items.count)）", "图库未连接时，需要删除的原图会先排在电脑上，图库连接后自动删除。取消后这张原图保留；壁纸文件夹中的那一份已在手机上移出。")
+            }
+            .confirmationDialog("取消全部 \(items.count) 项排队删除？", isPresented: $confirmCancelAllPending, titleVisibility: .visible) {
+                Button("全部取消", role: .destructive) { Task { await session.cancelAllPending() } }
+                Button("返回", role: .cancel) {}
+            } message: {
+                Text("取消后这些原图都会保留在图库里，不再等待删除。")
             }
         }
     }

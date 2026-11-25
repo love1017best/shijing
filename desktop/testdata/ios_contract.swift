@@ -78,6 +78,12 @@ private func runSchemaMode(dir: URL) throws {
     try check(full.excluded == 2 && full.pending == 1 && full.pendingItems?.count == 1, "RemoteState 计数或待删列表缺失")
     try check(full.pendingItems?.first?.wall != nil, "PendingItem.wall 缺失")
     try check(full.dirs?.count == 2 && full.dirs?.first?.deleted != nil, "LibraryDir 字段缺失")
+    try check(
+        full.activeProfile == "日常风景" && full.activeProfileModified == true &&
+        full.profiles?.count == 2 && full.profiles?.first?.willDelete == true &&
+        full.profiles?.last?.mode == "symlink",
+        "RemoteState 配置方案字段缺失或不一致"
+    )
     let last = try unwrap(full.last, "RemoteState.last 为空")
     try check(last.error != nil && last.brief != nil && last.detail != nil, "LastRun 可选字段缺失")
     let set = try unwrap(full.settings, "RemoteState.settings 为空")
@@ -258,8 +264,24 @@ private func runLiveMode() async throws {
     try check(afterCancelAll.pending == 0, "cancelPending(nil) 后应清空")
     _ = try await client.checkMounts()
 
-    // 12. 遥控运行与停止接口
-    _ = try await client.run(deleteOriginals: false)
+    // 11.5 配置方案切换（仅切换、错误校验）
+    let switched = try await client.switchProfile("暗色极简", run: false)
+    try check(
+        switched.activeProfile == "暗色极简" && switched.activeProfileModified != true &&
+        switched.sampleCount == 15 && switched.libraryDirs == 1 && switched.profiles?.count == 2 &&
+        switched.settings?.minWidth == 2560 && switched.settings?.minHeight == 1440,
+        "switchProfile(暗色极简) 状态异常: \(switched)"
+    )
+    try await expectServerError("POST /api/profiles/switch missing", status: 404) {
+        _ = try await client.switchProfile("不存在的方案")
+    }
+    try await expectServerError("POST /api/profiles/switch empty", status: 400) {
+        _ = try await client.switchProfile("   ")
+    }
+
+    // 12. 遥控运行与停止接口（用 switchProfile run: true 切回方案并启动）
+    let switchedRun = try await client.switchProfile("日常风景", run: true, deleteOriginals: false)
+    try check(switchedRun.activeProfile == "日常风景" && switchedRun.running, "switchProfile(run: true) 未启动运行")
     _ = try await client.stop()
 
     // 13. SSE 事件流：接收首帧并响应服务端状态变化

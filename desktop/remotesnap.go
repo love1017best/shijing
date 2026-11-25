@@ -176,6 +176,21 @@ type remoteState struct {
 	PendingList []remotePendingItem `json:"pending_items,omitempty"`
 	// 图库目录（手机上只读显示）：路径、是筛选还是仅采样、挂载状态、统计
 	Dirs []remoteDir `json:"dirs,omitempty"`
+	// 多套配置方案（场景预设）：当前方案名、是否相对方案有未保存改动、全部方案列表
+	ActiveProfile         string          `json:"active_profile,omitempty"`
+	ActiveProfileModified bool            `json:"active_profile_modified,omitempty"`
+	Profiles              []remoteProfile `json:"profiles,omitempty"`
+}
+
+// remoteProfile 是一套配置方案给手机展示的摘要。
+type remoteProfile struct {
+	Name        string `json:"name"`
+	SampleCount int    `json:"sample_count"`
+	MinWidth    int    `json:"min_width"`
+	MinHeight   int    `json:"min_height"`
+	LibraryDirs int    `json:"library_dirs"`
+	Mode        string `json:"mode"`
+	WillDelete  bool   `json:"will_delete"`
 }
 
 // remotePendingItem 是待删除队列里的一条（路径原样传回来取消）。
@@ -211,24 +226,28 @@ type remoteLast struct {
 var stageIDs = []string{"filter", "scan", "copy", "refresh"}
 
 func (a *app) remoteSnapshot() remoteState {
+	a.syncConfigFromShadow()
 	s := remoteState{
 		Version: a.version, Eyebrow: a.heroEyebrow(), Title: a.heroTitle(),
 		Running: a.running, Stopping: a.running && a.stopReq.Load(),
-		Fraction:    -1,
-		Blocked:     a.remoteBlocked(),
-		Unmounted:   a.unmountedCount(),
-		WillDelete:  a.willDelete(),
-		Wallpapers:  len(a.walls.all),
-		WallsRev:    a.remoteWallsRev(),
-		Dest:        tildify(a.cfg.DestDir),
-		Sample:      int(a.num),
-		Library:     len(a.allDirs()),
-		Settings:    a.remoteSettings(),
-		UndoName:    a.undoName(),
-		Excluded:    len(a.cfg.Excluded),
-		Pending:     len(a.pending),
-		PendingList: a.remotePendingList(),
-		Dirs:        a.remoteDirs(),
+		Fraction:              -1,
+		Blocked:               a.remoteBlocked(),
+		Unmounted:             a.unmountedCount(),
+		WillDelete:            a.willDelete(),
+		Wallpapers:            len(a.walls.all),
+		WallsRev:              a.remoteWallsRev(),
+		Dest:                  tildify(a.cfg.DestDir),
+		Sample:                int(a.num),
+		Library:               len(a.allDirs()),
+		Settings:              a.remoteSettings(),
+		UndoName:              a.undoName(),
+		Excluded:              len(a.cfg.Excluded),
+		Pending:               len(a.pending),
+		PendingList:           a.remotePendingList(),
+		Dirs:                  a.remoteDirs(),
+		ActiveProfile:         a.cfg.ActiveProfile,
+		ActiveProfileModified: a.cfg.ActiveProfileModified(),
+		Profiles:              a.remoteProfiles(),
 	}
 	if s.WillDelete {
 		s.DeleteNote = a.deleteNotice()
@@ -266,6 +285,30 @@ func (a *app) remoteSnapshot() remoteState {
 		s.NextAuto = next.Unix()
 	}
 	return s
+}
+
+// remoteProfiles 返回所有已保存配置方案的手机端摘要（主线程调用）。
+func (a *app) remoteProfiles() []remoteProfile {
+	if len(a.cfg.Profiles) == 0 {
+		return nil
+	}
+	out := make([]remoteProfile, 0, len(a.cfg.Profiles))
+	for _, p := range a.cfg.Profiles {
+		mode := p.Mode
+		if mode == "" {
+			mode = "copy"
+		}
+		out = append(out, remoteProfile{
+			Name:        p.Name,
+			SampleCount: p.SampleCount,
+			MinWidth:    p.MinWidth,
+			MinHeight:   p.MinHeight,
+			LibraryDirs: len(p.FilterAndSampleDirs) + len(p.SampleOnlyDirs),
+			Mode:        mode,
+			WillDelete:  p.WillDelete(),
+		})
+	}
+	return out
 }
 
 // remotePendingList 是待删除队列给手机看的那一份（主线程调用）。

@@ -82,6 +82,7 @@ struct DashboardView: View {
                     signingSection
                     pendingSection
                     wallsSection(rows: 3)
+                    ProfilesSection(session: session, state: state)
                     lastRunSection(state)
                     overviewSection(state)
                 }
@@ -114,6 +115,7 @@ struct DashboardView: View {
                 .frame(maxWidth: .infinity)
                 .layoutPriority(1)
                 List {
+                    ProfilesSection(session: session, state: s)
                     lastRunSection(s)
                     overviewSection(s)
                 }
@@ -508,8 +510,14 @@ struct DashboardView: View {
         if desk > 0 || mine > 0 {
             Section {
                 if desk > 0 {
-                    NoticeRow(icon: "clock", title: "电脑上排队 \(desk) 张",
-                              detail: "这些是图库未连接时记录的，图库连接后电脑会自动删除。不想删除的，请到「设置 › 待删除」中取消。")
+                    NavigationLink {
+                        PendingQueueView(session: session)
+                    } label: {
+                        NoticeRow(icon: "clock", title: "电脑上排队 \(desk) 张",
+                                  detail: session.offline
+                                      ? "这些是图库未连接时记录的，图库连接后电脑会自动删除。点开查看具体是哪几张。"
+                                      : "这些是图库未连接时记录的，图库连接后电脑会自动删除。点开可逐条或全部取消。")
+                    }
                 }
                 if mine > 0 {
                     let live = session.connection == .live

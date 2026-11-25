@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"desktop/core"
@@ -82,6 +83,7 @@ func (a *app) undoName() string {
 
 func (rs *remoteServer) extraRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/settings", rs.authed(rs.handleSettings))
+	mux.HandleFunc("POST /api/profiles/switch", rs.authed(rs.handleProfileSwitch))
 	mux.HandleFunc("GET /api/log", rs.authed(rs.handleLog))
 	mux.HandleFunc("POST /api/undo", rs.authed(rs.handleUndo))
 	mux.HandleFunc("GET /api/excluded", rs.authed(rs.handleExcluded))
@@ -128,6 +130,77 @@ func (rs *remoteServer) handleSettings(w http.ResponseWriter, r *http.Request, d
 		}
 	}) {
 		return
+	}
+	rs.writeSnapshot(w)
+}
+
+// handleProfileSwitch 切换配置方案，可选切换后立即换一批壁纸。
+// 请求体：{"name": "日常风景", "run": false, "delete": false}。
+func (rs *remoteServer) handleProfileSwitch(w http.ResponseWriter, r *http.Request, dev string) {
+	var body struct {
+		Name   string `json:"name"`
+		Run    bool   `json:"run"`
+		Delete bool   `json:"delete"`
+	}
+	if !readBodyOrFail(w, r, &body) {
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		writeErr(w, http.StatusBadRequest, "方案名称不能为空")
+		return
+	}
+
+	var status int
+	var errMsg string
+	var dirs []string
+	if !rs.onMainOrFail(w, func() {
+		a := rs.a
+		if a.running {
+			status, errMsg = http.StatusConflict, "正在更换壁纸，等完成后再切换方案"
+			return
+		}
+		if _, ok := a.cfg.FindProfile(name); !ok {
+			status, errMsg = http.StatusNotFound, fmt.Sprintf("找不到配置方案「%s」", name)
+			return
+		}
+		if err := a.applyProfile(name); err != nil {
+			status, errMsg = http.StatusConflict, err.Error()
+			return
+		}
+		a.appendLog("📱 「" + dev + "」切换到配置方案「" + name + "」")
+		if body.Run {
+			dirs = a.allDirs()
+		}
+	}) {
+		return
+	}
+	if status != 0 {
+		writeErr(w, status, errMsg)
+		return
+	}
+
+	if body.Run {
+		states := make([]mountState, len(dirs))
+		var wg sync.WaitGroup
+		for i, d := range dirs {
+			wg.Go(func() { states[i] = probeMount(rs.a.statDir, d) })
+		}
+		wg.Wait()
+
+		var runErr error
+		if !rs.onMainOrFail(w, func() {
+			for i, d := range dirs {
+				rs.a.setMountState(d, states[i])
+			}
+			runErr = rs.a.remoteRun(dev, body.Delete)
+		}) {
+			return
+		}
+		if runErr != nil {
+			writeErr(w, http.StatusConflict, runErr.Error())
+			return
+		}
 	}
 	rs.writeSnapshot(w)
 }

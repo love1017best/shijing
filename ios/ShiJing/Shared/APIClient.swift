@@ -155,6 +155,12 @@ struct APIClient: Sendable {
         try await send(request("POST", "api/settings", body: changes), as: RemoteState.self)
     }
 
+    /// 切换配置方案（场景预设）；run 为 true 时切换后立即换一批，deleteOriginals 控制是否删除不合格原图。
+    func switchProfile(_ name: String, run: Bool = false, deleteOriginals: Bool = false) async throws -> RemoteState {
+        let body: [String: Any] = ["name": name, "run": run, "delete": deleteOriginals]
+        return try await send(request("POST", "api/profiles/switch", body: body, timeout: run ? 20 : 15), as: RemoteState.self)
+    }
+
     /// 电脑上的运行日志（最近 400 行）。
     func log() async throws -> [String] {
         struct R: Decodable { var lines: [String] }
