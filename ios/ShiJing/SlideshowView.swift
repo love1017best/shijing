@@ -120,7 +120,9 @@ struct SlideshowView: View {
                                 .font(.caption2)
                             Text("\(playing ? "播放中" : "已暂停") · \(currentIndex + 1) / \(max(activeList.count, 1))")
                                 .font(.caption.monospacedDigit())
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(.white.opacity(0.92))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -136,11 +138,13 @@ struct SlideshowView: View {
             // 3. 底部液态玻璃信息卡（时钟 + 文件名）与自动隐藏控制胶囊
             VStack(spacing: 12) {
                 Spacer()
-                if size.width >= 820 {
+                if size.width >= 840 {
                     // 足够宽（Duo 内屏横屏、iPad）：信息卡靠左、控制条同排不重叠
-                    HStack(alignment: .bottom, spacing: 16) {
+                    // 分层 layoutPriority 避免 HStack 与 Spacer 平分提议宽度把按钮或文件名压扁
+                    HStack(alignment: .bottom, spacing: 12) {
                         if showInfo {
                             infoCard
+                                .layoutPriority(1)
                         } else {
                             Spacer(minLength: 0)
                         }
@@ -149,6 +153,7 @@ struct SlideshowView: View {
                         }
                         if showHUD {
                             wideControlBar
+                                .layoutPriority(2)
                                 .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                         if !showInfo {
@@ -163,7 +168,7 @@ struct SlideshowView: View {
                         }
                         if showHUD {
                             Group {
-                                if size.width >= 500 {
+                                if size.width >= 520 {
                                     wideControlBar
                                 } else {
                                     compactControlBar
@@ -248,10 +253,13 @@ struct SlideshowView: View {
                             .font(.system(size: isWide ? 36 : 30, weight: .bold, design: .rounded).monospacedDigit())
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
+                            .lineLimit(1)
                         Text(Self.dateText(ctx.date))
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.white.opacity(0.84))
+                            .lineLimit(1)
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                     HStack(spacing: 5) {
                         Text(Self.displayTitle(currentWall?.name ?? current))
                             .font(.footnote)
@@ -262,7 +270,7 @@ struct SlideshowView: View {
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.65))
                     }
-                    .frame(maxWidth: isWide ? 320 : 260, alignment: .leading)
+                    .frame(maxWidth: isWide ? 280 : 260, alignment: .leading)
                 }
             }
             .padding(.horizontal, 16)
@@ -288,6 +296,7 @@ struct SlideshowView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .glassBackground(in: Capsule(), tint: .black.opacity(0.32))
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var compactControlBar: some View {
@@ -298,6 +307,7 @@ struct SlideshowView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .glassBackground(in: Capsule(), tint: .black.opacity(0.3))
+            .fixedSize(horizontal: true, vertical: false)
 
             HStack(spacing: 6) {
                 playbackButtons
@@ -308,6 +318,7 @@ struct SlideshowView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .glassBackground(in: Capsule(), tint: .black.opacity(0.34))
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
@@ -335,12 +346,15 @@ struct SlideshowView: View {
         } label: {
             Text(Self.intervalLabel(intervalSec))
                 .font(.caption.weight(.semibold).monospacedDigit())
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(.white.opacity(0.94))
                 .padding(.horizontal, 10)
                 .frame(height: 34)
                 .background(.white.opacity(0.14), in: Capsule())
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityLabel("切图间隔：\(Self.intervalLabel(intervalSec))")
 
         barIconButton("shuffle", label: "随机播放", active: shuffle) {
@@ -370,12 +384,15 @@ struct SlideshowView: View {
         } label: {
             Text("整理")
                 .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(.white)
                 .padding(.horizontal, 11)
                 .frame(height: 34)
                 .background(.white.opacity(0.16), in: Capsule())
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityLabel("跳转到当前图片的大图预览进行整理")
     }
 

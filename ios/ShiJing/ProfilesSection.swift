@@ -95,9 +95,11 @@ struct ProfilesSection: View {
                 Label("换一批", systemImage: "shuffle")
                     .font(.caption.weight(.medium))
                     .labelStyle(.titleAndIcon)
+                    .lineLimit(1)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .fixedSize(horizontal: true, vertical: false)
             .disabled(disabled)
             .accessibilityLabel("切换到「\(p.name)」并换一批")
         }
