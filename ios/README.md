@@ -66,7 +66,8 @@ cd ios && xcodegen
 | `ShiJingApp.swift` | 入口：没有配对时显示 `SetupView`，否则显示三个标签页；前后台切换时断开 / 重连；本地通知 |
 | `MacListView.swift` / `PairView.swift` | 首次配对页、添加 / 管理 Mac、附近的 Mac 和手动输入地址 / 输入配对码 |
 | `QRScan.swift` | 扫描电脑上的配对二维码 |
-| `DashboardView.swift` | 概览：横幅卡、状态、步骤、进度、换一批 / 停止、配置方案、上一轮对比、签名到期提醒、待删除原图入口 |
+| `DashboardView.swift` | 概览：横幅卡（点击进入幻灯片）、状态、步骤、进度、换一批 / 停止、配置方案、上一轮对比、签名到期提醒、待删除原图入口 |
+| `SlideshowView.swift` | 幻灯片模式：全屏交叉淡入淡出播图、防息屏、液态玻璃时钟与文件名卡片、自动隐藏控制条，点卡片或「整理」跳转到当前图的大图预览 |
 | `ProfilesSection.swift` | 配置方案分组：概览页和设置页共用的方案切换与切换并换一批界面 |
 | `PendingQueueView.swift` | 「待删除原图」队列页：查看电脑上排队的待删除原图，逐条或全部取消 |
 | `SettingsSection.swift` / `SettingsComponents.swift` / `OfflineCacheSection.swift` | 「设置」标签（电脑上的拾景 / 这台设备 / 关于三栏）、配置方案、图库目录二级页、通用设置组件与离线缓存分区 |

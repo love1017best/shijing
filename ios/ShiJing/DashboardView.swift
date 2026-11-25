@@ -9,9 +9,13 @@ struct DashboardView: View {
     @State private var confirmDelete = false
     /// 宽屏两栏的列表要自己让开左右安全区
     @State private var safe = EdgeInsets()
-    /// 正在看的大图（横幅、概览里的缩略图、小组件点进来的都走这里）。
+    /// 正在看的大图（概览里的缩略图、小组件点进来的、以及幻灯片里点整理跳转过来的都走这里）。
     /// 放在这一层而不是缩略图网格里：转屏时宽窄两种排版换来换去，网格会被重建，状态放在里面预览就被关掉了。
     @State private var previewing: Wallpaper?
+    /// 点击横幅进入的幻灯片模式起点
+    @State private var slideshowStart: Wallpaper?
+    /// 从幻灯片点「整理」退出后待打开的大图预览（在 onDismiss 里弹出，避免双 cover 冲突）
+    @State private var pendingPreview: Wallpaper?
     /// 「全部壁纸」页；同理用状态推页面，不用放在分组标题里的 NavigationLink（转屏时它被重建，推出去的页面会被弹回来）
     @State private var showAll = false
     /// 横幅轮播现在显示的那张（nil = 电脑指定的横幅 `session.hero`）。见 `rotateHero`
@@ -32,6 +36,17 @@ struct DashboardView: View {
             .fullScreenCoverCompat(item: $previewing) { w in
                 WallPreview(session: session, startName: w.name)
             }
+            .fullScreenCoverCompat(item: $slideshowStart, onDismiss: {
+                if let w = pendingPreview {
+                    pendingPreview = nil
+                    previewing = w
+                }
+            }) { w in
+                SlideshowView(session: session, startName: w.name) { target in
+                    pendingPreview = target
+                    slideshowStart = nil
+                }
+            }
             .navigationDestination(isPresented: $showAll) { AllWallpapersView(session: session) }
             .task(id: "\(tabActive)|\(scenePhase == .active)") {
                 guard tabActive, scenePhase == .active else { return }
@@ -43,9 +58,12 @@ struct DashboardView: View {
             .onChange(of: session.walls) { openRequested() }
             #if DEBUG
             .onAppear {
-                // 演示模式截图用：-demoPreview 直接打开第 3 张的大图，-demoAll 直接打开「全部壁纸」
+                // 演示模式截图用：-demoPreview 直接打开第 3 张的大图，-demoSlideshow 直接进幻灯片，-demoAll 直接打开「全部壁纸」
                 if ProcessInfo.processInfo.arguments.contains("-demoPreview"), session.walls.count > 2 {
                     previewing = session.walls[2]
+                }
+                if ProcessInfo.processInfo.arguments.contains("-demoSlideshow"), let first = session.hero ?? session.walls.first {
+                    slideshowStart = first
                 }
                 if ProcessInfo.processInfo.arguments.contains("-demoAll") { showAll = true }
             }
@@ -140,12 +158,13 @@ struct DashboardView: View {
         previewing = w
     }
 
-    /// 顶部的横幅卡：背景是当前壁纸里的一张（和电脑上概览顶部同一张），点图片看大图。
+    /// 顶部的横幅卡：背景是当前壁纸里的一张（和电脑上概览顶部同一张），点击进入幻灯片模式。
     /// 窄屏：上面露出图片，下面压一整块毛玻璃放状态和按钮。
     /// 宽屏：图片铺满整张卡，左下角浮一块毛玻璃放状态，右下角是按钮；运行中毛玻璃撑满整行放步骤和进度。
     @ViewBuilder
     private func heroCard(_ s: RemoteState, wide: Bool) -> some View {
         let hero = shownHero
+        let canSlide = hero != nil && !s.running
         let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
         if wide && !s.running {
             HStack(alignment: .bottom, spacing: 16) {
@@ -160,36 +179,56 @@ struct DashboardView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, minHeight: 230, alignment: .bottom)
-            .background { heroBackground(hero) }
+            .background { heroBackground(hero, canSlide: canSlide) }
+            .overlay(alignment: .topTrailing) {
+                if canSlide { heroSlideshowBadge.padding(14) }
+            }
             .clipShape(shape)
         } else {
             VStack(spacing: 0) {
-                // 露出图片的部分：点开大图
+                // 露出图片的部分：点击进入幻灯片
                 Color.clear
                     .frame(height: wide ? 60 : (s.running ? 90 : 110))
                     .contentShape(Rectangle())
-                    .onTapGesture { if let hero { previewing = hero } }
-                    .accessibilityAddTraits(hero == nil ? [] : .isButton)
-                    .accessibilityLabel(hero.map { "查看大图：\($0.name)" } ?? "")
+                    .onTapGesture { if canSlide, let hero { slideshowStart = hero } }
+                    .accessibilityAddTraits(canSlide ? .isButton : [])
+                    .accessibilityLabel(canSlide ? "进入幻灯片：\(hero?.name ?? "")" : "")
                 heroPanel(s, wide: wide)
                     .padding(wide ? 16 : 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .modifier(HeroGlass(hero: hero, shape: RoundedRectangle(cornerRadius: 0)))
             }
-            .background { heroBackground(hero) }
+            .background { heroBackground(hero, canSlide: canSlide) }
+            .overlay(alignment: .topTrailing) {
+                if canSlide { heroSlideshowBadge.padding(12) }
+            }
             .clipShape(shape)
         }
     }
 
-    /// 横幅背景图；点空白处看大图（宽屏空闲时整张卡都是图）。
+    private var heroSlideshowBadge: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "play.fill")
+                .font(.system(size: 9, weight: .semibold))
+            Text("幻灯片")
+                .font(.caption2.weight(.medium))
+        }
+        .foregroundStyle(.white.opacity(0.94))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .glassBackground(in: Capsule(), tint: .black.opacity(0.24))
+        .allowsHitTesting(false)
+    }
+
+    /// 横幅背景图；点击空白处进入幻灯片模式（宽屏空闲时整张卡都是图）。
     @ViewBuilder
-    private func heroBackground(_ hero: Wallpaper?) -> some View {
+    private func heroBackground(_ hero: Wallpaper?, canSlide: Bool) -> some View {
         if let hero {
             WallImage(session: session, wall: hero, kind: heroKind(hero))
                 .id(hero.name) // 轮播换图时整张淡入淡出，不复用上一张的视图
                 .transition(.opacity)
                 .contentShape(Rectangle())
-                .onTapGesture { previewing = hero }
+                .onTapGesture { if canSlide { slideshowStart = hero } }
         } else {
             Color.groupedCell
         }
@@ -213,7 +252,7 @@ struct DashboardView: View {
             try? await Task.sleep(for: .seconds(10))
             if Task.isCancelled { return }
             let walls = session.walls
-            guard tabActive, scenePhase == .active, previewing == nil, !showAll, session.state?.running != true,
+            guard tabActive, scenePhase == .active, previewing == nil, slideshowStart == nil, !showAll, session.state?.running != true,
                   !ProcessInfo.processInfo.isLowPowerModeEnabled, walls.count > 1 else { continue }
             let start = shownHero.flatMap { cur in walls.firstIndex { $0.name == cur.name } } ?? 0
             for step in 1...min(5, walls.count - 1) {

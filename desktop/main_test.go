@@ -391,13 +391,18 @@ func TestHeroOpensItsImage(t *testing.T) {
 	tt.Frame()
 	click(t, tt, "打开壁纸文件夹")
 	tt.Frame()
-	if f.preview || opened == "" {
-		t.Fatalf("点横幅上的按钮不应打开预览: preview=%v opened=%q", f.preview, opened)
+	if f.preview || f.slideOpen || opened == "" {
+		t.Fatalf("点横幅上的按钮不应打开预览或幻灯片: preview=%v slide=%v opened=%q", f.preview, f.slideOpen, opened)
 	}
 	click(t, tt, "横幅壁纸")
 	tt.Frame()
-	if !f.preview || !tt.HasText("hero.jpg") || !tt.HasText("1 / 3") {
-		t.Errorf("点横幅应打开横幅图的大图: %q", tt.Texts())
+	if !f.slideOpen || f.slidePath != "/w/hero.jpg" || !tt.HasText("播放中 · 1 / 3") {
+		t.Errorf("点横幅应进入横幅图的幻灯片模式: slide=%v path=%q texts=%q", f.slideOpen, f.slidePath, tt.Texts())
+	}
+	click(t, tt, "查看并整理当前壁纸")
+	tt.Frame()
+	if f.slideOpen || !f.preview || !tt.HasText("hero.jpg") || !tt.HasText("1 / 3") {
+		t.Errorf("点幻灯片时钟/文件名卡应跳转到当前图的大图预览: slide=%v preview=%v texts=%q", f.slideOpen, f.preview, tt.Texts())
 	}
 }
 

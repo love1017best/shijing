@@ -118,6 +118,9 @@ func (a *app) wallMenu(m *ui.Menu, wall string) {
 	if m.Item("查看大图").Chosen() {
 		a.openPreviewOf(wall)
 	}
+	if m.Item("从这张开始幻灯片").Chosen() {
+		a.openSlideshowOf(wall)
+	}
 	if m.Item("用默认应用打开").Chosen() {
 		a.openPath(wall)
 	}
@@ -162,14 +165,26 @@ func (a *app) openPreviewOf(wall string) {
 // 按住空格连续翻时，翻过去的不会再解（以前每翻一张就开一个解码，十几张几千万像素的图同时解，内存一下冲上去）；
 // 顺着翻时下一张已经提前解好，翻过去直接是清楚的大图。离当前太远的大图丢掉，只留前后几张。
 func (a *app) pumpPreview() {
-	all := a.walls.all
-	if !a.preview || a.update == nil || len(all) == 0 {
+	if (!a.preview && !a.slideOpen) || a.update == nil || len(a.walls.all) == 0 {
+		return
+	}
+	var list []string
+	var center int
+	if a.slideOpen {
+		center, list = a.slideIndex()
+	} else {
+		list, center = a.walls.all, a.previewIdx
+	}
+	if len(list) == 0 || center < 0 || center >= len(list) {
 		return
 	}
 	keep := map[string]bool{}
+	if prev := a.slidePrevPath(); prev != "" {
+		keep[prev] = true
+	}
 	var todo []string
 	for _, d := range []int{0, 1, -1, 2} {
-		p := all[(a.previewIdx+d+len(all))%len(all)]
+		p := list[(center+d+len(list))%len(list)]
 		keep[p] = true
 		if _, done := a.big[p]; !done && !slices.Contains(todo, p) {
 			todo = append(todo, p)
@@ -189,8 +204,8 @@ func (a *app) pumpPreview() {
 		img := loadScaled(p, previewWidth)
 		a.update(func() {
 			a.bigBusy = false
-			if !a.preview {
-				return // 预览已经关了，不留
+			if !a.preview && !a.slideOpen {
+				return // 预览和幻灯片都关了，不留
 			}
 			if a.big == nil {
 				a.big = map[string]*ui.Bitmap{}
@@ -291,7 +306,9 @@ func (a *app) previewModal(c *ui.Context) {
 		a.pumpPreview()
 	} else {
 		a.jumpBuf, a.wheelAcc = "", 0
-		a.big = nil // 关掉预览就把大图都放掉（每张几十 MB）
+		if !a.slideOpen {
+			a.big = nil // 关掉预览且没开幻灯片就把大图都放掉（每张几十 MB）
+		}
 	}
 	vw, vh := c.Size()
 	wasOpen := a.preview

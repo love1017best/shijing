@@ -177,6 +177,7 @@ type app struct {
 	wallBarH       float32         // 选择操作条的高度，上一帧量到的
 	wallFilterKey  string          // 上次的筛选条件；变了就把网格滚回顶部
 	previewState                   // 大图预览（preview.go、undo.go）
+	slideshowState                 // 幻灯片模式（slideshow.go）
 	keyRecorder                    // 「快捷键」页的录制状态（keysview.go）
 	wallsGen       int             // 每次运行结束 +1，提示需要重新读取壁纸文件夹
 	wallsLoadedGen int
@@ -209,7 +210,10 @@ type app struct {
 	// setMenuKeys 把菜单栏命令（keyActions 里 menu 为 true 的）的快捷键交给菜单；测试里为 nil。
 	setMenuKeys func(map[string]string)
 	// showWindow 把隐藏的窗口重新显示出来（手机请求配对时）；测试里为 nil。
-	showWindow func()
+	showWindow    func()
+	isFullScreen  func() bool  // 查询窗口是否全屏（main.go 注入）
+	setFullScreen func(bool)   // 切换窗口全屏（main.go 注入）
+	setKeepAwake  func(bool)   // 防显示器息屏（main.go 注入）
 	remote     *remoteServer // 手机遥控服务，只在设置里打开时监听
 	pairOpen   bool          // 配对码弹层是否显示
 	pairCode   string        // 弹层显示的是哪一个配对码（新的请求来了重新弹出）
@@ -245,7 +249,10 @@ type app struct {
 }
 
 func newApp(cfgPath string, paths core.Paths) *app {
-	a := &app{cfgPath: cfgPath, paths: paths, page: pageOverview, mounts: map[string]mountState{}, started: time.Now()}
+	a := &app{
+		cfgPath: cfgPath, paths: paths, page: pageOverview, mounts: map[string]mountState{}, started: time.Now(),
+		slideshowState: defaultSlideshowState(),
+	}
 	a.logList.FollowEnd = true
 	a.run = func(cfg core.Config, rep core.Reporter) (core.Summary, error) {
 		return core.RunPipeline(cfg, paths, rep, nil)

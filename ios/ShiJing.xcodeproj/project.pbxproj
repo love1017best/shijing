@@ -42,6 +42,7 @@
 		9A201C796563873093360479 /* ProfilesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15C7D5F5AC8B9525B29DAFB /* ProfilesSection.swift */; };
 		9D0938E0B664D40BA4D3694E /* ImageStore+Prefetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83240B9AEFA6986C25B369E4 /* ImageStore+Prefetch.swift */; };
 		A2AFF9E185F4042964AB8AFF /* MacRelocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C083A13F84FAF5ED42216ED9 /* MacRelocator.swift */; };
+		A4E3CFA397697B3F183F16F8 /* SlideshowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE25B1175393B327397A9FF0 /* SlideshowView.swift */; };
 		A7A0B1BFE267C1B704117E74 /* OfflinePrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64A1FE1104D0236E89D7D58 /* OfflinePrefs.swift */; };
 		A804E19E549A123DB5135769 /* ImageStore+Disk.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F4072400DAF280B70CD407C /* ImageStore+Disk.swift */; };
 		B3974E68230A70F75046BBA6 /* QRScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A75E638475F79200CF9DB6D /* QRScan.swift */; };
@@ -138,6 +139,7 @@
 		D86F178096ED4F9BDCD820EE /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		DB7F89AA01677C0EB4EEDE4A /* WallPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallPreview.swift; sourceTree = "<group>"; };
 		DC583CFFDE12ABF27C4E1CC1 /* PendingQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingQueueView.swift; sourceTree = "<group>"; };
+		DE25B1175393B327397A9FF0 /* SlideshowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlideshowView.swift; sourceTree = "<group>"; };
 		E64A1FE1104D0236E89D7D58 /* OfflinePrefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflinePrefs.swift; sourceTree = "<group>"; };
 		E889EE0A5B2F87C3F2A883F6 /* OfflineCacheSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineCacheSection.swift; sourceTree = "<group>"; };
 		EBBECD2386D5DFE983684B8F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -228,6 +230,7 @@
 				04551D48684EF104173433F5 /* ShiJingApp.swift */,
 				D86F178096ED4F9BDCD820EE /* Signing.xcconfig */,
 				08A32667B20E7EAE1496A917 /* SigningExpiry.swift */,
+				DE25B1175393B327397A9FF0 /* SlideshowView.swift */,
 				203CA0AF52AC6DFA30E981A8 /* WallActions.swift */,
 				27D8BD3049F3539DD7DA7537 /* WallpapersView.swift */,
 				DB7F89AA01677C0EB4EEDE4A /* WallPreview.swift */,
@@ -368,6 +371,7 @@
 				297D4087083FCA357AF3B09A /* SharedKeychain.swift in Sources */,
 				94215927670239EE363E48CE /* ShiJingApp.swift in Sources */,
 				DCBBD1C38B5665384A54DF8F /* SigningExpiry.swift in Sources */,
+				A4E3CFA397697B3F183F16F8 /* SlideshowView.swift in Sources */,
 				042F5408C9309D785A58EE6B /* WallActions.swift in Sources */,
 				FF9B90C2D43F0864EF77A022 /* WallPreview.swift in Sources */,
 				EEBAEEC1CB19F5885A3B7D08 /* WallPreviewChrome.swift in Sources */,

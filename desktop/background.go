@@ -72,6 +72,7 @@ func setupBackground(a *app, win *mygo.Window) {
 			return
 		}
 		quitting = true
+		a.closeSlideshow(false)
 		if a.stopTimers != nil {
 			a.stopTimers()
 		}
@@ -103,6 +104,7 @@ func setupBackground(a *app, win *mygo.Window) {
 
 // hideMain 是关窗后台运行：隐藏窗口，Dock 图标也收起来，只留菜单栏的图标。
 func (a *app) hideMain(win *mygo.Window) {
+	a.closeSlideshow(false)
 	win.Hide()
 	mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
 }

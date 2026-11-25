@@ -13,7 +13,7 @@ func (a *app) view(c *ui.Context) {
 		a.initialized = true
 		a.checkMounts()
 	}
-	if !a.preview {
+	if !a.preview && !a.slideOpen {
 		a.undoKey(c) // 预览开着时由 previewKeys 接
 	}
 	if a.scanWallpapers != nil && !a.walls.loading &&
@@ -101,6 +101,7 @@ func (a *app) view(c *ui.Context) {
 	a.pairModal(c)
 	a.qrPairModal(c)
 	a.renameModal(c)
+	a.slideshowOverlay(c)
 	a.commitState()
 }
 

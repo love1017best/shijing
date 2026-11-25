@@ -7,7 +7,7 @@ extension RemoteSession {
     static var demoMode: String? {
         let args = ProcessInfo.processInfo.arguments
         if args.contains("-demoRunning") { return "running" }
-        return args.contains("-demo") || args.contains("-demoPreview") ? "idle" : nil
+        return args.contains("-demo") || args.contains("-demoPreview") || args.contains("-demoSlideshow") ? "idle" : nil
     }
 
     static func demo(_ mode: String, store: MacStore) -> RemoteSession {

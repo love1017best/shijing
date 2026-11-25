@@ -8,6 +8,7 @@ import (
 
 	"desktop/core"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -39,12 +40,13 @@ func (a *app) hero(c *ui.Context) {
 	box := ui.Box(c).Height(236).Radius(16).Clip().Background(duskTop)
 	// 轮播（advanceHero，main.go 每 heroInterval 调一次）换上的那张，没换过就是 walls.hero
 	heroBmp, heroPath := a.walls.shownHero()
-	if heroBmp != nil && heroPath != "" && !a.running {
-		// 横幅图也是壁纸文件夹里的一张：点空白处打开它的大图（按钮各管各的）
-		box.Label("横幅壁纸").Cursor(ui.CursorPointer).Tooltip(filepath.Base(heroPath) + "（单击查看大图，右键打开菜单）").
+	canSlide := heroBmp != nil && heroPath != "" && !a.running
+	if canSlide {
+		// 点横幅空白处进入幻灯片模式（按钮各管各的；右键菜单仍可直接查看大图或整理）
+		box.Label("横幅壁纸").Cursor(ui.CursorPointer).Tooltip(filepath.Base(heroPath) + "（单击进入幻灯片，右键打开菜单）").
 			ContextMenu(func(m *ui.Menu) { a.wallMenu(m, heroPath) })
 		if box.Clicked() {
-			a.openPreviewOf(heroPath)
+			a.openSlideshowOf(heroPath)
 		}
 	}
 	box.Children(func() {
@@ -62,6 +64,16 @@ func (a *app) hero(c *ui.Context) {
 			Angle: 180, Stops: []ui.GradientStop{
 				{Color: top, At: 0}, {Color: ui.RGBA(0, 0, 0, 0.12), At: 0.4}, {Color: ui.RGBA(0, 0, 0, 0.68), At: 1},
 			}})
+
+		if canSlide {
+			ui.Row(c).Absolute().Top(14).Right(16).Gap(5).AlignItems(ui.Center).
+				Padding(5, 10).Radius(14).
+				Material(glass.Glass{Tint: ui.RGBA(0, 0, 0, 0.22)}).
+				Border(1, white.Alpha(0.18)).Children(func() {
+				ui.Icon(c, iconPlay).FontSize(11).TextColor(white.Alpha(0.92))
+				ui.Text(c, "幻灯片").FontSize(11.5).TextColor(white.Alpha(0.92)).SingleLine()
+			})
+		}
 
 		ui.Row(c).Absolute().Left(24).Right(22).Bottom(20).Gap(16).AlignItems(ui.End).Children(func() {
 			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(4).Children(func() {

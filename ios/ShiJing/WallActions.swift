@@ -149,11 +149,15 @@ extension View {
 
     /// iOS 用全屏弹层，Mac 上做类型检查时退回普通弹层。
     @ViewBuilder
-    func fullScreenCoverCompat<Item: Identifiable, Content: View>(item: Binding<Item?>, @ViewBuilder content: @escaping (Item) -> Content) -> some View {
+    func fullScreenCoverCompat<Item: Identifiable, Content: View>(
+        item: Binding<Item?>,
+        onDismiss: (() -> Void)? = nil,
+        @ViewBuilder content: @escaping (Item) -> Content
+    ) -> some View {
         #if os(iOS)
-        fullScreenCover(item: item, content: content)
+        fullScreenCover(item: item, onDismiss: onDismiss, content: content)
         #else
-        sheet(item: item, content: content)
+        sheet(item: item, onDismiss: onDismiss, content: content)
         #endif
     }
 

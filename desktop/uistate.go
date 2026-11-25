@@ -18,6 +18,11 @@ type uiState struct {
 	// LastSuccess 是最近一次成功运行的结果：上次运行失败或被停止时，图库统计和空间预估仍然有数
 	LastSuccess       *core.Summary `json:"last_success,omitempty"`
 	SkipDeleteConfirm bool          `json:"skip_delete_confirm,omitempty"`
+	SlideIntervalSec  int           `json:"slide_interval_sec,omitempty"`
+	SlideShuffle      bool          `json:"slide_shuffle,omitempty"`
+	SlideContain      bool          `json:"slide_contain,omitempty"`
+	SlideHideInfo     bool          `json:"slide_hide_info,omitempty"`
+	SlideNoAwake      bool          `json:"slide_no_awake,omitempty"`
 }
 
 type savedRun struct {
@@ -39,6 +44,13 @@ func (a *app) loadUIState() {
 	}
 	a.skipConfirm = s.SkipDeleteConfirm
 	a.lastGood = s.LastSuccess
+	if s.SlideIntervalSec > 0 {
+		a.slideIntervalSec = s.SlideIntervalSec
+	}
+	a.slideShuffle = s.SlideShuffle
+	a.slideCover = !s.SlideContain
+	a.slideShowInfo = !s.SlideHideInfo
+	a.slideKeepAwake = !s.SlideNoAwake
 	if r := s.LastRun; r != nil {
 		a.last = &runResult{sum: r.Summary, err: savedError(r.Error), at: r.At}
 		if a.lastGood == nil && r.Error == "" {
@@ -63,7 +75,15 @@ func savedError(msg string) error {
 
 // saveUIState 只在主线程调用；文件很小，写失败也不影响使用，忽略错误。
 func (a *app) saveUIState() {
-	s := uiState{SkipDeleteConfirm: a.skipConfirm, LastSuccess: a.lastGood}
+	s := uiState{
+		SkipDeleteConfirm: a.skipConfirm,
+		LastSuccess:       a.lastGood,
+		SlideIntervalSec:  a.slideIntervalSec,
+		SlideShuffle:      a.slideShuffle,
+		SlideContain:      !a.slideCover,
+		SlideHideInfo:     !a.slideShowInfo,
+		SlideNoAwake:      !a.slideKeepAwake,
+	}
 	if r := a.last; r != nil {
 		s.LastRun = &savedRun{At: r.at, Summary: r.sum}
 		if r.err != nil {

@@ -107,6 +107,13 @@ func main() {
 			Content:         ui.View(a.view),
 		})
 		a.showWindow = func() { a.showMain(win) }
+		a.isFullScreen = win.IsFullScreen
+		a.setFullScreen = win.SetFullScreen
+		awake := &displayAwakeGuard{}
+		a.setKeepAwake = awake.Set
+		win.OnLeaveFullScreen(func() {
+			a.slideEnteredFS = false
+		})
 		stopCh := make(chan struct{})
 		a.stopTimers = func() {
 			select {
@@ -114,6 +121,7 @@ func main() {
 			default:
 				close(stopCh)
 			}
+			awake.Set(false)
 		}
 		// 定时自动换壁纸：必须在 win 初始化完成后再启动，避免与 win 赋值发生数据竞争。
 		// 有待删原图排队时顺手再查一遍图库挂上没、挂上了就执行。
@@ -145,8 +153,28 @@ func main() {
 					return
 				case <-tk.C:
 					w.Update(func() {
-						if w.IsVisible() {
+						if w.IsVisible() && !a.slideOpen {
 							a.advanceHero()
+						}
+					})
+				}
+			}
+		}(win)
+		// 幻灯片定时驱动：每秒更新时钟并检查切图（未开幻灯片时通过 atomic 直接跳过，不唤醒主线程）
+		go func(w *mygo.Window) {
+			tk := time.NewTicker(time.Second)
+			defer tk.Stop()
+			for {
+				select {
+				case <-stopCh:
+					return
+				case now := <-tk.C:
+					if !a.slideOpenAtomic.Load() {
+						continue
+					}
+					w.Update(func() {
+						if w.IsVisible() {
+							a.tickSlideshow(now)
 						}
 					})
 				}
