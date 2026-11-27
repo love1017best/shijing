@@ -95,7 +95,7 @@ func (a *app) dirSection(c *ui.Context, key, title string, icon *ui.SVG, desc st
 				d := dirs[i]
 				ui.Row(c).Gap(12).AlignItems(ui.Center).Padding(9, 14).ContextMenu(func(m *ui.Menu) {
 					if m.Item("在 Finder 中打开").Chosen() {
-						a.openPath(d)
+						a.openSourceDir(d)
 					}
 					m.Separator()
 					// 右键的是已选中的多项之一：一起移除；否则只移除这一项

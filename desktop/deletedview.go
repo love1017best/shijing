@@ -128,7 +128,7 @@ func (a *app) deletedRow(c *ui.Context, r core.DeleteRecord) {
 	row := ui.Row(c).Gap(10).AlignItems(ui.Center).Padding(7, 14)
 	row.ContextMenu(func(m *ui.Menu) {
 		if m.Item("在 Finder 中打开所在文件夹").Chosen() {
-			a.openPath(dir)
+			a.openSourceDir(dir)
 		}
 		if m.Item("拷贝完整路径").Chosen() {
 			c.WriteClipboard(r.Path)

@@ -435,3 +435,166 @@ func (a *app) dropWall(wall string) {
 		}
 	}
 }
+
+type probeOutcome int
+
+const (
+	probeOK probeOutcome = iota
+	probeUnmounted
+	probeMissing
+	probeTimeout
+)
+
+// probePathWithTimeout 在后台带超时检查图库中的文件或目录是否可访问，避免挂起的网络卷阻塞主线程。
+func probePathWithTimeout(target, libDir string, needDir bool, timeout time.Duration) probeOutcome {
+	ch := make(chan probeOutcome, 1)
+	go func() {
+		p := core.ExpandUser(target)
+		var (
+			fi  os.FileInfo
+			err error
+		)
+		if needDir {
+			fi, err = os.Stat(p)
+		} else {
+			fi, err = os.Lstat(p)
+		}
+		if err == nil {
+			if !needDir || fi.IsDir() {
+				ch <- probeOK
+				return
+			}
+			ch <- probeMissing
+			return
+		}
+		if !os.IsNotExist(err) {
+			ch <- probeUnmounted
+			return
+		}
+		// 目标不存在：区分「图库未连接」与「图库已连接但单个文件/子目录已不存在」
+		if libDir != "" {
+			if needDir && mountKey(target) == mountKey(libDir) {
+				ch <- probeUnmounted
+				return
+			}
+			if _, lerr := os.Stat(core.ExpandUser(libDir)); lerr != nil {
+				ch <- probeUnmounted
+				return
+			}
+			ch <- probeMissing
+			return
+		}
+		if needDir {
+			if strings.HasPrefix(p, "/Volumes/") {
+				ch <- probeUnmounted
+				return
+			}
+			ch <- probeMissing
+			return
+		}
+		if _, derr := os.Stat(filepath.Dir(p)); derr != nil {
+			ch <- probeUnmounted
+			return
+		}
+		ch <- probeMissing
+	}()
+	select {
+	case out := <-ch:
+		return out
+	case <-time.After(timeout):
+		return probeTimeout
+	}
+}
+
+// revealSource 在 Finder 中显示图库原图；图库未连接、无响应或文件不存在时弹出提示，
+// 避免 NSWorkspace 静默无反应。
+func (a *app) revealSource(src string) {
+	if src == "" {
+		return
+	}
+	a.openOrRevealSource(src, false)
+}
+
+// openSourceDir 在 Finder 中打开图库目录或其子目录；目录未连接或不存在时弹出提示。
+func (a *app) openSourceDir(dir string) {
+	if dir == "" {
+		return
+	}
+	a.openOrRevealSource(dir, true)
+}
+
+func (a *app) openOrRevealSource(target string, isDir bool) {
+	st, libDir, matched := a.sourceMountState(target)
+	// 已知卷挂起无响应时直接提示，避免对卡死卷反复起 stat 泄漏线程
+	if matched && st == mountSlow {
+		if isDir {
+			a.toast = "当前图库目录无响应，暂时无法打开"
+		} else {
+			a.toast = "当前图库目录无响应，暂时无法显示原图"
+		}
+		return
+	}
+	finish := func(out probeOutcome) {
+		switch out {
+		case probeOK:
+			if matched && a.mountStateOf(libDir) != mountOK {
+				a.setMountState(libDir, mountOK)
+				a.maybeProcessPending()
+			}
+			if isDir {
+				a.openPath(target)
+			} else {
+				a.revealPath(target)
+			}
+		case probeUnmounted:
+			if matched {
+				a.setMountState(libDir, mountMissing)
+			}
+			if isDir {
+				a.toast = "当前图库目录未连接，无法在 Finder 中打开"
+			} else {
+				a.toast = "当前图库目录未连接，无法显示原图"
+			}
+		case probeTimeout:
+			if matched {
+				a.setMountState(libDir, mountSlow)
+			}
+			if isDir {
+				a.toast = "当前图库目录无响应，暂时无法打开"
+			} else {
+				a.toast = "当前图库目录无响应，暂时无法显示原图"
+			}
+		case probeMissing:
+			if matched && a.mountStateOf(libDir) != mountOK {
+				a.setMountState(libDir, mountOK)
+			}
+			if isDir {
+				a.toast = "找不到该文件夹，可能已被移动或删除"
+			} else {
+				a.toast = "找不到原图文件，可能已被移动或删除"
+			}
+		}
+	}
+	if a.update == nil {
+		finish(probePathWithTimeout(target, libDir, isDir, mountProbeTimeout))
+		return
+	}
+	key := "file:" + mountKey(target)
+	if isDir {
+		key = "dir:" + mountKey(target)
+	}
+	if a.probingPaths[key] {
+		return
+	}
+	if a.probingPaths == nil {
+		a.probingPaths = map[string]bool{}
+	}
+	a.probingPaths[key] = true
+	go func() {
+		out := probePathWithTimeout(target, libDir, isDir, mountProbeTimeout)
+		a.update(func() {
+			delete(a.probingPaths, key)
+			finish(out)
+		})
+	}()
+}

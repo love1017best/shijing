@@ -46,7 +46,7 @@ func (a *app) previewKeys(c *ui.Context, wall string, hasSrc, canDelete bool, st
 		a.revealPath(wall)
 	case hasSrc && a.pressed(c, "reveal", true):
 		a.jumpBuf = ""
-		a.revealPath(a.wallSource(wall))
+		a.revealSource(a.wallSource(wall))
 	}
 }
 
@@ -128,7 +128,7 @@ func (a *app) wallMenu(m *ui.Menu, wall string) {
 		a.revealPath(wall)
 	}
 	if src != "" && m.Item("在 Finder 中显示原图").Chosen() {
-		a.revealPath(src)
+		a.revealSource(src)
 	}
 	m.Separator()
 	if m.Item(actRemove + "（原图保留）").Chosen() {
@@ -373,7 +373,7 @@ func (a *app) previewModal(c *ui.Context) {
 				keyButton(c, nil, "打开", a.keyLabel("open")).Tooltip(withKey("用默认应用打开", a.keyLabel("open"))).OnClick(func() { a.openPath(wall) })
 				keyButton(c, nil, "显示壁纸", a.keyLabel("reveal_wall")).Tooltip(withKey("在 Finder 中显示这张壁纸（在壁纸文件夹里选中它）", a.keyLabel("reveal_wall"))).OnClick(func() { a.revealPath(wall) })
 				if src != "" {
-					keyButton(c, nil, "显示原图", a.keyLabel("reveal")).Tooltip(withKey("在 Finder 中显示原图（在图库里选中它）", a.keyLabel("reveal"))).OnClick(func() { a.revealPath(src) })
+					keyButton(c, nil, "显示原图", a.keyLabel("reveal")).Tooltip(withKey("在 Finder 中显示原图（在图库里选中它）", a.keyLabel("reveal"))).OnClick(func() { a.revealSource(src) })
 				}
 				ui.Spacer(c)
 				keyButton(c, nil, actRemove, a.keyLabel("remove")).Tooltip(actRemoveTip).OnClick(func() { a.report(a.removeWallpaper(wall, false)) })

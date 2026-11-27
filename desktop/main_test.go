@@ -476,6 +476,7 @@ func TestPreviewKeyboard(t *testing.T) {
 		t.Errorf("D 应在 Finder 里选中这张壁纸: %q", opened)
 	}
 	tt.Key(0, ui.KeyF)
+	f.settle(t, tt, func() bool { return opened == "reveal:"+srcs["s-d.jpg"] })
 	if opened != "reveal:"+srcs["s-d.jpg"] {
 		t.Errorf("F 应在 Finder 里选中原图: %q", opened)
 	}
@@ -529,7 +530,14 @@ func TestRunNeedsDestDir(t *testing.T) {
 
 func TestLibraryContextMenu(t *testing.T) {
 	f, tt := newFakeApp(t)
-	f.cfg.FilterAndSampleDirs = []string{"/Volumes/Media0/A", "/Volumes/Media0/B"}
+	root := t.TempDir()
+	dirA, dirB := filepath.Join(root, "A"), filepath.Join(root, "B")
+	for _, d := range []string{dirA, dirB} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.cfg.FilterAndSampleDirs = []string{dirA, dirB}
 	click(t, tt, "图库")
 	if err := tt.RightClick("B"); err != nil {
 		t.Fatal(err)
@@ -537,8 +545,8 @@ func TestLibraryContextMenu(t *testing.T) {
 	if err := tt.ChooseMenuItem("在 Finder 中打开"); err != nil {
 		t.Fatalf("%v, 菜单: %q", err, tt.Menu())
 	}
-	tt.Frame()
-	if !slices.Equal(f.opened, []string{"/Volumes/Media0/B"}) {
+	f.settle(t, tt, func() bool { return len(f.opened) == 1 })
+	if !slices.Equal(f.opened, []string{dirB}) {
 		t.Errorf("应在 Finder 中打开目录: %q", f.opened)
 	}
 	if err := tt.RightClick("A"); err != nil {
@@ -548,7 +556,7 @@ func TestLibraryContextMenu(t *testing.T) {
 		t.Fatalf("%v, 菜单: %q", err, tt.Menu())
 	}
 	tt.Frame()
-	if !slices.Equal(f.cfg.FilterAndSampleDirs, []string{"/Volumes/Media0/B"}) {
+	if !slices.Equal(f.cfg.FilterAndSampleDirs, []string{dirB}) {
 		t.Errorf("右键移除后: %q", f.cfg.FilterAndSampleDirs)
 	}
 }

@@ -245,6 +245,7 @@ type app struct {
 	pendingMu       sync.Mutex
 	pendingCanceled map[string]bool // 后台 RunPending 执行期间被取消的路径
 	deletingWalls   map[string]bool // 正在后台删除 NAS 原图的壁纸路径，防重复点击
+	probingPaths    map[string]bool // 正在后台探测可访问性的图库路径，防连点重复提示
 	stopTimers      func()          // 退出前停止后台定时器（main.go 注入）
 }
 

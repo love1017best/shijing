@@ -23,22 +23,31 @@ func (a *app) loadPending() { a.pending = core.LoadPending(a.paths.Pending) }
 
 func (a *app) savePending() { _ = core.SavePending(a.paths.Pending, a.pending) }
 
+// sourceMountState 查找路径所属的图库目录（取最长前缀匹配）及其当前挂载状态。
+// 只按配置里的目录前缀和缓存的挂载状态判断，不去 stat（网络卷卡住时 stat 会阻塞）。
+func (a *app) sourceMountState(path string) (mountState, string, bool) {
+	key := mountKey(path)
+	var matchedRaw, matchedKey string
+	for _, raw := range a.allDirs() {
+		d := mountKey(raw)
+		if key != d && !strings.HasPrefix(key, d+"/") {
+			continue
+		}
+		if len(d) > len(matchedKey) {
+			matchedRaw, matchedKey = raw, d
+		}
+	}
+	if matchedKey == "" {
+		return mountUnknown, "", false
+	}
+	return a.mountStateOf(matchedRaw), matchedRaw, true
+}
+
 // sourceUnmounted 判断这张原图所在的图库目录现在是不是连不上。
 // 只按配置里的目录前缀和挂载状态判断，不去 stat（网络卷卡住时 stat 会阻塞）。
 func (a *app) sourceUnmounted(src string) bool {
-	src = mountKey(src)
-	for _, raw := range a.allDirs() {
-		d := mountKey(raw)
-		if src != d && !strings.HasPrefix(src, d+"/") {
-			continue
-		}
-		switch a.mountStateOf(raw) {
-		case mountMissing, mountSlow:
-			return true
-		}
-		return false
-	}
-	return false
+	st, _, ok := a.sourceMountState(src)
+	return ok && (st == mountMissing || st == mountSlow)
 }
 
 // enqueuePending 仅把原图记进待办队列并写日志，不动壁纸文件夹里的本地文件。

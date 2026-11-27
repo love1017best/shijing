@@ -269,4 +269,107 @@ func TestPendingSkipsWhenRunLocked(t *testing.T) {
 	}
 }
 
+// 图库目录未连接、无响应、文件缺失、以及重新连上后点击「显示原图」的提示与恢复行为。
+func TestRevealSourceAndOpenDirFeedback(t *testing.T) {
+	t.Run("图库未连接提示", func(t *testing.T) {
+		f, tt := newFakeApp(t)
+		libDir := filepath.Join(t.TempDir(), "missing-lib")
+		src := filepath.Join(libDir, "a.jpg")
+		f.cfg.FilterAndSampleDirs = []string{libDir}
+		f.setMountState(libDir, mountMissing)
+
+		f.revealSource(src)
+		f.settle(t, tt, func() bool { return tt.HasText("当前图库目录未连接，无法显示原图") })
+		if len(f.opened) != 0 {
+			t.Fatalf("图库未连接时不应调用 Finder 打开: %v", f.opened)
+		}
+	})
+
+	t.Run("图库无响应同步提示", func(t *testing.T) {
+		f, _ := newFakeApp(t)
+		libDir := "/Volumes/Slow/Fav"
+		f.cfg.FilterAndSampleDirs = []string{libDir}
+		f.setMountState(libDir, mountSlow)
+
+		f.revealSource(filepath.Join(libDir, "a.jpg"))
+		if !strings.Contains(f.toast, "当前图库目录无响应") {
+			t.Fatalf("图库无响应时应立即提示: %q", f.toast)
+		}
+		if len(f.opened) != 0 {
+			t.Fatalf("图库无响应时不应调用 Finder 打开: %v", f.opened)
+		}
+	})
+
+	t.Run("图库已连接但原图缺失", func(t *testing.T) {
+		f, tt := newFakeApp(t)
+		libDir := t.TempDir()
+		src := filepath.Join(libDir, "gone.jpg")
+		f.cfg.FilterAndSampleDirs = []string{libDir}
+		f.setMountState(libDir, mountOK)
+
+		f.revealSource(src)
+		f.settle(t, tt, func() bool { return tt.HasText("找不到原图文件，可能已被移动或删除") })
+		if len(f.opened) != 0 {
+			t.Fatalf("文件不存在时不应调用 Finder 打开: %v", f.opened)
+		}
+	})
+
+	t.Run("缓存未挂载但已重新连上时恢复状态并打开", func(t *testing.T) {
+		f, tt := newFakeApp(t)
+		libDir := t.TempDir()
+		src := filepath.Join(libDir, "ok.jpg")
+		if err := os.WriteFile(src, []byte("img"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		f.cfg.FilterAndSampleDirs = []string{libDir}
+		f.setMountState(libDir, mountMissing)
+
+		f.revealSource(src)
+		f.settle(t, tt, func() bool { return len(f.opened) == 1 })
+		if f.opened[0] != "reveal:"+src {
+			t.Fatalf("应打开原图: %v", f.opened)
+		}
+		if f.mountStateOf(libDir) != mountOK {
+			t.Fatalf("重连后应顺手把挂载状态恢复为 mountOK，实际=%v", f.mountStateOf(libDir))
+		}
+	})
+
+	t.Run("大图预览点显示原图按钮在图库未连接时提示", func(t *testing.T) {
+		f, tt := newFakeApp(t)
+		dest := t.TempDir()
+		wall := filepath.Join(dest, "w.jpg")
+		if err := os.WriteFile(wall, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		libDir := filepath.Join(t.TempDir(), "offline-lib")
+		src := filepath.Join(libDir, "origin.jpg")
+		f.cfg.DestDir = dest
+		f.cfg.FilterAndSampleDirs = []string{libDir}
+		f.setMountState(libDir, mountMissing)
+		f.walls = wallpapers{dir: dest, all: []string{wall}, sources: map[string]string{"w.jpg": src}}
+		f.wallsLoadedGen = f.wallsGen
+		f.preview, f.previewIdx = true, 0
+		tt.Frame()
+
+		click(t, tt, "显示原图")
+		f.settle(t, tt, func() bool { return tt.HasText("当前图库目录未连接，无法显示原图") })
+		if len(f.opened) != 0 {
+			t.Fatalf("图库未连接时不应调用 Finder 打开: %v", f.opened)
+		}
+	})
+
+	t.Run("图库目录未连接时打开目录给出提示", func(t *testing.T) {
+		f, tt := newFakeApp(t)
+		libDir := filepath.Join(t.TempDir(), "missing-dir")
+		f.cfg.SampleOnlyDirs = []string{libDir}
+		f.setMountState(libDir, mountMissing)
+
+		f.openSourceDir(libDir)
+		f.settle(t, tt, func() bool { return tt.HasText("当前图库目录未连接，无法在 Finder 中打开") })
+		if len(f.opened) != 0 {
+			t.Fatalf("目录未连接时不应调用 openPath: %v", f.opened)
+		}
+	})
+}
+
 
