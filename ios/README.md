@@ -67,7 +67,7 @@ cd ios && xcodegen
 | `MacListView.swift` / `PairView.swift` | 首次配对页、添加 / 管理 Mac、附近的 Mac 和手动输入地址 / 输入配对码 |
 | `QRScan.swift` | 扫描电脑上的配对二维码 |
 | `DashboardView.swift` | 概览：横幅卡（点击进入幻灯片）、状态、步骤、进度、换一批 / 停止、配置方案、上一轮对比、签名到期提醒、待删除原图入口 |
-| `SlideshowView.swift` | 幻灯片模式：全屏交叉淡入淡出播图、防息屏、液态玻璃时钟与文件名卡片、自动隐藏控制条，点卡片或「整理」跳转到当前图的大图预览 |
+| `SlideshowView.swift` / `SlideshowChrome.swift` | 幻灯片模式：全屏交叉淡入淡出播图、四向安全区/遮挡区避让与防息屏 / 液态玻璃状态胶囊、时钟与文件名卡片、宽/紧凑控制条（点卡片或「整理」跳到当前图的大图预览） |
 | `ProfilesSection.swift` | 配置方案分组：概览页和设置页共用的方案切换与切换并换一批界面 |
 | `PendingQueueView.swift` | 「待删除原图」队列页：查看电脑上排队的待删除原图，逐条或全部取消 |
 | `SettingsSection.swift` / `SettingsComponents.swift` / `OfflineCacheSection.swift` | 「设置」标签（电脑上的拾景 / 这台设备 / 关于三栏）、配置方案、图库目录二级页、通用设置组件与离线缓存分区 |
@@ -75,7 +75,7 @@ cd ios && xcodegen
 | `QueuedActionsView.swift` | 「待处理操作」页：离线时记下的移出、不再选、删除原图 |
 | `WallpapersView.swift` / `WallActions.swift` | 缩略图网格、「全部壁纸」页、撤销移出、统一的壁纸整理操作定义与按钮 |
 | `WallPreview.swift` / `WallPreviewChrome.swift` / `WallPreviewComponents.swift` | 大图预览、自适应顶底侧栏壳层、缩放与底部缩略图条 |
-| `RemoteSession.swift` / `RemoteSession+Actions.swift` | 和一台 Mac 的连接、SSE 事件流、断线重连与网络监测 / 换批、设置、撤销、壁纸整理与存相册操作 |
+| `RemoteSession.swift` / `RemoteConnection.swift` / `RemoteSession+Actions.swift` | 单台 Mac 的会话状态 / 连接状态机、SSE 事件流、网络监测与 Bonjour 重定位 / 换批、设置、撤销、壁纸整理与存相册操作 |
 | `RemoteSession+Queue.swift` | 离线操作队列：保存、连接后逐条处理、确认删除原图 |
 | `OfflineMode.swift` / `Shared/OfflinePrefs.swift` | 离线模式：手动离线、使用蜂窝网络时离线；设置存在共享钥匙串，小组件也读 |
 | `ConnectionUI.swift` | 连接异常时的整页提示、断开 / 重连时的状态徽标 |
@@ -87,6 +87,7 @@ cd ios && xcodegen
 | `AppShortcuts.swift` | Siri、聚焦和操作按钮里可直接使用的快捷指令 |
 | `RemoteSessionDemo.swift` | Debug 构建的演示数据（`-demo*` 启动参数，截图用） |
 | `Shared/APIClient.swift` / `Shared/Models.swift` | 接口客户端 / 数据结构（App 和小组件共用） |
+| `Shared/CoreLogic.swift` | 纯逻辑模块：离线队列演进、图片缓存淘汰、小组件缓存池清理、断线重连退避与幻灯片播放规则（可脱离 Xcode 由 `go test` 编译运行单测） |
 | `Shared/MacRelocator.swift` | Mac 局域网地址变化时按 Bonjour `sid` 自动发现新地址并更新连接（App、小组件、快捷指令共用） |
 | `Shared/SharedKeychain.swift` | 共享钥匙串：令牌、`CurrentMac` |
 | `Shared/Intents.swift` | 换一批 / 停止 / 状态三个 App Intent（快捷指令和小组件按钮使用） |

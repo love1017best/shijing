@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -128,5 +129,81 @@ func TestSlideshowAutoExitsOnRun(t *testing.T) {
 	tt.Frame()
 	if f.slideOpen || awake {
 		t.Fatalf("开始换一批壁纸时应自动退出幻灯片并释放防息屏: open=%v awake=%v", f.slideOpen, awake)
+	}
+}
+
+func TestSlideshowOrderStepWaitAndFormatting(t *testing.T) {
+	// 格式化辅助
+	if got := slideIntervalLabel(5); got != "5秒" {
+		t.Fatalf("5秒标签错误: %q", got)
+	}
+	if got := slideIntervalLabel(60); got != "1分" {
+		t.Fatalf("60秒标签错误: %q", got)
+	}
+	if got := slideIntervalLabel(90); got != "90秒" {
+		t.Fatalf("90秒标签错误: %q", got)
+	}
+	if got := slideFileTitle("/a/b/sunset.4k.jpg"); got != "sunset.4k" {
+		t.Fatalf("去扩展名错误: %q", got)
+	}
+	if got := slideFileTitle("/a/b/.hidden"); got != ".hidden" {
+		t.Fatalf("隐藏文件名不应去空: %q", got)
+	}
+	dt := time.Date(2026, 11, 28, 20, 0, 0, 0, time.UTC) // 周六
+	if got := slideDateText(dt); got != "11月28日 周六" {
+		t.Fatalf("日期格式错误: %q", got)
+	}
+
+	f, _ := newFakeApp(t)
+	walls := []string{"/w/a.jpg", "/w/b.jpg", "/w/c.jpg", "/w/d.jpg"}
+	f.walls = wallpapers{dir: core.ExpandUser(f.cfg.DestDir), all: walls}
+	f.wallsLoadedGen = f.wallsGen
+	f.openSlideshowOf(walls[1])
+
+	// 反向循环与大步长负偏移，并验证 A/B 槽位交替与 slidePrevPath
+	now := time.Now()
+	f.slideStep(-1, now)
+	if f.slidePath != walls[0] || f.slidePrevPath() != walls[1] {
+		t.Fatalf("后退一步异常: path=%q prev=%q", f.slidePath, f.slidePrevPath())
+	}
+	f.slideStep(-5, now) // 0 - 5 ≡ 3 (mod 4)
+	if f.slidePath != walls[3] || f.slidePrevPath() != walls[0] {
+		t.Fatalf("跨圈负步长异常: path=%q prev=%q", f.slidePath, f.slidePrevPath())
+	}
+
+	// 开启随机：当前图保持在第 0 位，且包含全部元素
+	f.toggleSlideShuffle(now)
+	order := f.slideList()
+	if len(order) != len(walls) || order[0] != walls[3] {
+		t.Fatalf("随机顺序首项应为当前图 %q: %v", walls[3], order)
+	}
+	sorted := slices.Clone(order)
+	slices.Sort(sorted)
+	if !slices.Equal(sorted, walls) {
+		t.Fatalf("随机顺序元素集合不一致: %v", order)
+	}
+	// 列表未变化时复用已有随机顺序
+	order2 := f.slideList()
+	if !slices.Equal(order, order2) {
+		t.Fatalf("列表未变时不应重新洗牌: %v vs %v", order, order2)
+	}
+
+	// 下一张大图尚未解码时，最多等待 slideWaitMax 再兜底切换
+	f.toggleSlideShuffle(now) // 回到顺序
+	f.big = map[string]*ui.Bitmap{}
+	cur := f.slidePath
+	next := f.slideNextWall()
+	due := f.slideNextAt
+	f.tickSlideshow(due)
+	if f.slidePath != cur {
+		t.Fatalf("下一张未解码时首次到点应暂缓切图，实际已切到 %q", f.slidePath)
+	}
+	f.tickSlideshow(due.Add(slideWaitMax - time.Second))
+	if f.slidePath != cur {
+		t.Fatalf("未满 slideWaitMax 时仍应等待，实际已切到 %q", f.slidePath)
+	}
+	f.tickSlideshow(due.Add(slideWaitMax))
+	if f.slidePath != next {
+		t.Fatalf("达到 slideWaitMax 应兜底切到 %q，实际 %q", next, f.slidePath)
 	}
 }

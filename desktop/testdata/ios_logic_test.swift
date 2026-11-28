@@ -192,6 +192,56 @@ private func testReconnectBackoffAndModels() throws {
     try expect(v6.baseURL?.absoluteString == "http://[fe80::1]:51734", "IPv6 URL 应加方括号")
 }
 
+private func testSlideshowLogic() throws {
+    // 间隔规范化、轮换与标签
+    try expect(SlideshowLogic.normalizedInterval(20) == 20, "预设间隔应保持原值")
+    try expect(SlideshowLogic.normalizedInterval(999) == 10, "非法间隔应退回默认 10 秒")
+    try expect(SlideshowLogic.nextInterval(after: 5) == 10, "5 -> 10")
+    try expect(SlideshowLogic.nextInterval(after: 60) == 5, "60 应回到首档 5")
+    try expect(SlideshowLogic.nextInterval(after: 7) == 5, "未知间隔应回到首档 5")
+    try expect(SlideshowLogic.intervalLabel(5) == "5秒", "5秒标签错误")
+    try expect(SlideshowLogic.intervalLabel(60) == "1分", "60秒应显示 1分")
+    try expect(SlideshowLogic.intervalLabel(90) == "90秒", "非整分钟应显示秒")
+
+    // 填充方式与翻转
+    try expect(SlideshowLogic.shouldFill(fitMode: 0, isLandscape: true), "自动模式横屏应铺满")
+    try expect(!SlideshowLogic.shouldFill(fitMode: 0, isLandscape: false), "自动模式竖屏应完整显示")
+    try expect(SlideshowLogic.shouldFill(fitMode: 1, isLandscape: false), "fitMode=1 始终铺满")
+    try expect(!SlideshowLogic.shouldFill(fitMode: 2, isLandscape: true), "fitMode=2 始终完整显示")
+    try expect(SlideshowLogic.toggledFitMode(currentlyFilled: true) == 2, "铺满翻转应为 2")
+    try expect(SlideshowLogic.toggledFitMode(currentlyFilled: false) == 1, "完整翻转应为 1")
+
+    // 随机顺序：当前图固定在第 0 位
+    let all = ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]
+    try expect(SlideshowLogic.buildOrder(all: all, shuffle: false, keeping: "c.jpg").isEmpty, "关闭随机应返回空顺序")
+    let shuffled = SlideshowLogic.buildOrder(all: all, shuffle: true, keeping: "c.jpg", shuffler: { $0.reversed() })
+    try expect(shuffled.first == "c.jpg", "开启随机应把当前图换到第 0 位：\(shuffled)")
+    try expect(Set(shuffled) == Set(all) && shuffled.count == all.count, "随机顺序应保留全部元素")
+    try expect(SlideshowLogic.activeList(all: all, shuffle: false, order: shuffled) == all, "顺序模式应返回原列表")
+    try expect(SlideshowLogic.activeList(all: all, shuffle: true, order: shuffled) == shuffled, "随机模式应返回洗牌列表")
+    try expect(SlideshowLogic.activeList(all: all, shuffle: true, order: []) == all, "随机顺序为空时应退回原列表")
+
+    // 正向与反向步进候选列表（含环形回绕与上限截断）
+    let fwd = SlideshowLogic.stepCandidates(in: all, current: "c.jpg", delta: 1)
+    try expect(fwd == ["d.jpg", "a.jpg", "b.jpg"], "正向候选不符：\(fwd)")
+    let back = SlideshowLogic.stepCandidates(in: all, current: "a.jpg", delta: -1)
+    try expect(back == ["d.jpg", "c.jpg", "b.jpg"], "反向候选不符：\(back)")
+    let capped = SlideshowLogic.stepCandidates(in: all, current: "a.jpg", delta: 1, maxTries: 2)
+    try expect(capped == ["b.jpg", "c.jpg"], "maxTries 截断不符：\(capped)")
+    try expect(SlideshowLogic.stepCandidates(in: ["only.jpg"], current: "only.jpg", delta: 1).isEmpty, "单图不应产生步进候选")
+
+    // 下一张预取与文案格式
+    try expect(SlideshowLogic.nextName(in: all, after: "d.jpg") == "a.jpg", "末张之后应回绕到首张")
+    try expect(SlideshowLogic.nextName(in: all, after: "missing.jpg") == nil, "当前图不在列表时应返回 nil")
+    try expect(SlideshowLogic.displayTitle("sunset.4k.jpg") == "sunset.4k", "去扩展名错误")
+    try expect(SlideshowLogic.displayTitle("noext") == "noext", "无扩展名应保留原名")
+
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(secondsFromGMT: 0)!
+    let date = cal.date(from: DateComponents(year: 2026, month: 11, day: 28, hour: 12))!
+    try expect(SlideshowLogic.dateText(date, calendar: cal) == "11月28日 周六", "日期格式错误")
+}
+
 @main
 struct IOSLogicTestMain {
     static func main() {
@@ -201,6 +251,7 @@ struct IOSLogicTestMain {
             try testImageCachePruner()
             try testWidgetCachePruner()
             try testReconnectBackoffAndModels()
+            try testSlideshowLogic()
             print("PASS: all iOS core logic tests passed")
         } catch {
             fputs("FAIL: \(error)\n", stderr)

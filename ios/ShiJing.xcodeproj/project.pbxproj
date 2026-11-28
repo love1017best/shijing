@@ -10,6 +10,7 @@
 		042F5408C9309D785A58EE6B /* WallActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 203CA0AF52AC6DFA30E981A8 /* WallActions.swift */; };
 		0503A2CCB8354AC748CE77A2 /* ShiJingWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5CF0981B7D45E7EE853F6988 /* ShiJingWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		05E2E89B0C05B1BE98635414 /* WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22FA460C376FBA22B55E217F /* WidgetViews.swift */; };
+		091D02555C342A4F958D6568 /* SlideshowChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 757AF2CFC3B6F7F905A10691 /* SlideshowChrome.swift */; };
 		099E53CA17FB750EED57745A /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CD57E5BA5441C8D0006947 /* DashboardView.swift */; };
 		0F54659699EBBC3BCED13F87 /* RecordsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF6C987C6A493F6426A7BFFC /* RecordsPage.swift */; };
 		11969FEE6BA2E4457ADE6793 /* SettingsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27206D3CADBD5E7A822D7E7C /* SettingsComponents.swift */; };
@@ -122,6 +123,7 @@
 		5CF0981B7D45E7EE853F6988 /* ShiJingWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShiJingWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		6AC7C4670660D49C3BD8F942 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		6B88ED75230843E7FF61E79A /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		757AF2CFC3B6F7F905A10691 /* SlideshowChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlideshowChrome.swift; sourceTree = "<group>"; };
 		83240B9AEFA6986C25B369E4 /* ImageStore+Prefetch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ImageStore+Prefetch.swift"; sourceTree = "<group>"; };
 		86B975A8ED3B736EB52565B8 /* WallPreviewChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallPreviewChrome.swift; sourceTree = "<group>"; };
 		910C0E6B6E878D4E095EBB5F /* RemoteSession+Queue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RemoteSession+Queue.swift"; sourceTree = "<group>"; };
@@ -230,6 +232,7 @@
 				04551D48684EF104173433F5 /* ShiJingApp.swift */,
 				D86F178096ED4F9BDCD820EE /* Signing.xcconfig */,
 				08A32667B20E7EAE1496A917 /* SigningExpiry.swift */,
+				757AF2CFC3B6F7F905A10691 /* SlideshowChrome.swift */,
 				DE25B1175393B327397A9FF0 /* SlideshowView.swift */,
 				203CA0AF52AC6DFA30E981A8 /* WallActions.swift */,
 				27D8BD3049F3539DD7DA7537 /* WallpapersView.swift */,
@@ -371,6 +374,7 @@
 				297D4087083FCA357AF3B09A /* SharedKeychain.swift in Sources */,
 				94215927670239EE363E48CE /* ShiJingApp.swift in Sources */,
 				DCBBD1C38B5665384A54DF8F /* SigningExpiry.swift in Sources */,
+				091D02555C342A4F958D6568 /* SlideshowChrome.swift in Sources */,
 				A4E3CFA397697B3F183F16F8 /* SlideshowView.swift in Sources */,
 				042F5408C9309D785A58EE6B /* WallActions.swift in Sources */,
 				FF9B90C2D43F0864EF77A022 /* WallPreview.swift in Sources */,

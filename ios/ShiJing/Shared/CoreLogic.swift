@@ -187,3 +187,106 @@ enum ReconnectBackoff {
         min(current * 2, failures >= 8 ? 60 : 15)
     }
 }
+
+/// 幻灯片模式的纯业务规则（切图顺序、循环步进候选、间隔轮换、填充方式与文案格式），
+/// 独立于 SwiftUI 视图层，供 `SlideshowView` 与单元测试复用。
+enum SlideshowLogic {
+    static let intervals = [5, 10, 20, 30, 60]
+    static let defaultInterval = 10
+
+    /// 规范化切图间隔：不在预设列表时退回默认值 10 秒。
+    static func normalizedInterval(_ sec: Int) -> Int {
+        intervals.contains(sec) ? sec : defaultInterval
+    }
+
+    /// 按预设挡位循环切到下一个间隔；当前值不在列表里时回到第一档。
+    static func nextInterval(after sec: Int) -> Int {
+        guard let idx = intervals.firstIndex(of: sec) else { return intervals[0] }
+        return intervals[(idx + 1) % intervals.count]
+    }
+
+    /// 间隔按钮的简短文案（如「10秒」「1分」）。
+    static func intervalLabel(_ sec: Int) -> String {
+        if sec >= 60 && sec % 60 == 0 { return "\(sec / 60)分" }
+        return "\(sec)秒"
+    }
+
+    /// 填充方式判定：0 = 自动（横屏铺满、竖屏完整），1 = 始终铺满，2 = 始终完整。
+    static func shouldFill(fitMode: Int, isLandscape: Bool) -> Bool {
+        switch fitMode {
+        case 1: return true
+        case 2: return false
+        default: return isLandscape
+        }
+    }
+
+    /// 双击或点切换按钮时在「铺满(1)」与「完整(2)」之间翻转。
+    static func toggledFitMode(currentlyFilled: Bool) -> Int {
+        currentlyFilled ? 2 : 1
+    }
+
+    /// 生成随机播放顺序：关闭随机时返回空；开启时洗牌并把 `keeping` 换到第 0 位，保证切随机不跳图。
+    static func buildOrder(
+        all: [String],
+        shuffle: Bool,
+        keeping current: String,
+        shuffler: ([String]) -> [String] = { $0.shuffled() }
+    ) -> [String] {
+        guard shuffle, !all.isEmpty else { return [] }
+        var next = shuffler(all)
+        if let i = next.firstIndex(of: current), i > 0 {
+            next.swapAt(0, i)
+        }
+        return next
+    }
+
+    /// 当前生效的播放列表：顺序模式用 `all`，随机模式优先用已生成的 `order`。
+    static func activeList(all: [String], shuffle: Bool, order: [String]) -> [String] {
+        if !shuffle { return all }
+        return order.isEmpty ? all : order
+    }
+
+    /// 计算沿 `delta`（+1 下一张 / -1 上一张）步进时依次尝试加载的候选文件名列表。
+    /// 最多返回 `min(maxTries, list.count - 1)` 个，离线遇到未缓存图片时按序跳过。
+    static func stepCandidates(
+        in list: [String],
+        current: String,
+        delta: Int,
+        maxTries: Int = 12
+    ) -> [String] {
+        let count = list.count
+        guard count > 1, delta != 0, maxTries > 0 else { return [] }
+        let start = list.firstIndex(of: current) ?? 0
+        let limit = min(maxTries, count - 1)
+        var out: [String] = []
+        out.reserveCapacity(limit)
+        for offset in 1...limit {
+            let raw = (start + delta * offset) % count
+            let idx = raw >= 0 ? raw : raw + count
+            out.append(list[idx])
+        }
+        return out
+    }
+
+    /// 返回下一张待预取的文件名（列表不足 2 张或找不到当前项时返回 nil）。
+    static func nextName(in list: [String], after current: String) -> String? {
+        guard list.count > 1, let idx = list.firstIndex(of: current) else { return nil }
+        return list[(idx + 1) % list.count]
+    }
+
+    /// 去掉文件扩展名用于信息卡展示；无扩展名或去完为空时保留原名。
+    static func displayTitle(_ name: String) -> String {
+        let stem = (name as NSString).deletingPathExtension
+        return stem.isEmpty ? name : stem
+    }
+
+    /// 中文月日与星期格式（如「11月28日 周六」）。
+    static func dateText(_ date: Date, calendar: Calendar = .current) -> String {
+        let m = calendar.component(.month, from: date)
+        let d = calendar.component(.day, from: date)
+        let wd = calendar.component(.weekday, from: date)
+        let names = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+        let w = (1...7).contains(wd) ? names[wd - 1] : ""
+        return "\(m)月\(d)日 \(w)"
+    }
+}
